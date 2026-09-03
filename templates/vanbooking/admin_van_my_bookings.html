@@ -1,0 +1,83 @@
+{{ define "title" }}My Van Bookings - Pro-Property{{ end }}
+{{ define "content" }}
+<div class="top-bar">
+    <h1>My Van Bookings</h1>
+    <a href="/admin/van-book" class="edit-btn">+ New Booking</a>
+</div>
+
+{{ if .Success }}
+<div style="background:#dcfce7;border:1px solid #86efac;color:#166534;padding:12px 16px;border-radius:6px;margin-bottom:16px;font-size:14px;">
+    Your booking request has been submitted. You will be notified once the fleet manager reviews it.
+</div>
+{{ end }}
+
+<div class="card">
+    {{ if .Bookings }}
+    <div class="table-responsive">
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Van</th>
+                    <th>Plate</th>
+                    <th>Destination</th>
+                    <th>Trip Date &amp; Time</th>
+                    <th>Purpose</th>
+                    <th>Driver</th>
+                    <th>Status</th>
+                    <th>Admin Notes</th>
+                    <th>Booked On</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{ range $i, $b := .Bookings }}
+                <tr>
+                    <td>{{ add $i 1 }}</td>
+                    <td>{{ $b.VanName }}</td>
+                    <td>{{ $b.PlateNumber }}</td>
+                    <td>{{ $b.Destination }}</td>
+                    <td>
+                        {{ $b.TripDate }}
+                        {{ if $b.TripTime }}<div style="font-size:12px;color:#6b7280;margin-top:2px;">🕐 {{ $b.TripTime }}</div>{{ end }}
+                    </td>
+                    <td>{{ $b.Purpose }}</td>
+                    <td>
+                        {{ if $b.DriverName }}
+                        <span style="font-size:13px;color:#15803d;font-weight:600;">🧑‍✈️ {{ $b.DriverName }}</span>
+                        {{ else }}
+                        <span style="font-size:12px;color:#94a3b8;">Not assigned</span>
+                        {{ end }}
+                    </td>
+                    <td>
+                        {{ if eq $b.Status "pending" }}
+                        <span class="badge" style="background:#f59e0b;color:#fff;">Pending</span>
+                        {{ else if eq $b.Status "approved" }}
+                        <span class="badge badge-booked" style="background:#16a34a;">Approved</span>
+                        {{ else if eq $b.Status "cancelled" }}
+                        <span class="badge" style="background:#6b7280;color:#fff;">Cancelled</span>
+                        {{ else }}
+                        <span class="badge" style="background:#dc2626;color:#fff;">Rejected</span>
+                        {{ end }}
+                    </td>
+                    <td style="max-width:200px;font-size:13px;color:#6b7280;">{{ $b.AdminNotes }}</td>
+                    <td>{{ $b.CreatedAt }}</td>
+                    <td>
+                        {{ if or (eq $b.Status "pending") (eq $b.Status "approved") }}
+                        <form method="POST" action="/admin/van-booking/{{ $b.ID }}/cancel" style="margin:0;"
+                              onsubmit="return confirm('Cancel this booking?');">
+                            <button type="submit" style="background:#dc2626;font-size:12px;padding:4px 12px;">Cancel</button>
+                        </form>
+                        {{ end }}
+                    </td>
+                </tr>
+                {{ end }}
+            </tbody>
+        </table>
+    </div>
+    {{ else }}
+    <p style="color:#6b7280;text-align:center;padding:2rem 0;">No van bookings yet. <a href="/admin/van-book">Book a van</a></p>
+    {{ end }}
+</div>
+{{ end }}
+{{ template "van_admin_base" . }}

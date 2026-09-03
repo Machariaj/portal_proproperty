@@ -1,0 +1,49 @@
+{{ define "base" }}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>{{ block "title" . }}ProProperty Portal{{ end }}</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+
+<body>
+    <div class="layout">
+        <aside class="sidebar">
+            <div class="logo">
+                <span class="logo-mark">PP</span>
+                <span class="logo-text">ProProperty</span>
+            </div>
+            <nav class="nav">
+                <a href="/dashboard" class="nav-item {{ if eq .Active "dashboard" }}active{{ end }}">Dashboard</a>
+                <a href="/properties" class="nav-item {{ if eq .Active "properties" }}active{{ end }}">Properties</a>
+                <a href="/tenants" class="nav-item {{ if eq .Active "tenants" }}active{{ end }}">Tenants</a>
+                <a href="/payments" class="nav-item {{ if eq .Active "payments" }}active{{ end }}">Payments</a>
+                <a href="/reports" class="nav-item {{ if eq .Active "reports" }}active{{ end }}">Reports</a>
+            </nav>
+            <div class="sidebar-footer">
+                <form action="/logout" method="post">
+                    <button type="submit" class="btn-ghost">Logout</button>
+                </form>
+            </div>
+        </aside>
+        <main class="main">
+            <header class="topbar">
+                <div class="topbar-left">
+                    <h1 class="page-title">{{ .Title }}</h1>
+                </div>
+                <div class="topbar-right">
+                    <span class="user-pill">systemadmin@proproperty.co.ke</span>
+                </div>
+            </header>
+            <section class="content">
+                {{ block "content" . }}{{ end }}
+            </section>
+        </main>
+    </div>
+</body>
+
+</html>
+{{ end }}

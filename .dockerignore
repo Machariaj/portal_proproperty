@@ -1,0 +1,5 @@
+uploads/
+*.log
+.git
+.env
+docker-compose.yml

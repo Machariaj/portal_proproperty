@@ -1,0 +1,88 @@
+{{ define "title" }}{{ .Title }}{{ end }}
+
+{{ define "content" }}
+<div style="padding:28px 32px 40px; max-width:760px;">
+
+    <div class="page-header">
+        <div>
+            <h1>Permissions</h1>
+            <p>{{ .UserName }} &nbsp;·&nbsp; <span style="color:#94a3b8;">{{ .UserEmail }}</span></p>
+        </div>
+        <a href="/welfare/permissions" class="btn-ghost">← Back to Users</a>
+    </div>
+
+    {{ if .SaveOK }}
+    <div class="alert alert-success" style="margin-bottom:20px;">Permissions saved successfully.</div>
+    {{ end }}
+
+    <form method="POST" action="/welfare/permissions/{{ .UserID }}">
+
+        <div style="display:flex;gap:8px;margin-bottom:20px;align-items:center;flex-wrap:wrap;">
+            <span style="font-size:13px;color:#64748b;">
+                Role: <strong style="text-transform:capitalize;">{{ .UserRole }}</strong>
+            </span>
+            <button type="button" onclick="setAll(true)"
+                    style="margin-left:auto;" class="btn-primary btn-sm">✓ Grant All</button>
+            <button type="button" onclick="setAll(false)"
+                    class="btn-ghost btn-sm">✕ Revoke All</button>
+        </div>
+
+        <div style="background:#fff;border-radius:14px;box-shadow:0 2px 12px rgba(0,0,0,0.06);overflow:hidden;">
+            <div style="padding:16px 20px 12px;border-bottom:1px solid #f1f5f9;">
+                <span style="font-size:14px;font-weight:700;color:#0f172a;">Staff Welfare Features</span>
+            </div>
+            <div style="overflow-x:auto;">
+                <table class="wf-table">
+                    <thead>
+                        <tr>
+                            <th style="width:56%;">Feature</th>
+                            <th style="text-align:center;width:22%;">Read</th>
+                            <th style="text-align:center;width:22%;">Write</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{ range .Features }}
+                        <tr>
+                            <td style="font-weight:500;">{{ .Label }}</td>
+                            <td style="text-align:center;">
+                                <input type="checkbox" name="{{ .Key }}_read" value="1"
+                                       id="r_{{ .Key }}"
+                                       {{ if .CanRead }}checked{{ end }}
+                                       onchange="syncRead('{{ .Key }}')">
+                            </td>
+                            <td style="text-align:center;">
+                                <input type="checkbox" name="{{ .Key }}_write" value="1"
+                                       id="w_{{ .Key }}"
+                                       {{ if .CanWrite }}checked{{ end }}
+                                       onchange="syncWrite('{{ .Key }}')">
+                            </td>
+                        </tr>
+                        {{ end }}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div style="margin-top:20px;">
+            <button type="submit" class="btn-primary">Save Permissions</button>
+        </div>
+    </form>
+</div>
+
+<script>
+function syncWrite(key) {
+    var w = document.getElementById('w_' + key);
+    var r = document.getElementById('r_' + key);
+    if (w && r && w.checked) r.checked = true;
+}
+function syncRead(key) {
+    var w = document.getElementById('w_' + key);
+    var r = document.getElementById('r_' + key);
+    if (w && r && !r.checked) w.checked = false;
+}
+function setAll(val) {
+    document.querySelectorAll('input[type=checkbox]').forEach(function(cb) { cb.checked = val; });
+}
+</script>
+{{ end }}
+{{ template "welfare_base" . }}

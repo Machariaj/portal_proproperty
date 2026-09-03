@@ -1,0 +1,312 @@
+{{ define "title" }}{{ .Title }} - Pro-Property{{ end }}
+{{ define "content" }}
+<div class="top-bar">
+    <h1>{{ .Title }}</h1>
+    <a href="/admin/estate/{{ .EstateID }}" class="edit-btn" style="background:#6b7280;">← Back to Estate</a>
+</div>
+
+<!-- Estate details form -->
+<div class="card" style="max-width:760px;">
+    <h3 style="margin:0 0 16px;font-size:16px;color:var(--text);">Estate Details</h3>
+    {{ if .SaveError }}
+    <div style="background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;padding:12px 16px;border-radius:8px;margin-bottom:16px;font-size:13px;font-weight:600;">
+        ✗ {{ .SaveError }}
+    </div>
+    {{ end }}
+    {{ if .SaveOK }}
+    <div style="background:#dcfce7;border:1px solid #86efac;color:#166534;padding:12px 16px;border-radius:8px;margin-bottom:16px;font-size:13px;font-weight:600;">
+        ✓ Details saved successfully.
+    </div>
+    {{ end }}
+    <form method="POST" enctype="multipart/form-data" action="/admin/estate/{{ .EstateID }}/edit">
+        <label for="name">Estate Name</label>
+        <input type="text" id="name" name="name" value="{{ .EstateName }}" required>
+
+        <label for="prop_plotinfo">Estate Info</label>
+        <textarea id="prop_plotinfo" name="prop_plotinfo" rows="5">{{ .PlotInfo }}</textarea>
+
+        <label for="plot_price">Plot Price (KES) <span style="color:#dc2626;">*</span></label>
+        <input type="number" id="plot_price" name="plot_price" min="0" step="0.01" placeholder="e.g. 1850000" value="{{ .PlotPrice }}">
+
+        <label for="mutation_image">Upload / Replace Mutation Image (optional)</label>
+        {{ if .DisplayImage }}
+        <div style="margin-bottom:10px;">
+            <p style="margin:0 0 6px;font-size:12px;color:#6b7280;">Current mutation image:</p>
+            <img src="/uploads/{{ .DisplayImage }}" alt="Current mutation image"
+                 style="max-width:100%;max-height:220px;border-radius:6px;border:1px solid #e5e7eb;object-fit:contain;">
+        </div>
+        {{ end }}
+        <input type="file" id="mutation_image" name="mutation_image" accept="image/*"
+               onchange="previewMutation(this)">
+        <div id="mutation-preview" style="display:none;margin-top:8px;">
+            <p style="margin:0 0 4px;font-size:12px;color:#2563eb;">New image preview:</p>
+            <img id="mutation-preview-img" src="" alt="New image preview"
+                 style="max-width:100%;max-height:220px;border-radius:6px;border:2px solid #2563eb;object-fit:contain;">
+        </div>
+        <label for="visibility" style="margin-top:14px;display:block;">Visibility</label>
+        <select id="visibility" name="visibility">
+            <option value="show"{{ if not .IsRestricted }} selected{{ end }}>Show – visible to all agents and admins</option>
+            <option value="hide"{{ if .IsRestricted }} selected{{ end }}>Hide – restricted (Private Estates page only)</option>
+        </select>
+        <p style="margin:4px 0 12px;font-size:12px;color:#6b7280;">
+            Changing to Hidden moves this estate to the Private Estates section immediately.
+        </p>
+
+        <button type="submit" id="save-details-btn" style="margin-top:16px;">💾 Save Details</button>
+    </form>
+</div>
+
+<!-- Zone editor -->
+<div class="card" style="margin-top:20px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:16px;">
+        <h3 style="margin:0;font-size:16px;color:var(--text);">Zone Editor</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            <button type="button" onclick="cancelDraw()" style="background:#6b7280;">✕ Cancel</button>
+            <button type="button" onclick="clearAll()" style="background:#dc2626;">🗑 Clear All</button>
+            <button type="button" id="save-zones-btn" onclick="saveZones()" style="background:#16a34a;">💾 Save Zones</button>
+        </div>
+    </div>
+
+    <p style="margin:0 0 10px;font-size:13px;color:#6b7280;">
+        <strong>How to use:</strong> Click on the image to place polygon vertices. Double-click (or click near the first point) to close and label the zone. Right-click a finished zone to delete it.
+    </p>
+
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:10px;font-size:13px;align-items:center;">
+        <span id="draw-status" style="color:#2563eb;font-weight:600;">Ready — click image to start drawing</span>
+        <span><span class="legend-dot" style="background:#3b82f6;opacity:0.5;"></span> Drawing zone</span>
+        <span><span class="legend-dot" style="background:#3b82f6;opacity:0.35;border:2px solid #1d4ed8;"></span> Saved zone</span>
+    </div>
+
+    {{ if .DisplayImage }}
+    <div id="editor-container" style="position:relative;display:block;width:100%;max-width:900px;">
+        <img id="editor-img" src="/uploads/{{ .DisplayImage }}" alt="{{ .EstateName }}"
+             style="width:100%;display:block;border-radius:8px;user-select:none;"
+             onerror="this.style.display='none';document.getElementById('no-editor-img').style.display='flex'">
+        <svg id="zone-editor"
+             style="position:absolute;top:0;left:0;width:100%;height:100%;cursor:crosshair;"
+             viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
+    </div>
+    <div id="no-editor-img" style="display:none;width:100%;height:300px;background:#f1f5f9;border-radius:8px;
+         align-items:center;justify-content:center;color:#94a3b8;font-size:14px;">
+        Upload a mutation image above to enable the zone editor.
+    </div>
+    {{ else }}
+    <div style="width:100%;height:300px;background:#f1f5f9;border-radius:8px;display:flex;
+         align-items:center;justify-content:center;color:#94a3b8;font-size:14px;">
+        Upload a mutation image above to enable the zone editor.
+    </div>
+    {{ end }}
+</div>
+
+<script>
+(function () {
+    var ns = 'http://www.w3.org/2000/svg';
+    var svg = document.getElementById('zone-editor');
+    var statusEl = document.getElementById('draw-status');
+    if (!svg) return;
+
+    // Load existing zones from server
+    var zones = {{ .ZonesJSON }};
+    var currentPts = [];
+    var drawing = false;
+
+    // ── Rendering ────────────────────────────────────────────────────────────
+
+    function renderAll() {
+        svg.innerHTML = '';
+        zones.forEach(function (z, idx) {
+            if (!z.points || z.points.length < 3) return;
+            var pts = z.points.map(function (p) { return p.x + ',' + p.y; }).join(' ');
+
+            var poly = document.createElementNS(ns, 'polygon');
+            poly.setAttribute('points', pts);
+            poly.setAttribute('fill', '#3b82f6');
+            poly.setAttribute('fill-opacity', '0.35');
+            poly.setAttribute('stroke', '#1d4ed8');
+            poly.setAttribute('stroke-width', '0.4');
+            poly.setAttribute('cursor', 'pointer');
+
+            var title = document.createElementNS(ns, 'title');
+            title.textContent = 'Plot ' + z.plot_number + '  (right-click to delete)';
+            poly.appendChild(title);
+
+            (function (i) {
+                poly.addEventListener('contextmenu', function (e) {
+                    e.preventDefault();
+                    if (confirm('Delete zone for plot ' + zones[i].plot_number + '?')) {
+                        zones.splice(i, 1);
+                        renderAll();
+                    }
+                });
+            }(idx));
+            svg.appendChild(poly);
+
+            // Centroid label
+            var cx = z.points.reduce(function (a, p) { return a + p.x; }, 0) / z.points.length;
+            var cy = z.points.reduce(function (a, p) { return a + p.y; }, 0) / z.points.length;
+            var text = document.createElementNS(ns, 'text');
+            text.setAttribute('x', cx);
+            text.setAttribute('y', cy + 0.7);
+            text.setAttribute('text-anchor', 'middle');
+            text.setAttribute('dominant-baseline', 'middle');
+            text.setAttribute('font-size', '2.4');
+            text.setAttribute('fill', '#1d4ed8');
+            text.setAttribute('font-weight', '700');
+            text.setAttribute('pointer-events', 'none');
+            text.textContent = z.plot_number;
+            svg.appendChild(text);
+        });
+        renderCurrentDraw();
+    }
+
+    function renderCurrentDraw() {
+        // Remove old drawing group if present
+        var old = svg.querySelector('#draw-group');
+        if (old) old.parentNode.removeChild(old);
+        if (currentPts.length === 0) return;
+
+        var g = document.createElementNS(ns, 'g');
+        g.setAttribute('id', 'draw-group');
+
+        // Polyline for current path
+        if (currentPts.length > 1) {
+            var pl = document.createElementNS(ns, 'polyline');
+            pl.setAttribute('points', currentPts.map(function (p) { return p.x + ',' + p.y; }).join(' '));
+            pl.setAttribute('fill', 'none');
+            pl.setAttribute('stroke', '#22c55e');
+            pl.setAttribute('stroke-width', '0.5');
+            g.appendChild(pl);
+        }
+
+        // Dots for each vertex
+        currentPts.forEach(function (p, i) {
+            var circle = document.createElementNS(ns, 'circle');
+            circle.setAttribute('cx', p.x);
+            circle.setAttribute('cy', p.y);
+            circle.setAttribute('r', i === 0 ? '1.2' : '0.8');
+            circle.setAttribute('fill', i === 0 ? '#16a34a' : '#22c55e');
+            circle.setAttribute('stroke', '#fff');
+            circle.setAttribute('stroke-width', '0.3');
+            g.appendChild(circle);
+        });
+
+        svg.appendChild(g);
+    }
+
+    // ── SVG coordinate helpers ────────────────────────────────────────────────
+
+    function toPercent(e) {
+        var rect = svg.getBoundingClientRect();
+        return {
+            x: ((e.clientX - rect.left) / rect.width) * 100,
+            y: ((e.clientY - rect.top) / rect.height) * 100
+        };
+    }
+
+    function dist(a, b) {
+        var dx = a.x - b.x, dy = a.y - b.y;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    // ── Click handler ─────────────────────────────────────────────────────────
+
+    svg.addEventListener('click', function (e) {
+        if (e.target.tagName === 'polygon') return;
+        var pos = toPercent(e);
+
+        if (currentPts.length >= 3 && dist(pos, currentPts[0]) < 2.5) {
+            finishPolygon();
+            return;
+        }
+        currentPts.push(pos);
+        drawing = true;
+        statusEl.textContent = 'Drawing… ' + currentPts.length + ' point(s). Double-click or click near ● to close.';
+        renderCurrentDraw();
+    });
+
+    svg.addEventListener('dblclick', function (e) {
+        if (currentPts.length >= 3) finishPolygon();
+    });
+
+    function finishPolygon() {
+        var plotNum = prompt('Enter plot number for this zone:', '');
+        if (!plotNum || !plotNum.trim()) {
+            cancelDraw();
+            return;
+        }
+        // Replace existing zone with same plot number
+        zones = zones.filter(function (z) { return z.plot_number !== plotNum.trim(); });
+        zones.push({ plot_number: plotNum.trim(), points: currentPts.slice(), status: 'available' });
+        currentPts = [];
+        drawing = false;
+        statusEl.textContent = 'Zone ' + plotNum.trim() + ' saved. Click image to draw next zone.';
+        renderAll();
+    }
+
+    // ── Controls ──────────────────────────────────────────────────────────────
+
+    window.cancelDraw = function () {
+        currentPts = [];
+        drawing = false;
+        statusEl.textContent = 'Ready — click image to start drawing';
+        renderAll();
+    };
+
+    window.clearAll = function () {
+        if (!confirm('Clear ALL zones for this estate?')) return;
+        zones = [];
+        currentPts = [];
+        drawing = false;
+        statusEl.textContent = 'All zones cleared. Click image to start drawing.';
+        renderAll();
+    };
+
+    window.saveZones = function () {
+        var btn = document.getElementById('save-zones-btn');
+        btn.disabled = true;
+        btn.textContent = 'Saving…';
+        fetch('/admin/estate/{{ .EstateID }}/zones', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(zones)
+        }).then(function (resp) {
+            if (resp.ok) {
+                btn.textContent = '✓ Saved!';
+                statusEl.textContent = 'Zones saved to database.';
+                setTimeout(function () { btn.textContent = '💾 Save Zones'; btn.disabled = false; }, 2500);
+            } else {
+                btn.textContent = 'Error!';
+                btn.disabled = false;
+            }
+        }).catch(function () {
+            btn.textContent = 'Error!';
+            btn.disabled = false;
+        });
+    };
+
+    // Initial render
+    renderAll();
+}());
+
+document.querySelector('form').addEventListener('submit', function() {
+    var btn = document.getElementById('save-details-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; btn.style.background = '#94a3b8'; }
+});
+
+function previewMutation(input) {
+    var preview = document.getElementById('mutation-preview');
+    var img = document.getElementById('mutation-preview-img');
+    if (input.files && input.files[0]) {
+        var reader = new FileReader();
+        reader.onload = function(e) {
+            img.src = e.target.result;
+            preview.style.display = 'block';
+        };
+        reader.readAsDataURL(input.files[0]);
+    } else {
+        preview.style.display = 'none';
+    }
+}
+</script>
+{{ end }}
+{{ template "admin_base" . }}

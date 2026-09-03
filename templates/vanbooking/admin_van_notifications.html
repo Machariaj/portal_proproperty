@@ -1,0 +1,25 @@
+{{ define "title" }}Notifications - Pro-Property{{ end }}
+{{ define "content" }}
+<div class="top-bar">
+    <h1>Notifications</h1>
+    <a href="/admin/van-bookings" class="edit-btn" style="background:#6b7280;">← All Bookings</a>
+</div>
+
+<div class="card">
+    {{ if .Notifications }}
+    <div style="display:flex;flex-direction:column;gap:10px;">
+        {{ range .Notifications }}
+        <div style="padding:14px 16px;border-radius:8px;border:1px solid {{ if .IsRead }}#e2e8f0{{ else }}#93c5fd{{ end }};background:{{ if .IsRead }}#f8fafc{{ else }}#eff6ff{{ end }};">
+            <p style="margin:0 0 6px;font-size:14px;color:#0f172a;{{ if not .IsRead }}font-weight:600;{{ end }}">
+                {{ .Message }}
+            </p>
+            <span style="font-size:12px;color:#94a3b8;">{{ .CreatedAt }}{{ if not .IsRead }} &nbsp;·&nbsp; New{{ end }}</span>
+        </div>
+        {{ end }}
+    </div>
+    {{ else }}
+    <p style="color:#6b7280;text-align:center;padding:2rem 0;">No notifications yet.</p>
+    {{ end }}
+</div>
+{{ end }}
+{{ template "van_admin_base" . }}

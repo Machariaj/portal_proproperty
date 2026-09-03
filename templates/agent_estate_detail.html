@@ -1,0 +1,482 @@
+{{ define "title" }}{{ .EstateName }} - Pro-Property{{ end }}
+{{ define "content" }}
+<div class="top-bar">
+    <h1>{{ .EstateName }}</h1>
+    <a href="/agent/estates" class="edit-btn" style="background:#6b7280;">← Back to Estates</a>
+</div>
+
+<div class="estate-detail-card">
+    <div class="estate-detail-img">
+        {{ if .DisplayImage }}
+        <div style="position:relative;display:block;width:100%;">
+            <img id="mutation-img" src="/uploads/{{ .DisplayImage }}" alt="{{ .EstateName }}"
+                style="width:100%;display:block;border-radius:8px;cursor:zoom-in;" onclick="openLightbox()"
+                onerror="this.style.display='none';document.getElementById('no-img').style.display='flex'">
+            <svg id="zone-overlay" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;"
+                viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
+        </div>
+        <div id="no-img" style="display:none;width:100%;height:200px;background:#f1f5f9;border-radius:8px;
+             align-items:center;justify-content:center;color:#94a3b8;font-size:14px;">No image available</div>
+        <!-- Action buttons below image -->
+        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+            <button onclick="openLightbox()"
+                style="background:#475569;color:#fff;border:none;border-radius:6px;padding:7px 14px;font-size:13px;cursor:pointer;">🔍
+                Zoom</button>
+            <a href="/uploads/{{ .DisplayImage }}" download="{{ .EstateName }}"
+                style="background:#475569;color:#fff;border-radius:6px;padding:7px 14px;font-size:13px;text-decoration:none;">⬇
+                Download</a>
+            <button onclick="shareEstate()"
+                style="background:#2563eb;color:#fff;border:none;border-radius:6px;padding:7px 14px;font-size:13px;cursor:pointer;">🔗
+                Share</button>
+        </div>
+        {{ else }}
+        <div style="width:100%;height:200px;background:#f1f5f9;border-radius:8px;display:flex;
+             align-items:center;justify-content:center;color:#94a3b8;font-size:14px;">No image available</div>
+        {{ end }}
+    </div>
+
+    <div class="estate-detail-info">
+        <h2>{{ .EstateName }}</h2>
+        {{ if .PlotInfo }}
+        <div class="estate-plotinfo">
+            {{ range lines .PlotInfo }}{{ if . }}<p>{{ . }}</p>{{ end }}{{ end }}
+        </div>
+        {{ end }}
+
+        <div class="estate-status-btns">
+            <a href="/agent/estate/{{ .EstateID }}/plots?status=available" class="estate-btn-available">
+                <span class="stat-label">Available</span>
+                <span class="stat-count">{{ index .Counts "available" }}</span>
+            </a>
+            <a href="/agent/estate/{{ .EstateID }}/plots?status=booked" class="estate-btn-booked">
+                <span class="stat-label">Booked</span>
+                <span class="stat-count">{{ index .Counts "booked" }}</span>
+            </a>
+            <a href="/agent/estate/{{ .EstateID }}/plots?status=sa_signed" class="estate-btn-signed">
+                <span class="stat-label">SA Signed</span>
+                <span class="stat-count">{{ index .Counts "sa_signed" }}</span>
+            </a>
+            <a href="/agent/estate/{{ .EstateID }}/plots?status=sold" class="estate-btn-sold">
+                <span class="stat-label">Sold</span>
+                <span class="stat-count">{{ index .Counts "sold" }}</span>
+            </a>
+        </div>
+    </div>
+</div>
+
+<!-- Zoom Lightbox -->
+<div id="lightbox"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:3000;align-items:center;justify-content:center;overflow:hidden;">
+    <button onclick="closeLightbox()"
+        style="position:absolute;top:14px;right:18px;background:rgba(255,255,255,0.15);border:none;color:#fff;font-size:22px;cursor:pointer;border-radius:50%;width:38px;height:38px;line-height:38px;text-align:center;z-index:10;">✕</button>
+    <div style="position:absolute;top:14px;left:50%;transform:translateX(-50%);display:flex;gap:8px;z-index:10;">
+        <button onclick="lbZoom(1.25)"
+            style="background:rgba(255,255,255,0.15);border:none;color:#fff;font-size:18px;cursor:pointer;border-radius:6px;width:36px;height:36px;">+</button>
+        <button onclick="lbZoom(0.8)"
+            style="background:rgba(255,255,255,0.15);border:none;color:#fff;font-size:18px;cursor:pointer;border-radius:6px;width:36px;height:36px;">−</button>
+        <button onclick="lbReset()"
+            style="background:rgba(255,255,255,0.15);border:none;color:#fff;font-size:12px;cursor:pointer;border-radius:6px;padding:0 10px;height:36px;">Reset</button>
+    </div>
+    <div id="lb-wrapper"
+        style="position:relative;display:inline-block;cursor:grab;transform-origin:center center;user-select:none;">
+        <img id="lb-img" src="" style="display:block;max-width:90vw;max-height:82vh;border-radius:4px;"
+            draggable="false">
+        <svg id="lb-svg" viewBox="0 0 100 100" preserveAspectRatio="none"
+            style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;"></svg>
+    </div>
+    <p
+        style="position:absolute;bottom:12px;left:50%;transform:translateX(-50%);color:rgba(255,255,255,0.45);font-size:12px;white-space:nowrap;">
+        Scroll to zoom · Drag to pan · Esc to close</p>
+</div>
+
+<!-- Share Modal -->
+<div id="share-modal"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:3000;align-items:center;justify-content:center;">
+    <div
+        style="background:#fff;border-radius:12px;padding:24px;width:100%;max-width:500px;box-shadow:0 8px 32px rgba(0,0,0,0.2);position:relative;max-height:90vh;overflow-y:auto;">
+        <button onclick="closeShareModal()"
+            style="position:absolute;top:12px;right:16px;background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280;">✕</button>
+        <h3 style="margin:0 0 14px;font-size:16px;color:var(--text);">Share Estate</h3>
+        <img id="share-preview" src="" style="width:100%;border-radius:8px;margin-bottom:14px;display:none;">
+        <div style="display:flex;flex-direction:column;gap:8px;">
+            <a id="share-download-btn" href="#" download
+                style="display:flex;align-items:center;justify-content:center;gap:8px;background:#475569;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600;">
+                ⬇ Download Share Image
+            </a>
+            <a id="wa-link" href="#" target="_blank" rel="noopener"
+                style="display:flex;align-items:center;justify-content:center;gap:8px;background:#25d366;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                    <path
+                        d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+                </svg>
+                Share via WhatsApp
+            </a>
+            <button id="copy-link-btn" onclick="copyLink()"
+                style="background:#f1f5f9;color:var(--text);padding:10px 16px;border-radius:8px;border:1px solid #e2e8f0;font-size:14px;font-weight:600;cursor:pointer;">
+                🔗 Copy Link
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+    var zonesData = {{ .ZonesJSON }};
+    var estateName = {{ js .EstateName }};
+    var plotInfoLines = {{ if .PlotInfoJSON }}{{ .PlotInfoJSON }}{{ else }}[]{{ end }};
+    var counts = {
+        available: {{ index .Counts "available" }},
+        booked: {{ index .Counts "booked" }},
+        sa_signed: {{ index .Counts "sa_signed" }},
+        sold: {{ index .Counts "sold" }}
+    };
+    {{ if .DisplayImage }}
+    var mutationSrc = '/uploads/' + {{ js .DisplayImage }};
+    {{ else }}
+    var mutationSrc = '';
+    {{ end }}
+
+    (function () {
+        var overlay = document.getElementById('zone-overlay');
+        if (!overlay || !zonesData || zonesData.length === 0) return;
+        renderZones(overlay);
+    }());
+
+    function renderZones(svgEl) {
+        var ns = 'http://www.w3.org/2000/svg';
+        var colors = {
+            available: { fill: '#ffffff', opacity: '0.55', text: '#374151' },
+            booked: { fill: '#ffff00', opacity: '0.82', text: '#5a3e00' },
+            sa_signed: { fill: '#ff0000', opacity: '0.82', text: '#ffffff' },
+            sold: { fill: '#00cc00', opacity: '0.85', text: '#ffffff' }
+        };
+        svgEl.innerHTML = '';
+        zonesData.forEach(function (z) {
+            if (!z.points || z.points.length < 3) return;
+            var c = colors[z.status] || colors.available;
+            var pts = z.points.map(function (p) { return p.x + ',' + p.y; }).join(' ');
+            var poly = document.createElementNS(ns, 'polygon');
+            poly.setAttribute('points', pts);
+            poly.setAttribute('fill', c.fill);
+            poly.setAttribute('fill-opacity', c.opacity);
+            poly.setAttribute('stroke', '#555');
+            poly.setAttribute('stroke-width', '0.3');
+            var title = document.createElementNS(ns, 'title');
+            title.textContent = 'Plot ' + z.plot_number + ' \u2013 ' + z.status;
+            poly.appendChild(title);
+            svgEl.appendChild(poly);
+            var cx = z.points.reduce(function (a, p) { return a + p.x; }, 0) / z.points.length;
+            var cy = z.points.reduce(function (a, p) { return a + p.y; }, 0) / z.points.length;
+            var text = document.createElementNS(ns, 'text');
+            text.setAttribute('x', cx);
+            text.setAttribute('y', cy + 0.7);
+            text.setAttribute('text-anchor', 'middle');
+            text.setAttribute('dominant-baseline', 'middle');
+            text.setAttribute('font-size', '2.2');
+            text.setAttribute('fill', c.text);
+            text.setAttribute('font-weight', '600');
+            text.setAttribute('pointer-events', 'none');
+            text.textContent = z.plot_number;
+            svgEl.appendChild(text);
+        });
+    }
+
+    var lb = document.getElementById('lightbox');
+    var lbWrap = document.getElementById('lb-wrapper');
+    var lbImg = document.getElementById('lb-img');
+    var lbSvg = document.getElementById('lb-svg');
+    var lbScale = 1, lbTx = 0, lbTy = 0;
+    var isDrag = false, dragSX, dragSY, origTx, origTy;
+
+    function openLightbox() {
+        var src = document.getElementById('mutation-img');
+        if (!src) return;
+        lbImg.src = src.src;
+        renderZones(lbSvg);
+        lbScale = 1; lbTx = 0; lbTy = 0; applyLb();
+        lb.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+    }
+    function closeLightbox() { lb.style.display = 'none'; document.body.style.overflow = ''; }
+    function applyLb() {
+        lbWrap.style.transform = 'scale(' + lbScale + ') translate(' + (lbTx / lbScale) + 'px,' + (lbTy / lbScale) + 'px)';
+    }
+    function lbZoom(f) { lbScale = Math.min(Math.max(lbScale * f, 0.4), 10); applyLb(); }
+    function lbReset() { lbScale = 1; lbTx = 0; lbTy = 0; applyLb(); }
+
+    lb.addEventListener('wheel', function (e) { e.preventDefault(); lbZoom(e.deltaY < 0 ? 1.15 : 0.87); }, { passive: false });
+    lb.addEventListener('click', function (e) { if (e.target === lb) closeLightbox(); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeLightbox(); closeShareModal(); } });
+
+    lbWrap.addEventListener('mousedown', function (e) {
+        isDrag = true; dragSX = e.clientX; dragSY = e.clientY; origTx = lbTx; origTy = lbTy;
+        lbWrap.style.cursor = 'grabbing'; e.preventDefault();
+    });
+    document.addEventListener('mousemove', function (e) {
+        if (!isDrag) return;
+        lbTx = origTx + (e.clientX - dragSX); lbTy = origTy + (e.clientY - dragSY); applyLb();
+    });
+    document.addEventListener('mouseup', function () { isDrag = false; if (lbWrap) lbWrap.style.cursor = 'grab'; });
+
+    var pinchDist = null;
+    lb.addEventListener('touchmove', function (e) {
+        if (e.touches.length === 2) {
+            e.preventDefault();
+            var d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+            if (pinchDist) lbZoom(d / pinchDist);
+            pinchDist = d;
+        }
+    }, { passive: false });
+    lb.addEventListener('touchend', function () { pinchDist = null; });
+
+    function rrect(ctx, x, y, w, h, r) {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.arcTo(x + w, y, x + w, y + r, r);
+        ctx.lineTo(x + w, y + h - r); ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+        ctx.lineTo(x + r, y + h); ctx.arcTo(x, y + h, x, y + h - r, r);
+        ctx.lineTo(x, y + r); ctx.arcTo(x, y, x + r, y, r);
+        ctx.closePath();
+    }
+    function wrapText(ctx, text, x, y, maxW, lineH) {
+        var words = text.split(' '), line = '';
+        for (var i = 0; i < words.length; i++) {
+            var test = line + words[i] + ' ';
+            if (ctx.measureText(test).width > maxW && i > 0) {
+                ctx.fillText(line.trim(), x, y); line = words[i] + ' '; y += lineH;
+            } else { line = test; }
+        }
+        ctx.fillText(line.trim(), x, y); return y + lineH;
+    }
+
+    function buildCard(mutImg, logoImg, onDone) {
+        var W = 960, H = 590;
+        var HDR = 70; /* header height */
+        var scale = 6;
+        var cv = document.createElement('canvas');
+        cv.width = W * scale; cv.height = H * scale;
+        var c = cv.getContext('2d');
+        c.scale(scale, scale);
+        c.imageSmoothingEnabled = false;
+
+        /* Background */
+        c.fillStyle = '#f8fafc'; c.fillRect(0, 0, W, H);
+
+        /* ── Header ── */
+        c.fillStyle = '#ffffff'; c.fillRect(0, 0, W, HDR);
+        /* thin green bottom border on header */
+        c.fillStyle = '#16a34a'; c.fillRect(0, HDR - 3, W, 3);
+
+        /* Logo image (left) */
+        if (logoImg) {
+            var lh = HDR - 10, lw = lh * (logoImg.width / logoImg.height);
+            c.drawImage(logoImg, 10, 5, lw, lh);
+        } else {
+            /* Fallback text logo */
+            c.fillStyle = '#dc2626'; c.font = 'bold 20px Arial';
+            c.textAlign = 'left'; c.fillText('PRO-PROPERTY', 10, 32);
+            c.fillStyle = '#16a34a'; c.fillRect(10, 38, 148, 20);
+            c.fillStyle = '#ffffff'; c.font = 'bold 11px Arial';
+            c.fillText('SOLUTIONS LIMITED', 14, 53);
+        }
+
+        /* Contact info (right) */
+        var cx2 = W - 10;
+        c.textAlign = 'right'; c.fillStyle = '#374151';
+        c.font = '11px Arial';    c.fillText('info@proproperty.co.ke', cx2, 16);
+        c.font = '11px Arial';    c.fillText('www.proproperty.co.ke', cx2, 30);
+        c.font = '10px Arial';    c.fillText('Muguku Business Centre,', cx2, 43);
+        c.fillText('2nd Floor Wing A, Suite 2R, Kikuyu Town', cx2, 55);
+        c.font = 'bold 11px Arial'; c.fillStyle = '#16a34a';
+        c.fillText('0709 255 255, 0716 373 737', cx2, 67);
+
+        /* Left: mutation image — below header */
+        var iX = 10, iY = HDR + 8, iMaxW = 590, iMaxH = 462;
+        var iW = iMaxW, iH = iMaxH;
+        if (mutImg) {
+            var ratio = Math.min(iMaxW / mutImg.width, iMaxH / mutImg.height);
+            iW = mutImg.width * ratio; iH = mutImg.height * ratio;
+            c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+            c.drawImage(mutImg, iX, iY, iW, iH);
+            c.imageSmoothingEnabled = false;
+            var zc = {
+                available: { fill: 'rgba(255,255,255,0.72)', text: '#374151' },
+                booked:    { fill: 'rgba(255,220,0,0.92)',   text: '#5a3e00' },
+                sa_signed: { fill: 'rgba(220,0,0,0.92)',     text: '#ffffff' },
+                sold:      { fill: 'rgba(0,180,0,0.95)',     text: '#ffffff' }
+            };
+            zonesData.forEach(function (z) {
+                if (!z.points || z.points.length < 3) return;
+                var col = zc[z.status] || zc.available;
+                c.beginPath();
+                c.moveTo(iX + z.points[0].x / 100 * iW, iY + z.points[0].y / 100 * iH);
+                for (var j = 1; j < z.points.length; j++)
+                    c.lineTo(iX + z.points[j].x / 100 * iW, iY + z.points[j].y / 100 * iH);
+                c.closePath();
+                c.fillStyle = col.fill; c.fill();
+                c.strokeStyle = 'rgba(60,60,60,0.8)'; c.lineWidth = 0.5; c.stroke();
+                var cx = z.points.reduce(function (a, p) { return a + p.x; }, 0) / z.points.length;
+                var cy = z.points.reduce(function (a, p) { return a + p.y; }, 0) / z.points.length;
+                c.fillStyle = col.text; c.font = 'bold 7px Arial'; c.textAlign = 'center';
+                c.fillText(z.plot_number, iX + cx / 100 * iW, iY + cy / 100 * iH + 2.5);
+            });
+        } else {
+            c.fillStyle = '#e2e8f0'; c.fillRect(iX, iY, iMaxW, iMaxH);
+            c.fillStyle = '#94a3b8'; c.font = '14px Arial'; c.textAlign = 'center';
+            c.fillText('No Image', iX + iMaxW / 2, iY + iMaxH / 2);
+        }
+
+        /* Right panel */
+        var rx = iX + iW + 14, ry = HDR + 14, rW = W - rx - 12;
+        c.textAlign = 'left';
+
+        /* Clean white background for right panel — removes canvas gray tint */
+        c.fillStyle = '#ffffff';
+        c.fillRect(rx - 8, HDR, W - (rx - 8), H - HDR - 32);
+        /* Subtle left separator */
+        c.fillStyle = '#e2e8f0';
+        c.fillRect(rx - 8, HDR + 6, 1, H - HDR - 44);
+
+        /* Badges + payment anchored from the bottom so they always show */
+        var bW = Math.min((rW - 8) / 2, 100), bH = 22, bGap = 4;
+        var payStartY   = H - 32 - 140;                     /* 418 — fixed */
+        var badgeStartY = payStartY - 2 * (bH + bGap) - 14; /* 352 — fixed */
+
+        /* Estate name */
+        c.fillStyle = '#0f172a'; c.font = 'bold 18px Arial';
+        ry = wrapText(c, estateName, rx, ry, rW, 24) + 4;
+
+        /* Divider */
+        c.fillStyle = '#e2e8f0'; c.fillRect(rx, ry, rW, 1); ry += 10;
+
+        /* Plot info lines — auto-scale lineH so all lines fit regardless of count */
+        var plotTop = ry;
+        var availPlotH = badgeStartY - 8 - plotTop;
+        c.font = 'bold 14px Arial';
+        /* Pre-count total rendered lines (including wraps) to compute lineH */
+        var processedPlotLines = [], totalPlotLines = 0;
+        plotInfoLines.forEach(function (ln) {
+            ln = ln.trim(); if (!ln) return;
+            ln = ln.replace(/cash buyer/gi, 'cash buyer/3 months');
+            processedPlotLines.push(ln);
+            var words = ln.split(' '), line = '', count = 1;
+            for (var i = 0; i < words.length; i++) {
+                var test = line + words[i] + ' ';
+                if (c.measureText(test).width > rW && i > 0) { count++; line = words[i] + ' '; }
+                else { line = test; }
+            }
+            totalPlotLines += count;
+        });
+        var plotLineH = totalPlotLines > 0
+            ? Math.max(14, Math.min(18, Math.floor(availPlotH / totalPlotLines)))
+            : 18;
+        c.fillStyle = '#1e293b';
+        c.save();
+        c.beginPath(); c.rect(rx, plotTop, rW, availPlotH); c.clip();
+        processedPlotLines.forEach(function (ln) {
+            ry = wrapText(c, ln, rx, ry, rW, plotLineH);
+        });
+        c.restore();
+
+        /* Status badges — anchored just above payment section */
+        var badges = [
+            { label: 'Available', val: counts.available, bg: '#ffffff', bd: '#d1d5db', fg: '#111827' },
+            { label: 'Booked',    val: counts.booked,    bg: '#ffff00', bd: '#ca8a04', fg: '#5a3e00' },
+            { label: 'SA Signed', val: counts.sa_signed, bg: '#ff0000', bd: '#cc0000', fg: '#ffffff' },
+            { label: 'Sold',      val: counts.sold,      bg: '#00cc00', bd: '#009900', fg: '#ffffff' }
+        ];
+        badges.forEach(function (b, i) {
+            var bx = rx + (i % 2) * (bW + 8), by = badgeStartY + Math.floor(i / 2) * (bH + bGap);
+            c.fillStyle = b.bg; c.strokeStyle = b.bd; c.lineWidth = 0.7;
+            rrect(c, bx, by, bW, bH, 4); c.fill(); c.stroke();
+            c.fillStyle = b.fg; c.textAlign = 'left';
+            c.font = 'bold 7px Arial';
+            c.fillText(b.label, bx + 5, by + 9);
+            c.font = 'bold 12px Arial';
+            c.fillText(b.val, bx + 5, by + 20);
+        });
+
+        /* Payment details — fixed Y, never pushed off canvas */
+        ry = payStartY;
+        c.fillStyle = '#e2e8f0'; c.fillRect(rx, ry, rW, 1); ry += 10;
+        c.fillStyle = '#0f172a'; c.font = 'bold 13px Arial'; c.textAlign = 'left';
+        c.fillText('Payment Details:', rx, ry); ry += 18;
+
+        c.fillStyle = '#1d4ed8'; c.font = 'bold 12px Arial';
+        c.fillText('Bank Deposit:', rx, ry); ry += 16;
+        c.fillStyle = '#1e293b'; c.font = '13px Arial';
+        c.fillText('Acc Name: Pro-property Solutions Limited', rx + 6, ry); ry += 16;
+        c.fillText('Acc No: 1218612479  |  KCB Bank, Kikuyu Branch', rx + 6, ry); ry += 19;
+
+        c.fillStyle = '#6b7280'; c.font = 'bold 12px Arial'; c.textAlign = 'center';
+        c.fillText('\u2014 OR \u2014', rx + rW / 2, ry); ry += 16;
+
+        c.fillStyle = '#15803d'; c.font = 'bold 12px Arial'; c.textAlign = 'left';
+        c.fillText('M-Pesa:', rx, ry); ry += 16;
+        c.fillStyle = '#1e293b'; c.font = '13px Arial';
+        c.fillText('Paybill: 522522  |  Acc No: 1218612479', rx + 6, ry);
+
+        /* Footer */
+        c.fillStyle = '#1e293b'; c.fillRect(0, H - 32, W, 32);
+        c.fillStyle = '#94a3b8'; c.font = '14px Arial'; c.textAlign = 'center';
+        c.fillText('www.proproperty.co.ke', W / 2, H - 10);
+        onDone(cv);
+    }
+
+    var _shareBlobUrl = null;
+    function shareEstate() {
+        function go(mutImg, logoImg) {
+            buildCard(mutImg, logoImg, function (cv) {
+                cv.toBlob(function (blob) {
+                    var fname = estateName.replace(/[^a-z0-9]/gi, '_') + '.png';
+                    var file = new File([blob], fname, { type: 'image/png' });
+                    if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+                        navigator.share({
+                            files: [file], title: estateName,
+                            text: 'Check out ' + estateName + ' on Pro-Property'
+                        }).catch(function () { });
+                    } else {
+                        if (_shareBlobUrl) URL.revokeObjectURL(_shareBlobUrl);
+                        _shareBlobUrl = URL.createObjectURL(blob);
+                        var prev = document.getElementById('share-preview');
+                        var dl = document.getElementById('share-download-btn');
+                        prev.src = _shareBlobUrl; prev.style.display = 'block';
+                        dl.href = _shareBlobUrl; dl.download = fname;
+                        var msg = 'Check out ' + estateName + ' on Pro-Property: ' + window.location.href;
+                        document.getElementById('wa-link').href = 'https://wa.me/?text=' + encodeURIComponent(msg);
+                        document.getElementById('share-modal').style.display = 'flex';
+                    }
+                }, 'image/png');
+            });
+        }
+        var pending = 2, logoImg = null, mutImg = null;
+        function loaded() { if (--pending === 0) go(mutImg, logoImg); }
+        var logo = new Image();
+        logo.onload = function () { logoImg = logo; loaded(); };
+        logo.onerror = function () { loaded(); };
+        logo.src = '/static/img/logo.png';
+        if (mutationSrc) {
+            var mi = new Image(); mi.crossOrigin = 'anonymous';
+            mi.onload = function () { mutImg = mi; loaded(); };
+            mi.onerror = function () { loaded(); };
+            mi.src = mutationSrc;
+        } else { loaded(); }
+    }
+
+    function closeShareModal() {
+        document.getElementById('share-modal').style.display = 'none';
+        if (_shareBlobUrl) { URL.revokeObjectURL(_shareBlobUrl); _shareBlobUrl = null; }
+        document.getElementById('share-preview').style.display = 'none';
+    }
+    document.getElementById('share-modal').addEventListener('click', function (e) { if (e.target === this) closeShareModal(); });
+
+    function copyLink() {
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(window.location.href).then(function () {
+                var btn = document.getElementById('copy-link-btn');
+                var orig = btn.textContent; btn.textContent = '✅ Copied!';
+                setTimeout(function () { btn.textContent = orig; }, 2000);
+            });
+        }
+    }
+</script>
+{{ end }}
+{{ template "agent_base" . }}

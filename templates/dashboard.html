@@ -1,0 +1,95 @@
+{{ define "title" }}Dashboard - Pro-Property{{ end }}
+{{ define "content" }}
+<style>
+.dash-stat-link {
+    display:block;
+    background:var(--card-bg,#fff);
+    border:1px solid var(--border,#e5e7eb);
+    border-radius:10px;
+    box-shadow:0 1px 3px rgba(0,0,0,.06);
+    text-decoration:none;
+    color:inherit;
+    cursor:pointer;
+    transition:box-shadow .15s, transform .15s;
+}
+.dash-stat-link:hover {
+    box-shadow:0 4px 16px rgba(0,0,0,.12);
+    transform:translateY(-2px);
+}
+</style>
+<div class="top-bar">
+    <h1>Welcome, {{ .AgentName }}</h1>
+</div>
+
+<!-- Stats cards -->
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:24px;">
+    <div class="card" style="text-align:center;padding:20px;">
+        <div style="font-size:13px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;">Total Estates</div>
+        <div style="font-size:30px;font-weight:700;color:#2563eb;margin:8px 0 0;">{{ .TotalEstates }}</div>
+    </div>
+    <div class="card" style="text-align:center;padding:20px;">
+        <div style="font-size:13px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;">Available Plots</div>
+        <div style="font-size:30px;font-weight:700;color:#16a34a;margin:8px 0 0;">{{ .TotalAvailable }}</div>
+    </div>
+    <a href="/agent/bookings" class="dash-stat-link" style="text-align:center;padding:20px;">
+        <div style="font-size:13px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;">Your Booked Plots</div>
+        <div style="font-size:30px;font-weight:700;color:#ca8a04;margin:8px 0 4px;">{{ .AgentBooked }}</div>
+        <div style="font-size:11px;color:#ca8a04;opacity:.8;">View →</div>
+    </a>
+    <div class="card" style="text-align:center;padding:20px;">
+        <div style="font-size:13px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;">Your SA Signed Plots</div>
+        <div style="font-size:30px;font-weight:700;color:#2563eb;margin:8px 0 0;">{{ .AgentSaSigned }}</div>
+    </div>
+    <a href="/agent/sales" class="dash-stat-link" style="text-align:center;padding:20px;">
+        <div style="font-size:13px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;">Your Sold Plots</div>
+        <div style="font-size:30px;font-weight:700;color:#dc2626;margin:8px 0 4px;">{{ .AgentSold }}</div>
+        <div style="font-size:11px;color:#dc2626;opacity:.8;">View →</div>
+    </a>
+</div>
+
+<!-- Charts -->
+<div class="chart-grid">
+    <div class="card">
+        <h3>Available Plots by Estate</h3>
+        <div class="chart-wrap"><canvas id="availableChart"></canvas></div>
+    </div>
+    <div class="card">
+        <h3>Booked Plots by Estate</h3>
+        <div class="chart-wrap"><canvas id="bookedChart"></canvas></div>
+    </div>
+    <div class="card chart-full">
+        <h3>Sold Plots by Estate</h3>
+        <div class="chart-wrap"><canvas id="soldChart"></canvas></div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+(function () {
+    var d = {{ .ChartData }};
+    var names = d.estates || [];
+    var opts = {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+    };
+    new Chart(document.getElementById('availableChart'), {
+        type: 'bar',
+        data: { labels: names, datasets: [{ data: d.availablePlots, backgroundColor: '#16a34a' }] },
+        options: opts
+    });
+    new Chart(document.getElementById('bookedChart'), {
+        type: 'bar',
+        data: { labels: names, datasets: [{ data: d.bookedPlots, backgroundColor: '#ca8a04' }] },
+        options: opts
+    });
+    new Chart(document.getElementById('soldChart'), {
+        type: 'bar',
+        data: { labels: names, datasets: [{ data: d.soldPlots, backgroundColor: '#dc2626' }] },
+        options: opts
+    });
+}());
+</script>
+{{ end }}
+{{ template "agent_base" . }}

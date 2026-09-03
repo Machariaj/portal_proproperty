@@ -1,0 +1,37 @@
+# Compiled binaries
+marketers_portal
+portal_linux
+*.exe
+propropertysolutionsltd/sendToZohoCRM
+propropertysolutionsltd/go-installer.msi
+propropertysolutionsltd/go.zip
+
+# Database dumps and backups
+*.sql
+*.dump
+
+# Data files with sensitive info
+*.csv
+*.xlsx
+*.xls
+
+# PHP config with credentials
+propropertysolutionsltd/config.php
+propropertysolutionsltd/db.php
+propropertysolutionsltd/db_connection.php
+
+# User uploaded files
+uploads/
+
+# Log files
+*.log
+*.txt
+*.tmp
+*.out
+
+# Claude session files
+.claude/
+
+# OS files
+.DS_Store
+Thumbs.db

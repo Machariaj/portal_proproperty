@@ -1,0 +1,85 @@
+{{ define "title" }}Sold Plots - Pro-Property{{ end }}
+{{ define "content" }}
+<div class="top-bar">
+    <h1>Sold Plots</h1>
+</div>
+
+<!-- Filter bar -->
+<div class="card" style="margin-bottom:16px;">
+    <form method="GET" action="/admin/sold-plots" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">
+        <div style="display:flex;flex-direction:column;gap:4px;min-width:160px;">
+            <label style="font-size:12px;color:#6b7280;font-weight:600;">Agent</label>
+            <select name="agent" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                <option value="">All Agents</option>
+                {{ range .Agents }}<option value="{{ .ID }}" {{ if eq $.FAgent .ID }}selected{{ end }}>{{ .Name }}</option>{{ end }}
+            </select>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;min-width:180px;">
+            <label style="font-size:12px;color:#6b7280;font-weight:600;">Estate</label>
+            <select name="estate" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                <option value="">All Estates</option>
+                {{ range .Estates }}<option value="{{ .ID }}" {{ if eq $.FEstate .ID }}selected{{ end }}>{{ .Name }}</option>{{ end }}
+            </select>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+            <label style="font-size:12px;color:#6b7280;font-weight:600;">Date Sold From</label>
+            <input type="date" name="date_from" value="{{ .FFrom }}" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+            <label style="font-size:12px;color:#6b7280;font-weight:600;">Date Sold To</label>
+            <input type="date" name="date_to" value="{{ .FTo }}" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+        </div>
+        <button type="submit" style="padding:7px 18px;font-size:13px;">Filter</button>
+        {{ if or .FAgent .FEstate .FFrom .FTo }}
+        <a href="/admin/sold-plots" style="padding:7px 14px;font-size:13px;background:#6b7280;color:#fff;border-radius:6px;text-decoration:none;">Clear</a>
+        {{ end }}
+    </form>
+</div>
+
+<div class="card">
+    <div class="table-responsive">
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Client Name</th>
+                    <th>Phone</th>
+                    <th>Estate</th>
+                    <th>Plot Number</th>
+                    <th>Agent</th>
+                    <th>Amount (KSh)</th>
+                    <th>Payment Plan</th>
+                    <th>Date Sold</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{ range $i, $s := .Sales }}
+                <tr>
+                    <td>{{ add $i 1 }}</td>
+                    <td>{{ $s.BuyerName }}</td>
+                    <td>{{ $s.BuyerPhone }}</td>
+                    <td>{{ $s.EstateName }}</td>
+                    <td>{{ $s.PlotNumber }}</td>
+                    <td>{{ $s.AgentName }}</td>
+                    <td>{{ printf "%.0f" $s.Amount }}</td>
+                    <td>{{ $s.PaymentPlan }}</td>
+                    <td>{{ $s.DateSold }}</td>
+                    <td>
+                        {{ if $.CanSoldToAvailable }}
+                        <form method="POST" action="/admin/estate/{{ $s.EstateID }}/plot-status" style="margin:0;">
+                            <input type="hidden" name="plot_id" value="{{ $s.PlotID }}">
+                            <input type="hidden" name="status" value="available">
+                            <button type="submit" style="background:#6b7280;font-size:12px;padding:5px 10px;white-space:nowrap;"
+                                    onclick="return confirm('Return Plot {{ $s.PlotNumber }} to Available? This will remove the sale record.')">← Available</button>
+                        </form>
+                        {{ end }}
+                    </td>
+                </tr>
+                {{ end }}
+            </tbody>
+        </table>
+    </div>
+</div>
+{{ end }}
+{{ template "admin_base" . }}

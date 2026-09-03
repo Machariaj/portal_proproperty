@@ -1,0 +1,197 @@
+{{ define "title" }}Manage Vans - Pro-Property{{ end }}
+{{ define "content" }}
+<div class="top-bar">
+    <h1>Manage Vans</h1>
+    <a href="/admin/van-bookings" class="edit-btn" style="background:#6b7280;">← Van Bookings</a>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start;">
+
+    <!-- Vans section -->
+    <div>
+        <div class="card">
+            <h3 style="margin:0 0 14px;font-size:15px;color:#374151;">Add Van</h3>
+            <form method="POST" action="/admin/vans">
+                <input type="hidden" name="action" value="add_van">
+                <label>Van Name / Description</label>
+                <input type="text" name="name" placeholder="e.g. Toyota HiAce" required>
+                <label>Plate Number</label>
+                <input type="text" name="plate_number" placeholder="e.g. KCC 123X" required>
+                <label>Seating Capacity</label>
+                <input type="number" name="capacity" min="1" placeholder="e.g. 14">
+                <button type="submit" style="margin-top:10px;">Add Van</button>
+            </form>
+        </div>
+
+        <div class="card" style="margin-top:16px;">
+            <h3 style="margin:0 0 12px;font-size:15px;color:#374151;">Fleet</h3>
+            {{ if .Vans }}
+            <div class="table-responsive">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Plate</th>
+                            <th>Seats</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{ range .Vans }}
+                        <tr>
+                            <td>{{ .Name }}</td>
+                            <td>{{ .PlateNumber }}</td>
+                            <td>{{ .Capacity }}</td>
+                            <td>
+                                {{ if eq .Status "available" }}
+                                <span class="badge badge-booked" style="background:#16a34a;">Available</span>
+                                {{ else }}
+                                <span class="badge" style="background:#dc2626;color:#fff;">Maintenance</span>
+                                {{ end }}
+                            </td>
+                            <td style="display:flex;gap:6px;flex-wrap:wrap;">
+                                <form method="POST" action="/admin/vans" style="margin:0;">
+                                    <input type="hidden" name="action" value="toggle_van">
+                                    <input type="hidden" name="van_id" value="{{ .ID }}">
+                                    <button type="submit"
+                                        style="font-size:12px;padding:5px 10px;background:#f59e0b;">
+                                        {{ if eq .Status "available" }}Set Maintenance{{ else }}Set Available{{ end }}
+                                    </button>
+                                </form>
+                                <form method="POST" action="/admin/vans" style="margin:0;"
+                                    onsubmit="return confirm('Delete this van?');">
+                                    <input type="hidden" name="action" value="delete_van">
+                                    <input type="hidden" name="van_id" value="{{ .ID }}">
+                                    <button type="submit" class="delete-btn"
+                                        style="font-size:12px;padding:5px 10px;">Delete</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {{ end }}
+                    </tbody>
+                </table>
+            </div>
+            {{ else }}
+            <p style="color:#6b7280;text-align:center;padding:1rem 0;">No vans added yet.</p>
+            {{ end }}
+        </div>
+    </div>
+
+    <!-- Destinations section -->
+    <div>
+        <div class="card">
+            <h3 style="margin:0 0 14px;font-size:15px;color:#374151;">Add Destination</h3>
+            <form method="POST" action="/admin/vans">
+                <input type="hidden" name="action" value="add_dest">
+                <label>Destination Name</label>
+                <input type="text" name="dest_name" placeholder="e.g. Nairobi CBD" required>
+                <button type="submit" style="margin-top:10px;">Add Destination</button>
+            </form>
+        </div>
+
+        <div class="card" style="margin-top:16px;">
+            <h3 style="margin:0 0 12px;font-size:15px;color:#374151;">Destinations</h3>
+            {{ if .Destinations }}
+            <div class="table-responsive">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Destination</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{ range .Destinations }}
+                        <tr>
+                            <td>{{ .Name }}</td>
+                            <td>
+                                <form method="POST" action="/admin/vans" style="margin:0;"
+                                    onsubmit="return confirm('Delete destination?');">
+                                    <input type="hidden" name="action" value="del_dest">
+                                    <input type="hidden" name="dest_id" value="{{ .ID }}">
+                                    <button type="submit" class="delete-btn"
+                                        style="font-size:12px;padding:5px 10px;">Delete</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {{ end }}
+                    </tbody>
+                </table>
+            </div>
+            {{ else }}
+            <p style="color:#6b7280;text-align:center;padding:1rem 0;">No destinations added yet.</p>
+            {{ end }}
+        </div>
+    </div>
+
+</div>
+
+<!-- Drivers section -->
+<div class="card" style="margin-top:16px;">
+    <h3 style="margin:0 0 14px;font-size:15px;color:#374151;">Drivers</h3>
+    <form method="POST" action="/admin/vans" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">
+        <input type="hidden" name="action" value="add_driver">
+        <div style="grid-column:1/-1;">
+            <label style="font-size:12px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">Select Portal User *</label>
+            <select name="driver_agent" id="driverAgentSelect" required style="width:100%;" onchange="fillDriverPhone(this)">
+                <option value="">-- Select user --</option>
+                {{ range .Agents }}
+                <option value="{{ .Name }}" data-phone="{{ .Phone }}">{{ .Name }}{{ if .Phone }} ({{ .Phone }}){{ end }}</option>
+                {{ end }}
+            </select>
+        </div>
+        <div>
+            <label style="font-size:12px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">Override Name (optional)</label>
+            <input type="text" name="driver_name" id="driverNameInput" placeholder="Leave blank to use user name" style="width:100%;">
+        </div>
+        <div>
+            <label style="font-size:12px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">Phone (with country code) *</label>
+            <input type="text" name="driver_phone" id="driverPhoneInput" placeholder="e.g. 254712345678" required style="width:100%;">
+        </div>
+        <div style="grid-column:1/-1;">
+            <button type="submit" style="padding:9px 18px;background:#0369a1;">Add Driver</button>
+        </div>
+    </form>
+    <script>
+    function fillDriverPhone(sel) {
+        var opt = sel.options[sel.selectedIndex];
+        document.getElementById('driverPhoneInput').value = opt.dataset.phone || '';
+    }
+    </script>
+
+    {{ if .Drivers }}
+    <div class="table-responsive">
+        <table style="font-size:13px;">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Phone</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{ range .Drivers }}
+                <tr>
+                    <td>{{ .Name }}</td>
+                    <td>{{ .Phone }}</td>
+                    <td>
+                        <form method="POST" action="/admin/vans" style="margin:0;"
+                            onsubmit="return confirm('Remove this driver?');">
+                            <input type="hidden" name="action" value="del_driver">
+                            <input type="hidden" name="driver_id" value="{{ .ID }}">
+                            <button type="submit" class="delete-btn" style="font-size:12px;padding:5px 10px;">Remove</button>
+                        </form>
+                    </td>
+                </tr>
+                {{ end }}
+            </tbody>
+        </table>
+    </div>
+    {{ else }}
+    <p style="color:#6b7280;font-size:13px;">No drivers added yet.</p>
+    {{ end }}
+</div>
+
+{{ end }}
+{{ template "van_admin_base" . }}

@@ -1,0 +1,42 @@
+{{ define "title" }}Add Estate - Pro-Property{{ end }}
+{{ define "content" }}
+<div class="top-bar">
+    <h1>Add Estate</h1>
+    <a href="/admin/estates" class="edit-btn" style="background:#6b7280;">← Back to Estates</a>
+</div>
+
+<div class="card" style="max-width:760px;">
+    {{ if .FormError }}
+    <div style="background:#fee2e2;border:1px solid #fca5a5;color:#b91c1c;padding:10px 14px;border-radius:6px;margin-bottom:16px;font-size:14px;">
+        {{ .FormError }}
+    </div>
+    {{ end }}
+
+    <form method="POST" enctype="multipart/form-data" action="/admin/add-estate">
+        <label for="name">Estate Name <span style="color:#dc2626;">*</span></label>
+        <input type="text" id="name" name="name" placeholder="e.g. Sunrise Gardens Phase 1" required>
+
+        <label for="prop_plotinfo">Estate Info / Description</label>
+        <textarea id="prop_plotinfo" name="prop_plotinfo" rows="5" placeholder="Brief description, location, plot sizes, price range..."></textarea>
+
+        <label for="plot_price">Plot Price (KES) <span style="color:#dc2626;">*</span></label>
+        <input type="number" id="plot_price" name="plot_price" min="0" step="0.01" placeholder="e.g. 1850000">
+
+        <label for="mutation_image">Mutation / Site Plan Image (optional)</label>
+        <input type="file" id="mutation_image" name="mutation_image" accept="image/*">
+        <p style="margin:4px 0 0;font-size:12px;color:#6b7280;">You can upload or replace this later from the estate edit page.</p>
+
+        <label for="visibility" style="margin-top:14px;display:block;">Visibility <span style="color:#dc2626;">*</span></label>
+        <select id="visibility" name="visibility" required>
+            <option value="show">Show – visible to all agents and admins</option>
+            <option value="hide">Hide – restricted (Private Estates page only)</option>
+        </select>
+        <p style="margin:4px 0 0;font-size:12px;color:#6b7280;">
+            Hidden estates are only accessible to users you explicitly grant access to.
+        </p>
+
+        <button type="submit" style="margin-top:18px;">➕ Create Estate</button>
+    </form>
+</div>
+{{ end }}
+{{ template "admin_base" . }}

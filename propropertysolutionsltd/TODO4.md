@@ -1,0 +1,7 @@
+- [x] Update sendToZohoCRM function in sell_plot.php to create a deal after contact creation
+- [x] Add detailed logging for token retrieval, contact creation, deal creation, and attachment uploads
+- [x] Test the updated integration using test_zoho.php
+- [x] Check logs for any errors and verify in Zoho CRM dashboard
+- [x] Implement comprehensive activity logging system with EAT timezone
+- [x] Refactor database connections to use db_connection.php in multiple files
+- [x] Update Zoho CRM contact creation to send data to separate columns (Estate, Plot_Number, Deposit, Payment_Plan, Agent) instead of Description field

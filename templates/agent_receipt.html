@@ -1,0 +1,199 @@
+{{ define "title" }}Booking Confirmation - Pro-Property{{ end }}
+{{ define "content" }}
+<style>
+#receipt-wrapper { max-width: 720px; margin: 0 auto; }
+.receipt-card {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    padding: 40px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+}
+.receipt-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: 2px solid #1e3a5f;
+    padding-bottom: 20px;
+    margin-bottom: 24px;
+}
+.receipt-company h2 { margin: 0 0 2px; font-size: 20px; color: #1e3a5f; font-weight: 700; }
+.receipt-company p  { margin: 0; font-size: 12px; color: #6b7280; }
+.receipt-meta { text-align: right; font-size: 13px; color: #374151; }
+.receipt-meta .receipt-no { font-size: 18px; font-weight: 700; color: #1e3a5f; margin-bottom: 4px; }
+.receipt-title {
+    text-align: center;
+    background: #dcfce7;
+    color: #166534;
+    padding: 10px;
+    border-radius: 6px;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    margin-bottom: 24px;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+}
+.receipt-section { margin-bottom: 22px; }
+.receipt-section h4 {
+    margin: 0 0 10px;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: #6b7280;
+    border-bottom: 1px solid #e5e7eb;
+    padding-bottom: 5px;
+}
+.receipt-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; font-size: 14px; }
+.receipt-grid dt { color: #6b7280; }
+.receipt-grid dd { font-weight: 600; color: #111; margin: 0; }
+.receipt-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.receipt-table th {
+    background: #f1f5f9; color: #374151; text-align: left;
+    padding: 8px 10px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px;
+}
+.receipt-table td { padding: 9px 10px; border-bottom: 1px solid #f1f5f9; color: #1f2937; }
+.receipt-table tr:last-child td { border-bottom: none; }
+.stamp-wrap {
+    margin-top: 32px;
+    border-top: 1px solid #e5e7eb;
+    padding-top: 24px;
+    display: flex;
+    justify-content: center;
+}
+@media (max-width: 600px) {
+    #receipt-wrapper { width: 100%; box-sizing: border-box; }
+    .receipt-card { padding: 16px; border-radius: 8px; }
+    .receipt-header { flex-direction: column; gap: 12px; }
+    .receipt-meta { text-align: left; }
+    .receipt-grid { grid-template-columns: 1fr; }
+    .receipt-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .no-print { flex-wrap: wrap; }
+}
+@media print {
+    .top-bar, .sidebar, .menu-toggle, #print-btn, #back-btn, #download-btn, .no-print { display: none !important; }
+    body { background: #fff !important; }
+    .main { padding: 0 !important; margin: 0 !important; }
+    .receipt-card { border: none; box-shadow: none; padding: 24px; }
+    @page { size: A4; margin: 12mm; }
+}
+</style>
+
+<div id="receipt-wrapper">
+    <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;" class="no-print">
+        <button id="back-btn" onclick="history.back()"
+                style="background:#6b7280;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-size:13px;cursor:pointer;">← Back</button>
+        <button id="print-btn" onclick="window.print()"
+                style="background:#1e3a5f;color:#fff;border:none;padding:8px 20px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600;">🖨 Print Receipt</button>
+        <button id="download-btn" onclick="downloadReceiptPDF()"
+                style="background:#16a34a;color:#fff;border:none;padding:8px 20px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600;">⬇ Download PDF</button>
+        <button onclick="shareOnWhatsApp()"
+                style="background:#25d366;color:#fff;border:none;padding:8px 20px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600;">Share on WhatsApp</button>
+        <a href="/agent/bookings"
+           style="background:#16a34a;color:#fff;padding:8px 16px;border-radius:6px;font-size:13px;text-decoration:none;">My Bookings</a>
+    </div>
+
+    <div class="receipt-card">
+        <!-- Header -->
+        <div class="receipt-header">
+            <div class="receipt-company">
+                <img src="/static/img/logo.png" alt="Pro-Property" style="height:48px;margin-bottom:6px;" onerror="this.style.display='none'">
+                <h2>Pro-Property Solutions Limited</h2>
+                <p>Turning dreams into reality</p>
+            </div>
+            <div class="receipt-meta">
+                <div class="receipt-no">RECEIPT #{{ .Receipt.ReceiptNumber }}</div>
+                <div>{{ .Receipt.DateBooked }}</div>
+            </div>
+        </div>
+
+        <div class="receipt-title">BOOKING CONFIRMATION</div>
+
+        <!-- Buyer details -->
+        <div class="receipt-section">
+            <h4>Buyer Information</h4>
+            <dl class="receipt-grid">
+                <dt>Full Name</dt>
+                <dd>{{ .Receipt.BuyerName }}</dd>
+                <dt>Phone</dt>
+                <dd>{{ .Receipt.BuyerPhone }}</dd>
+                {{ if .Receipt.BuyerEmail }}
+                <dt>Email</dt>
+                <dd>{{ .Receipt.BuyerEmail }}</dd>
+                {{ end }}
+                <dt>Agent</dt>
+                <dd>{{ .Receipt.AgentName }}</dd>
+            </dl>
+        </div>
+
+        <!-- Plots booked -->
+        <div class="receipt-section">
+            <h4>Plots Booked ({{ len .Receipt.Plots }})</h4>
+            <div class="receipt-table-wrap">
+            <table class="receipt-table">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Plot Number</th>
+                        <th>Estate</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{ range $i, $p := .Receipt.Plots }}
+                    <tr>
+                        <td>{{ inc $i }}</td>
+                        <td><strong>{{ $p.PlotNumber }}</strong></td>
+                        <td>{{ $p.EstateName }}</td>
+                        <td><span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">BOOKED</span></td>
+                    </tr>
+                    {{ end }}
+                </tbody>
+            </table>
+            </div>
+        </div>
+
+        <!-- Payment details -->
+        <div class="receipt-section">
+            <h4>Payment Details</h4>
+            <dl class="receipt-grid">
+                <dt>Deposit Paid (KES)</dt>
+                <dd style="color:#16a34a;font-size:16px;font-weight:700;">{{ fmtAmount .Receipt.Deposit }}</dd>
+                <dt>Payment Plan</dt>
+                <dd>{{ if .Receipt.PaymentPlan }}{{ .Receipt.PaymentPlan }}{{ else }}—{{ end }}</dd>
+                <dt>Date Booked</dt>
+                <dd>{{ .Receipt.DateBooked }}</dd>
+            </dl>
+        </div>
+
+        <div style="margin-top:32px;border-top:1px solid #e5e7eb;padding-top:24px;text-align:center;font-size:11px;color:#9ca3af;">
+            This receipt confirms plot booking only. Full ownership is subject to completion of payment and signing of the Sale Agreement. You have 14 days from the booking date to have the Sale Agreement signed to avoid the booking expiring.
+        </div>
+    </div>
+</div>
+
+<script>
+// Clear the cart now that booking is confirmed
+localStorage.removeItem('ppm_cart');
+if (typeof updateCartBadge === 'function') updateCartBadge();
+
+function downloadReceiptPDF() {
+    var btn = document.getElementById('download-btn');
+    btn.textContent = 'Preparing…';
+    btn.disabled = true;
+    setTimeout(function() {
+        window.print();
+        btn.textContent = '⬇ Download PDF';
+        btn.disabled = false;
+    }, 100);
+}
+
+function shareOnWhatsApp() {
+    var url = window.location.href;
+    var text = 'Here is your Booking Confirmation receipt: ' + url;
+    window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank');
+}
+
+</script>
+{{ end }}
+{{ template "agent_base" . }}

@@ -1,0 +1,36 @@
+{{ define "title" }}Properties - ProProperty{{ end }}
+{{ define "content" }}
+<div class="card">
+    <div class="card-header">
+        <h2>Managed Properties</h2>
+    </div>
+    <div class="card-body table-wrapper">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Location</th>
+                    <th>Units</th>
+                    <th>Occupied</th>
+                    <th>Occupancy</th>
+                    <th>Manager</th>
+                    <th>Monthly Collection</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{ range .Properties }}
+                <tr>
+                    <td>{{ .Name }}</td>
+                    <td>{{ .Location }}</td>
+                    <td>{{ .Units }}</td>
+                    <td>{{ .Occupied }}</td>
+                    <td>{{ .Occupancy }}%</td>
+                    <td>{{ .Manager }}</td>
+                    <td>KSh {{ printf "%.0f" .Collection }}</td>
+                </tr>
+                {{ end }}
+            </tbody>
+        </table>
+    </div>
+    {{ end }}
+    {{ template "base" . }}

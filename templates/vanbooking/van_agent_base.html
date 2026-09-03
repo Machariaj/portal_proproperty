@@ -1,0 +1,146 @@
+{{ define "van_agent_base" }}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>{{ block "title" . }}Van Booking{{ end }}</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <link rel="stylesheet" href="/static/css/admin.css">
+    <style>
+        :root {
+            --sidebar-bg: #0c4a6e;
+            --sidebar-hover: #075985;
+        }
+        .sidebar-module-tag {
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.8px;
+            text-transform: uppercase;
+            color: #7dd3fc;
+            margin-bottom: 4px;
+            display: block;
+        }
+        .sidebar-back-link {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            padding: 8px 10px;
+            border-radius: 8px;
+            font-size: 13px;
+            color: #94a3b8;
+            margin-bottom: 14px;
+            border: 1px solid #1e3a4f;
+            transition: background 0.15s;
+        }
+        .sidebar-back-link:hover { background: #075985; color: #fff; }
+        .notif-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: #dc2626;
+            color: #fff;
+            font-size: 10px;
+            font-weight: 700;
+            min-width: 18px;
+            height: 18px;
+            border-radius: 9px;
+            padding: 0 4px;
+            margin-left: 6px;
+        }
+    </style>
+</head>
+
+<style>
+.notif-float {
+    position: fixed;
+    top: 14px;
+    right: 18px;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #0369a1;
+    color: #fff;
+    padding: 7px 14px;
+    border-radius: 24px;
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+    transition: background 0.15s;
+}
+.notif-float:hover { background: #075985; color: #fff; }
+.notif-float .badge {
+    background: #dc2626;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    min-width: 18px;
+    height: 18px;
+    border-radius: 9px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 4px;
+}
+</style>
+
+<body>
+
+    <a href="/agent/van-notifications" class="notif-float">
+        🔔{{ if .UnreadCount }}<span class="badge">{{ .UnreadCount }}</span>{{ end }}
+    </a>
+
+    <button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('sidebar--open')">☰
+        Menu</button>
+
+    <div class="sidebar">
+        <div class="logo-container">
+            <img src="/static/img/logo.png" alt="Pro-Property Logo" class="logo" onerror="this.style.display='none'">
+            <span class="sidebar-module-tag">Van Booking</span>
+            <h2 style="font-size:15px;margin:0;">Fleet Management</h2>
+        </div>
+
+        <a href="/hub" class="sidebar-back-link">&#8592; Back to Hub</a>
+
+        <ul>
+            <li><a href="/agent/van-booking" {{ if eq .Active "van-new" }}class="active" {{ end }}>Book a Van</a></li>
+            <li>
+                <a href="/agent/van-bookings" {{ if eq .Active "van-my" }}class="active" {{ end }}>My Bookings</a>
+            </li>
+            <li>
+                <a href="/agent/van-driver-sessions" {{ if eq .Active "van-driver" }}class="active" {{ end }}>My Assigned Trips</a>
+            </li>
+            {{ if .IsFleetManager }}
+            <li>
+                <a href="/agent/van-fleet-approval" {{ if eq .Active "van-fleet" }}class="active" {{ end }}>Fleet Approvals</a>
+            </li>
+            {{ end }}
+            <li>
+                <a href="/agent/van-notifications" {{ if eq .Active "van-notif" }}class="active" {{ end }}>
+                    Notifications
+                    {{ if .UnreadCount }}<span class="notif-badge">{{ .UnreadCount }}</span>{{ end }}
+                </a>
+            </li>
+            <li>
+                <form action="/logout" method="post" style="margin:0">
+                    <button type="submit" class="sidebar-logout-btn">Logout</button>
+                </form>
+            </li>
+        </ul>
+    </div>
+
+    <div class="main">
+        {{ block "content" . }}{{ end }}
+    </div>
+
+    <script>
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') document.querySelector('.sidebar').classList.remove('sidebar--open');
+        });
+    </script>
+</body>
+
+</html>
+{{ end }}

@@ -1,0 +1,47 @@
+{{ define "title" }}Pending Projects - Pro-Property{{ end }}
+{{ define "content" }}
+<div class="top-bar">
+    <h1>Pending Projects</h1>
+    <a href="/admin/add-estate" class="edit-btn">➕ Add Estate</a>
+</div>
+
+<div class="card">
+    {{ if .Estates }}
+    <div class="table-responsive">
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Estate Name</th>
+                    <th>Total Plots</th>
+                    <th>Available</th>
+                    <th>Booked</th>
+                    <th>SA Signed</th>
+                    <th>Sold</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{ range $i, $e := .Estates }}
+                <tr>
+                    <td>{{ add $i 1 }}</td>
+                    <td><a href="/admin/estate/{{ $e.ID }}" style="color:var(--primary);font-weight:600;">{{ $e.Name }}</a></td>
+                    <td><strong>{{ $e.Total }}</strong></td>
+                    <td class="text-available">{{ $e.Available }}</td>
+                    <td class="text-booked">{{ $e.Booked }}</td>
+                    <td class="text-signed">{{ $e.SaSigned }}</td>
+                    <td class="text-sold">{{ $e.Sold }}</td>
+                    <td>
+                        <a href="/admin/estate/{{ $e.ID }}/edit" class="edit-btn" style="font-size:12px;padding:5px 10px;">Edit</a>
+                    </td>
+                </tr>
+                {{ end }}
+            </tbody>
+        </table>
+    </div>
+    {{ else }}
+    <p style="color:#6b7280;font-size:14px;">No pending projects. All estates are either fully sold or none have been created yet.</p>
+    {{ end }}
+</div>
+{{ end }}
+{{ template "admin_base" . }}

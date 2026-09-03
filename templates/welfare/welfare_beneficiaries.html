@@ -1,0 +1,266 @@
+{{ define "title" }}Staff Welfare – Claims{{ end }}
+
+{{ define "content" }}
+<div style="padding:28px 32px 40px; max-width:1100px;">
+
+    {{ if .Success }}<div class="alert alert-success">{{ .Success }}</div>{{ end }}
+    {{ if .Error   }}<div class="alert alert-error">{{ .Error }}</div>{{ end }}
+
+    <div class="page-header">
+        <div>
+            <h1>Claims</h1>
+            <p>Manage welfare claims and payouts</p>
+        </div>
+        <button class="btn-primary" onclick="openModal('addBeneficiaryModal')">+ New Claim</button>
+    </div>
+
+    <!-- Status tabs / filter -->
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:24px;flex-wrap:wrap;">
+        <a href="/welfare/beneficiaries?status=pending"
+           style="text-decoration:none;"
+           class="tab-btn {{ if eq .Status "pending" }}tab-active{{ end }}">
+            Pending
+            {{ if gt (index .Counts "pending") 0 }}
+            <span class="tab-count">{{ index .Counts "pending" }}</span>
+            {{ end }}
+        </a>
+        <a href="/welfare/beneficiaries?status=approved"
+           style="text-decoration:none;"
+           class="tab-btn {{ if eq .Status "approved" }}tab-active{{ end }}">
+            Approved
+            {{ if gt (index .Counts "approved") 0 }}
+            <span class="tab-count" style="background:#1d4ed8;">{{ index .Counts "approved" }}</span>
+            {{ end }}
+        </a>
+        <a href="/welfare/beneficiaries?status=completed"
+           style="text-decoration:none;"
+           class="tab-btn {{ if eq .Status "completed" }}tab-active{{ end }}">
+            Completed
+            {{ if gt (index .Counts "completed") 0 }}
+            <span class="tab-count" style="background:#15803d;">{{ index .Counts "completed" }}</span>
+            {{ end }}
+        </a>
+    </div>
+
+    <!-- Cases table -->
+    <div style="background:#fff;border-radius:14px;box-shadow:0 2px 12px rgba(0,0,0,0.06);overflow:hidden;">
+        <div style="padding:18px 20px 14px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;">
+            <span style="font-size:15px;font-weight:700;color:#0f172a;">
+                {{ if eq .Status "pending" }}Pending Claims
+                {{ else if eq .Status "approved" }}Approved Claims
+                {{ else }}Completed Claims{{ end }}
+            </span>
+            <span style="font-size:13px;color:#64748b;">
+                {{ if .Beneficiaries }}{{ len .Beneficiaries }} claim{{ if gt (len .Beneficiaries) 1 }}s{{ end }}{{ else }}No claims{{ end }}
+            </span>
+        </div>
+
+        {{ if .Beneficiaries }}
+        <div style="overflow-x:auto;">
+            <table class="wf-table">
+                <thead>
+                    <tr>
+                        <th>Member</th>
+                        <th>Category</th>
+                        <th>Description</th>
+                        <th>Requested</th>
+                        <th>Date</th>
+                        {{ if eq .Status "approved" }}<th>Approved Amt</th><th>Approved On</th>{{ end }}
+                        {{ if eq .Status "completed" }}<th>Payout</th><th>Completed</th>{{ end }}
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {{ range .Beneficiaries }}
+                <tr>
+                    <td style="font-weight:700;white-space:nowrap;">{{ .MemberName }}</td>
+                    <td>
+                        <span class="welfare-badge
+                            {{ if eq .Status "pending"   }}badge-pending{{ end }}
+                            {{ if eq .Status "approved"  }}badge-approved{{ end }}
+                            {{ if eq .Status "completed" }}badge-paid{{ end }}">
+                            {{ .Category }}
+                        </span>
+                    </td>
+                    <td style="color:#475569;max-width:200px;font-size:13px;">
+                        {{ if .Description }}{{ .Description }}{{ else }}<span style="color:#cbd5e1;">—</span>{{ end }}
+                    </td>
+                    <td style="font-weight:600;white-space:nowrap;">
+                        {{ if gt .AmountRequested 0.0 }}KES {{ printf "%.0f" .AmountRequested }}{{ else }}<span style="color:#cbd5e1;">Not stated</span>{{ end }}
+                    </td>
+                    <td style="color:#64748b;white-space:nowrap;font-size:12.5px;">{{ .RequestedDate }}</td>
+
+                    {{ if eq $.Status "approved" }}
+                    <td style="font-weight:700;color:#1d4ed8;white-space:nowrap;">
+                        {{ if gt .AmountApproved 0.0 }}KES {{ printf "%.0f" .AmountApproved }}{{ else }}<span style="color:#cbd5e1;">—</span>{{ end }}
+                    </td>
+                    <td style="color:#64748b;white-space:nowrap;font-size:12.5px;">{{ if .ApprovedDate }}{{ .ApprovedDate }}{{ else }}—{{ end }}</td>
+                    {{ end }}
+
+                    {{ if eq $.Status "completed" }}
+                    <td style="font-weight:700;color:#15803d;white-space:nowrap;">
+                        {{ if gt .AmountApproved 0.0 }}KES {{ printf "%.0f" .AmountApproved }}{{ else }}<span style="color:#cbd5e1;">—</span>{{ end }}
+                    </td>
+                    <td style="color:#64748b;white-space:nowrap;font-size:12.5px;">{{ if .CompletedDate }}{{ .CompletedDate }}{{ else }}—{{ end }}</td>
+                    {{ end }}
+
+                    <td style="white-space:nowrap;">
+                        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                        {{ if eq .Status "pending" }}
+                            <button class="btn-approve btn-sm"
+                                onclick="openApproveModal({{ .ID }}, '{{ .MemberName }}', {{ .AmountRequested }})">
+                                Approve
+                            </button>
+                            <form method="post" action="/welfare/beneficiaries/{{ .ID }}/delete" style="margin:0"
+                                  onsubmit="return confirm('Delete this case?');">
+                                <button class="btn-danger btn-sm">Delete</button>
+                            </form>
+                        {{ end }}
+                        {{ if eq .Status "approved" }}
+                            <form method="post" action="/welfare/beneficiaries/{{ .ID }}/complete" style="margin:0">
+                                <button class="btn-complete btn-sm">Mark Complete</button>
+                            </form>
+                        {{ end }}
+                        {{ if eq .Status "completed" }}
+                            <span style="font-size:12px;color:#94a3b8;">Done</span>
+                        {{ end }}
+                        </div>
+                    </td>
+                </tr>
+                {{ end }}
+                </tbody>
+            </table>
+        </div>
+        {{ else }}
+        <div style="text-align:center;padding:60px 20px;color:#94a3b8;">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:0.4;display:block;margin:0 auto 14px;">
+                <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
+                <circle cx="9" cy="7" r="4"/>
+                <path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/>
+            </svg>
+            <p style="font-size:14px;font-weight:600;">
+                No {{ .Status }} cases
+            </p>
+            {{ if eq .Status "pending" }}
+            <p style="font-size:13px;">Click <strong>+ New Claim</strong> to submit a claim.</p>
+            {{ end }}
+        </div>
+        {{ end }}
+    </div>
+</div>
+
+<!-- Add Claim Modal -->
+<div class="wf-modal-overlay" id="addBeneficiaryModal" onclick="if(event.target===this)closeModal('addBeneficiaryModal')">
+    <div class="wf-modal">
+        <div class="wf-modal-title">
+            New Claim
+            <button class="wf-modal-close" onclick="closeModal('addBeneficiaryModal')">✕</button>
+        </div>
+        <form action="/welfare/beneficiaries/add" method="post">
+            <div class="wf-form-row">
+                <div class="wf-form-group" style="flex:2">
+                    <label>Member *</label>
+                    <select name="member_id" required>
+                        <option value="">Select member…</option>
+                        {{ range .Members }}
+                        <option value="{{ .ID }}">{{ .Name }}</option>
+                        {{ end }}
+                    </select>
+                </div>
+                <div class="wf-form-group">
+                    <label>Category *</label>
+                    <select name="category" required>
+                        <option value="">Select…</option>
+                        <option>Death (Self)</option>
+                        <option>Hospitalization</option>
+                        <option>Wedding</option>
+                        <option>Baby Shower</option>
+                        <option>Parting Gift</option>
+                    </select>
+                </div>
+            </div>
+            <div class="wf-form-row">
+                <div class="wf-form-group" style="flex:1">
+                    <label>Description</label>
+                    <textarea name="description" rows="2" placeholder="Brief description of the situation" style="resize:vertical;"></textarea>
+                </div>
+            </div>
+            <div class="wf-form-row">
+                <div class="wf-form-group">
+                    <label>Amount Requested (KES)</label>
+                    <input type="number" name="amount_requested" placeholder="e.g. 10000" min="0" step="0.01">
+                </div>
+                <div class="wf-form-group">
+                    <label>Request Date *</label>
+                    <input type="date" name="requested_date" value="{{ .Today }}" required>
+                </div>
+            </div>
+            <div class="wf-form-row">
+                <div class="wf-form-group" style="flex:1">
+                    <label>Notes</label>
+                    <textarea name="notes" rows="2" placeholder="Any additional details" style="resize:vertical;"></textarea>
+                </div>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;">
+                <button type="button" class="btn-ghost" onclick="closeModal('addBeneficiaryModal')">Cancel</button>
+                <button type="submit" class="btn-primary">Submit Claim</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Approve Modal -->
+<div class="wf-modal-overlay" id="approveModal" onclick="if(event.target===this)closeModal('approveModal')">
+    <div class="wf-modal" style="max-width:380px;">
+        <div class="wf-modal-title">
+            Approve Case
+            <button class="wf-modal-close" onclick="closeModal('approveModal')">✕</button>
+        </div>
+        <p style="font-size:13px;color:#475569;margin:0 0 16px;">
+            Approving case for <strong id="approveForName"></strong>.
+        </p>
+        <form id="approveForm" method="post">
+            <div class="wf-form-row">
+                <div class="wf-form-group" style="flex:1">
+                    <label>Approved Amount (KES)</label>
+                    <input type="number" name="amount_approved" id="approveAmtInput" placeholder="Leave blank to keep as requested" min="0" step="0.01">
+                </div>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;">
+                <button type="button" class="btn-ghost" onclick="closeModal('approveModal')">Cancel</button>
+                <button type="submit" class="btn-approve">Confirm Approval</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+    .tab-btn {
+        padding: 8px 20px; border-radius: 9px; font-size: 13px; font-weight: 600;
+        color: #64748b; background: #fff; border: 1.5px solid #e2e8f0;
+        cursor: pointer; transition: all 0.15s; display: inline-flex; align-items: center; gap: 6px;
+    }
+    .tab-btn:hover { border-color: #dc2626; color: #dc2626; background: #fff5f5; }
+    .tab-btn.tab-active { background: #dc2626; color: #fff; border-color: #dc2626; }
+    .tab-count {
+        display: inline-flex; align-items: center; justify-content: center;
+        background: #dc2626; color: #fff; font-size: 10px; font-weight: 700;
+        min-width: 18px; height: 18px; border-radius: 9px; padding: 0 4px;
+    }
+    .tab-btn.tab-active .tab-count { background: rgba(255,255,255,0.3); }
+</style>
+
+<script>
+function openApproveModal(id, name, reqAmt) {
+    document.getElementById('approveForName').textContent = name;
+    document.getElementById('approveForm').action = '/welfare/beneficiaries/' + id + '/approve';
+    if (reqAmt > 0) {
+        document.getElementById('approveAmtInput').value = reqAmt;
+    } else {
+        document.getElementById('approveAmtInput').value = '';
+    }
+    openModal('approveModal');
+}
+</script>
+{{ end }}
+{{ template "welfare_base" . }}

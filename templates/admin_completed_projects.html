@@ -1,0 +1,42 @@
+{{ define "title" }}Completed Projects - Pro-Property{{ end }}
+{{ define "content" }}
+<div class="top-bar">
+    <h1>Completed Projects</h1>
+</div>
+
+<div class="card">
+    {{ if .Estates }}
+    <div class="table-responsive">
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Estate Name</th>
+                    <th>Total Plots</th>
+                    <th>Sold</th>
+                    <th>Last Sale</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{ range $i, $e := .Estates }}
+                <tr>
+                    <td>{{ add $i 1 }}</td>
+                    <td><a href="/admin/estate/{{ $e.ID }}" style="color:var(--primary);font-weight:600;">{{ $e.Name }}</a></td>
+                    <td><strong>{{ $e.Total }}</strong></td>
+                    <td class="text-sold"><strong>{{ $e.Sold }}</strong></td>
+                    <td>{{ $e.LastSale }}</td>
+                    <td>
+                        <a href="/admin/estate/{{ $e.ID }}" class="edit-btn" style="font-size:12px;padding:5px 10px;">View</a>
+                    </td>
+                </tr>
+                {{ end }}
+            </tbody>
+        </table>
+    </div>
+    {{ else }}
+    <p style="color:#6b7280;font-size:14px;">No completed projects yet. An estate is marked complete when all its plots are sold.</p>
+    {{ end }}
+</div>
+{{ end }}
+{{ template "admin_base" . }}

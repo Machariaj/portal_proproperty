@@ -1,0 +1,72 @@
+{{ define "title" }}Access – {{ .EstateName }} - Pro-Property{{ end }}
+{{ define "content" }}
+<div class="top-bar">
+    <h1>🔒 Access: {{ .EstateName }}</h1>
+    <a href="/admin/private-estate/{{ .EstateID }}/plots" class="edit-btn" style="background:#6b7280;">← View Plots</a>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start;">
+
+    <!-- Users with access -->
+    <div class="card">
+        <h3 style="margin:0 0 14px;font-size:15px;color:var(--text);">Users With Access</h3>
+        {{ if .GrantedUsers }}
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+            <thead>
+                <tr>
+                    <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #e5e7eb;">Name</th>
+                    <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #e5e7eb;">Role</th>
+                    <th style="padding:6px 8px;border-bottom:1px solid #e5e7eb;"></th>
+                </tr>
+            </thead>
+            <tbody>
+                {{ range .GrantedUsers }}
+                <tr>
+                    <td style="padding:8px;">
+                        <strong>{{ .Name }}</strong><br>
+                        <span style="font-size:11px;color:#6b7280;">{{ .Email }}</span>
+                    </td>
+                    <td style="padding:8px;">
+                        <span style="background:#e0e7ff;color:#3730a3;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;text-transform:uppercase;">{{ .Role }}</span>
+                    </td>
+                    <td style="padding:8px;">
+                        <form method="POST" action="/admin/private-estate/{{ $.EstateID }}/access/revoke"
+                              onsubmit="return confirm('Revoke access for {{ .Name }}?')">
+                            <input type="hidden" name="user_id" value="{{ .UserID }}">
+                            <button type="submit"
+                                    style="background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;padding:4px 10px;border-radius:5px;font-size:12px;cursor:pointer;">
+                                Revoke
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+                {{ end }}
+            </tbody>
+        </table>
+        {{ else }}
+        <p style="color:var(--muted);font-size:13px;margin:0;">No users have been granted access yet.</p>
+        {{ end }}
+    </div>
+
+    <!-- Grant access -->
+    <div class="card">
+        <h3 style="margin:0 0 14px;font-size:15px;color:var(--text);">Grant Access</h3>
+        {{ if .AvailableUsers }}
+        <form method="POST" action="/admin/private-estate/{{ .EstateID }}/access/grant">
+            <label for="user_id">Select User</label>
+            <select id="user_id" name="user_id" required style="margin-bottom:14px;">
+                <option value="">-- Choose user --</option>
+                {{ range .AvailableUsers }}
+                <option value="{{ .UserID }}">{{ .Name }} ({{ .Role }}) – {{ .Email }}</option>
+                {{ end }}
+            </select>
+            <button type="submit" class="add-btn">Grant Access</button>
+        </form>
+        {{ else }}
+        <p style="color:var(--muted);font-size:13px;margin:0;">All users already have access.</p>
+        {{ end }}
+    </div>
+
+</div>
+{{ end }}
+{{ template "admin_base" . }}

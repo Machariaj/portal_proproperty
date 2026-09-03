@@ -1,0 +1,565 @@
+{{ define "title" }}Staff Welfare – Members{{ end }}
+
+{{ define "content" }}
+<style>
+    .split-container {
+        display: flex; height: calc(100vh - 56px); overflow: hidden;
+    }
+    .list-panel {
+        width: 100%; transition: width 0.3s ease;
+        overflow-y: auto; padding: 28px 28px 28px;
+        box-sizing: border-box; display: flex; flex-direction: column;
+    }
+    .list-panel.has-detail { width: 42%; border-right: 2px solid #f1f5f9; }
+
+    .detail-panel {
+        width: 0; overflow: hidden; transition: width 0.3s ease;
+        overflow-y: auto; background: #fafafa;
+    }
+    .detail-panel.visible { width: 58%; }
+    .detail-inner { padding: 28px 28px 40px; min-width: 340px; }
+
+    .member-card {
+        background: #fff; border-radius: 12px; padding: 14px 16px;
+        box-shadow: 0 1px 6px rgba(0,0,0,0.06); cursor: pointer;
+        border: 2px solid transparent; transition: all 0.15s;
+        display: flex; align-items: center; gap: 14px; margin-bottom: 10px;
+    }
+    .member-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.1); border-color: #fca5a5; }
+    .member-card.selected { border-color: #dc2626; background: #fff5f5; }
+    .member-avatar {
+        width: 44px; height: 44px; border-radius: 50%;
+        background: #fee2e2; color: #dc2626;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 17px; font-weight: 800; flex-shrink: 0;
+    }
+    .member-card-info { flex: 1; min-width: 0; }
+    .member-card-name { font-size: 14px; font-weight: 700; color: #1e293b; }
+    .member-card-dept { font-size: 12px; color: #64748b; margin-top: 2px; }
+    .member-card-meta { display: flex; align-items: center; gap: 8px; margin-top: 5px; flex-wrap: wrap; }
+    .member-stat { font-size: 11.5px; color: #64748b; }
+    .member-stat strong { color: #1e293b; }
+
+    .search-bar {
+        padding: 9px 12px 9px 36px; border: 1px solid #e2e8f0; border-radius: 9px;
+        font-size: 13px; width: 100%; box-sizing: border-box; margin-bottom: 16px;
+    }
+    .search-bar:focus { border-color: #dc2626; outline: none; }
+    .search-wrap { position: relative; }
+    .search-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: #94a3b8; }
+
+    .section-card {
+        background: #fff; border-radius: 12px; padding: 18px 20px;
+        box-shadow: 0 1px 6px rgba(0,0,0,0.06); margin-bottom: 16px;
+    }
+    .section-card-header {
+        display: flex; align-items: center; justify-content: space-between;
+        margin-bottom: 14px;
+    }
+    .section-card-title { font-size: 14px; font-weight: 700; color: #0f172a; }
+
+    .dep-item {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 8px 0; border-bottom: 1px solid #f1f5f9; gap: 8px;
+    }
+    .dep-item:last-child { border-bottom: none; }
+    .dep-name { font-size: 13px; font-weight: 600; color: #1e293b; }
+    .dep-rel  { font-size: 12px; color: #64748b; }
+
+    .member-info-grid {
+        display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px;
+    }
+    .info-cell { display: flex; flex-direction: column; gap: 2px; }
+    .info-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #94a3b8; font-weight: 700; }
+    .info-value { font-size: 13.5px; color: #1e293b; font-weight: 500; }
+    .info-value.empty { color: #cbd5e1; font-style: italic; }
+
+    #noSelection {
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        height: 100%; text-align: center; color: #94a3b8; padding: 40px;
+    }
+    #noSelection svg { opacity: 0.3; margin-bottom: 16px; }
+
+    .inline-tag {
+        display: inline-block; font-size: 11px; font-weight: 700;
+        padding: 2px 8px; border-radius: 12px; letter-spacing: 0.3px;
+    }
+    .tag-active   { background: #dcfce7; color: #166534; }
+    .tag-inactive { background: #fef9c3; color: #854d0e; }
+    .tag-resigned { background: #fee2e2; color: #991b1b; }
+</style>
+
+{{ if .Success }}<div class="alert alert-success" style="margin:16px 28px 0;">{{ .Success }}</div>{{ end }}
+{{ if .Error   }}<div class="alert alert-error"   style="margin:16px 28px 0;">{{ .Error }}</div>{{ end }}
+
+<div class="split-container" id="splitContainer">
+
+    <!-- LEFT: Member list -->
+    <div class="list-panel" id="listPanel">
+
+        <div class="page-header">
+            <div>
+                <h1>Members</h1>
+                <p>KES 500 monthly contribution per member</p>
+            </div>
+            <div style="display:flex;gap:8px;">
+                <a href="/welfare/export/members" class="btn-ghost">↓ Export to Excel</a>
+                <button class="btn-primary" onclick="openModal('addMemberModal')">+ Add Member</button>
+            </div>
+        </div>
+
+        <div class="stat-grid" style="margin-bottom:20px;">
+            <div class="stat-card">
+                <span class="stat-label">Active Members</span>
+                <span class="stat-value">{{ .ActiveMembers }}</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-label">Fund Balance</span>
+                <span class="stat-value" style="color:{{ if lt .Balance 0.0 }}#dc2626{{ else }}#15803d{{ end }};">KES {{ printf "%.0f" .Balance }}</span>
+                <span class="stat-sub">In: {{ printf "%.0f" .TotalContributions }} | Out: {{ printf "%.0f" .TotalDeductions }}</span>
+            </div>
+        </div>
+
+        <div class="search-wrap">
+            <span class="search-icon">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+                </svg>
+            </span>
+            <input type="text" class="search-bar" placeholder="Search members..." id="memberSearch" oninput="filterMembers(this.value)">
+        </div>
+
+        <div id="memberListContainer">
+        {{ if .Members }}
+            {{ range .Members }}
+            <div class="member-card {{ if eq (printf "%d" .ID) $.SelectedID }}selected{{ end }}"
+                 id="mc-{{ .ID }}" onclick="selectMember({{ .ID }}, this)" data-name="{{ .Name }}" data-dept="{{ .Department }}" data-code="{{ .MemberCode }}">
+                <div class="member-avatar">{{ slice .Name 0 1 }}</div>
+                <div class="member-card-info">
+                    <div class="member-card-name">{{ .Name }}
+                        <span class="inline-tag {{ if eq .Status "active" }}tag-active{{ else if eq .Status "resigned" }}tag-resigned{{ else }}tag-inactive{{ end }}" style="margin-left:6px;font-size:10px;">{{ .Status }}</span>
+                    </div>
+                    <div class="member-card-dept">
+                        {{ if .MemberCode }}<span style="font-size:11px;font-weight:700;color:#0369a1;letter-spacing:0.5px;">{{ .MemberCode }}</span>{{ if .Department }} &nbsp;·&nbsp; {{ end }}{{ end }}{{ if .Department }}{{ .Department }}{{ end }}
+                    </div>
+                    <div class="member-card-meta">
+                        {{ if eq .ThisMonth "paid" }}
+                            <span class="welfare-badge badge-paid">✓ This month paid</span>
+                        {{ else }}
+                            <span class="welfare-badge badge-pending">⚠ This month pending</span>
+                        {{ end }}
+                        <span class="member-stat"><strong>{{ .MonthsPaid }}</strong> months paid</span>
+                        {{ if gt .DepCount 0 }}
+                        <span class="member-stat"><strong>{{ .DepCount }}</strong> beneficiar{{ if gt .DepCount 1 }}ies{{ else }}y{{ end }}</span>
+                        {{ end }}
+                    </div>
+                </div>
+            </div>
+            {{ end }}
+        {{ else }}
+            <div style="text-align:center;padding:40px;color:#94a3b8;">
+                <p>No members yet. Click <strong>+ Add Member</strong> to get started.</p>
+            </div>
+        {{ end }}
+        </div>
+    </div>
+
+    <!-- RIGHT: Detail panel -->
+    <div class="detail-panel {{ if .SelectedID }}visible{{ end }}" id="detailPanel">
+        <div class="detail-inner">
+            <div id="noSelection" style="{{ if .SelectedID }}display:none{{ end }}">
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
+                    <circle cx="9" cy="7" r="4"/>
+                    <path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/>
+                </svg>
+                <p style="font-size:15px;font-weight:600;">Select a member</p>
+                <p style="font-size:13px;">Click any member on the left to view their details.</p>
+            </div>
+
+            <div id="memberDetailContent" style="{{ if not .SelectedID }}display:none{{ end }}">
+
+                <!-- Header -->
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+                    <div style="display:flex;align-items:center;gap:14px;">
+                        <div class="member-avatar" id="detAvatar" style="width:52px;height:52px;font-size:20px;"></div>
+                        <div>
+                            <div style="font-size:18px;font-weight:800;color:#0f172a;" id="detName"></div>
+                            <div style="font-size:13px;color:#64748b;">
+                                <span id="detCode" style="font-weight:700;color:#0369a1;letter-spacing:0.5px;"></span>
+                                <span id="detDeptSep" style="display:none;"> · </span>
+                                <span id="detDept"></span>
+                            </div>
+                        </div>
+                    </div>
+                    <button class="btn-ghost btn-sm" onclick="closeDetail()">✕ Close</button>
+                </div>
+
+                <!-- Member info -->
+                <div class="section-card">
+                    <div class="section-card-header">
+                        <span class="section-card-title">Member Info</span>
+                        <span class="inline-tag" id="detStatus"></span>
+                    </div>
+                    <div class="member-info-grid">
+                        <div class="info-cell"><span class="info-label">Phone</span><span class="info-value" id="detPhone"></span></div>
+                        <div class="info-cell"><span class="info-label">Email</span><span class="info-value" id="detEmail"></span></div>
+                        <div class="info-cell"><span class="info-label">Joined</span><span class="info-value" id="detJoined"></span></div>
+                        <div class="info-cell"><span class="info-label">Total Paid</span><span class="info-value" id="detTotal" style="color:#15803d;font-weight:700;"></span></div>
+                    </div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                        <button class="btn-primary btn-sm" onclick="openContribModal()">+ Record Contribution</button>
+                        <button id="toggleStatusBtn" class="btn-ghost btn-sm" onclick="toggleMemberStatus()"></button>
+                        <button id="resignBtn" class="btn-danger btn-sm" onclick="resignMember()" style="display:none;">Resign / Remove</button>
+                    </div>
+                </div>
+
+                <!-- Contributions -->
+                <div class="section-card">
+                    <div class="section-card-header">
+                        <span class="section-card-title">Contributions</span>
+                        <span id="detMonths" style="font-size:12px;color:#64748b;"></span>
+                    </div>
+                    <div id="contribList">
+                        <div style="color:#94a3b8;font-size:13px;text-align:center;padding:20px;">No contributions recorded.</div>
+                    </div>
+                </div>
+
+                <!-- Beneficiaries -->
+                <div class="section-card">
+                    <div class="section-card-header">
+                        <span class="section-card-title">Beneficiaries</span>
+                        <button class="btn-ghost btn-sm" onclick="openDepModal()">+ Add Beneficiary</button>
+                    </div>
+                    <div id="depList">
+                        <div style="color:#94a3b8;font-size:13px;text-align:center;padding:20px;">No beneficiaries on record.</div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Member Modal -->
+<div class="wf-modal-overlay" id="addMemberModal" onclick="if(event.target===this)closeModal('addMemberModal')">
+    <div class="wf-modal">
+        <div class="wf-modal-title">
+            Add New Member
+            <button class="wf-modal-close" onclick="closeModal('addMemberModal')">✕</button>
+        </div>
+        <form action="/welfare/members/add" method="post">
+            <div class="wf-form-row">
+                <div class="wf-form-group" style="flex:2">
+                    <label>Full Name *</label>
+                    <input type="text" name="name" placeholder="e.g. Jane Wanjiku" required>
+                </div>
+                <div class="wf-form-group">
+                    <label>Department</label>
+                    <input type="text" name="department" placeholder="e.g. Sales">
+                </div>
+            </div>
+            <div class="wf-form-row">
+                <div class="wf-form-group">
+                    <label>Phone</label>
+                    <input type="tel" name="phone" placeholder="0712 345 678">
+                </div>
+                <div class="wf-form-group">
+                    <label>Email</label>
+                    <input type="email" name="email" placeholder="jane@company.co.ke">
+                </div>
+            </div>
+            <div class="wf-form-row">
+                <div class="wf-form-group">
+                    <label>Date Joined Welfare</label>
+                    <input type="date" name="joined_date">
+                </div>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;">
+                <button type="button" class="btn-ghost" onclick="closeModal('addMemberModal')">Cancel</button>
+                <button type="submit" class="btn-primary">Add Member</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Add Contribution Modal -->
+<div class="wf-modal-overlay" id="addContribModal" onclick="if(event.target===this)closeModal('addContribModal')">
+    <div class="wf-modal">
+        <div class="wf-modal-title">
+            Record Contribution
+            <button class="wf-modal-close" onclick="closeModal('addContribModal')">✕</button>
+        </div>
+        <form id="contribForm" method="post">
+            <div class="wf-form-row">
+                <div class="wf-form-group">
+                    <label>Month *</label>
+                    <input type="month" name="month" id="contribMonth" required>
+                </div>
+                <div class="wf-form-group">
+                    <label>Amount (KES) *</label>
+                    <input type="number" name="amount" value="500" min="1" required>
+                </div>
+            </div>
+            <div class="wf-form-row">
+                <div class="wf-form-group">
+                    <label>Date Paid</label>
+                    <input type="date" name="paid_date" id="contribPaidDate">
+                </div>
+                <div class="wf-form-group">
+                    <label>Notes</label>
+                    <input type="text" name="notes" placeholder="Optional notes">
+                </div>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;">
+                <button type="button" class="btn-ghost" onclick="closeModal('addContribModal')">Cancel</button>
+                <button type="submit" class="btn-primary">Record Payment</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Add Beneficiary Modal -->
+<div class="wf-modal-overlay" id="addDepModal" onclick="if(event.target===this)closeModal('addDepModal')">
+    <div class="wf-modal">
+        <div class="wf-modal-title">
+            Add Beneficiary
+            <button class="wf-modal-close" onclick="closeModal('addDepModal')">✕</button>
+        </div>
+        <form id="depForm" method="post">
+            <div class="wf-form-row">
+                <div class="wf-form-group" style="flex:2">
+                    <label>Full Name *</label>
+                    <input type="text" name="name" placeholder="e.g. John Kamau" required>
+                </div>
+                <div class="wf-form-group">
+                    <label>Relationship *</label>
+                    <select name="relationship" required>
+                        <option value="">Select…</option>
+                        <option>Spouse</option>
+                        <option>Child</option>
+                        <option>Parent</option>
+                        <option>Sibling</option>
+                        <option>Other</option>
+                    </select>
+                </div>
+            </div>
+            <div class="wf-form-row">
+                <div class="wf-form-group" style="flex:1">
+                    <label>ID / Birth Certificate No.</label>
+                    <input type="text" name="id_number" placeholder="e.g. 12345678 or BC/2019/001">
+                </div>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;">
+                <button type="button" class="btn-ghost" onclick="closeModal('addDepModal')">Cancel</button>
+                <button type="submit" class="btn-primary">Add Beneficiary</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+var currentMemberID = {{ if .SelectedID }}'{{ .SelectedID }}'{{ else }}null{{ end }};
+var currentMemberStatus = '';
+var todayStr = new Date().toISOString().slice(0, 7); // YYYY-MM
+
+// Pre-set today on load
+document.getElementById('contribMonth').value = todayStr;
+document.getElementById('contribPaidDate').value = new Date().toISOString().slice(0, 10);
+
+{{ if .SelectedID }}
+// Auto-load selected member on page load (after redirect with ?m=)
+window.addEventListener('load', function() {
+    var card = document.getElementById('mc-{{ .SelectedID }}');
+    if (card) selectMember({{ .SelectedID }}, card);
+});
+{{ end }}
+
+function selectMember(id, cardEl) {
+    // Deselect all
+    document.querySelectorAll('.member-card').forEach(function(c) { c.classList.remove('selected'); });
+    if (cardEl) cardEl.classList.add('selected');
+
+    // Show split
+    var listPanel   = document.getElementById('listPanel');
+    var detailPanel = document.getElementById('detailPanel');
+    listPanel.classList.add('has-detail');
+    detailPanel.classList.add('visible');
+    document.getElementById('noSelection').style.display = 'none';
+    document.getElementById('memberDetailContent').style.display = '';
+
+    currentMemberID = id;
+
+    // Fetch member data
+    fetch('/welfare/api/member/' + id)
+        .then(function(r) { return r.json(); })
+        .then(function(m) {
+            renderMemberDetail(m);
+        })
+        .catch(function() {
+            document.getElementById('detName').textContent = 'Error loading member';
+        });
+
+    // Update URL without reload
+    var url = new URL(window.location);
+    url.searchParams.set('m', id);
+    history.replaceState(null, '', url);
+}
+
+function renderMemberDetail(m) {
+    currentMemberStatus = m.status;
+
+    document.getElementById('detAvatar').textContent = m.name.charAt(0).toUpperCase();
+    document.getElementById('detName').textContent   = m.name;
+    document.getElementById('detPhone').textContent  = m.phone  || '—';
+    document.getElementById('detEmail').textContent  = m.email  || '—';
+    document.getElementById('detJoined').textContent = m.joined_date || '—';
+    document.getElementById('detTotal').textContent  = 'KES ' + m.total_paid.toLocaleString();
+    document.getElementById('detMonths').textContent = m.months_paid + ' months paid';
+
+    // Member code + dept
+    var codeEl = document.getElementById('detCode');
+    var sepEl  = document.getElementById('detDeptSep');
+    var deptEl = document.getElementById('detDept');
+    codeEl.textContent = m.member_code || '';
+    deptEl.textContent = m.department  || '';
+    sepEl.style.display = (m.member_code && m.department) ? '' : 'none';
+
+    var statusEl = document.getElementById('detStatus');
+    if (m.status === 'active') {
+        statusEl.className = 'inline-tag tag-active'; statusEl.textContent = 'Active';
+    } else if (m.status === 'resigned') {
+        statusEl.className = 'inline-tag tag-resigned'; statusEl.textContent = 'Resigned';
+    } else {
+        statusEl.className = 'inline-tag tag-inactive'; statusEl.textContent = 'Inactive';
+    }
+
+    var toggleBtn = document.getElementById('toggleStatusBtn');
+    var resignBtn = document.getElementById('resignBtn');
+    if (m.status === 'resigned') {
+        toggleBtn.textContent = 'Restore';
+        toggleBtn._action = 'activate';
+        resignBtn.style.display = 'none';
+    } else if (m.status === 'active') {
+        toggleBtn.textContent = 'Deactivate';
+        toggleBtn._action = 'deactivate';
+        resignBtn.style.display = '';
+    } else {
+        toggleBtn.textContent = 'Activate';
+        toggleBtn._action = 'activate';
+        resignBtn.style.display = '';
+    }
+
+    // Contributions
+    var cl = document.getElementById('contribList');
+    if (!m.contributions || m.contributions.length === 0) {
+        cl.innerHTML = '<div style="color:#94a3b8;font-size:13px;text-align:center;padding:20px;">No contributions recorded.</div>';
+    } else {
+        var html = '<table class="wf-table" style="font-size:13px;">' +
+            '<thead><tr><th>Month</th><th>Amount</th><th>Date Paid</th><th>Status</th><th></th></tr></thead><tbody>';
+        m.contributions.forEach(function(c) {
+            var badge = c.status === 'paid'
+                ? '<span class="welfare-badge badge-paid">Paid</span>'
+                : '<span class="welfare-badge badge-pending">Pending</span>';
+            html += '<tr>' +
+                '<td>' + c.month + '</td>' +
+                '<td>KES ' + c.amount.toLocaleString() + '</td>' +
+                '<td>' + (c.paid_date || '—') + '</td>' +
+                '<td>' + badge + '</td>' +
+                '<td><form method="post" action="/welfare/members/' + m.id + '/contributions/delete" style="margin:0" onsubmit="return confirm(\'Remove this contribution?\');">' +
+                '<input type="hidden" name="contribution_id" value="' + c.id + '">' +
+                '<button class="btn-danger btn-sm">✕</button></form></td>' +
+                '</tr>';
+        });
+        html += '</tbody></table>';
+        cl.innerHTML = html;
+    }
+
+    // Dependants
+    var dl = document.getElementById('depList');
+    if (!m.dependants || m.dependants.length === 0) {
+        dl.innerHTML = '<div style="color:#94a3b8;font-size:13px;text-align:center;padding:20px;">No beneficiaries on record.</div>';
+    } else {
+        var dhtml = '';
+        m.dependants.forEach(function(d) {
+            dhtml += '<div class="dep-item">' +
+                '<div><div class="dep-name">' + d.name + '</div>' +
+                '<div class="dep-rel">' + d.relationship + (d.dob ? ' · DOB: ' + d.dob : '') + (d.id_number ? ' · ID: ' + d.id_number : '') + '</div></div>' +
+                '<form method="post" action="/welfare/members/' + m.id + '/dependants/delete" style="margin:0" onsubmit="return confirm(\'Remove beneficiary?\');">' +
+                '<input type="hidden" name="dependant_id" value="' + d.id + '">' +
+                '<button class="btn-danger btn-sm">✕</button></form>' +
+                '</div>';
+        });
+        dl.innerHTML = dhtml;
+    }
+
+    // Update modal form actions
+    document.getElementById('contribForm').action = '/welfare/members/' + m.id + '/contributions/add';
+    document.getElementById('depForm').action     = '/welfare/members/' + m.id + '/dependants/add';
+}
+
+function closeDetail() {
+    var listPanel   = document.getElementById('listPanel');
+    var detailPanel = document.getElementById('detailPanel');
+    listPanel.classList.remove('has-detail');
+    detailPanel.classList.remove('visible');
+    document.querySelectorAll('.member-card').forEach(function(c) { c.classList.remove('selected'); });
+    document.getElementById('noSelection').style.display = '';
+    document.getElementById('memberDetailContent').style.display = 'none';
+    currentMemberID = null;
+    var url = new URL(window.location);
+    url.searchParams.delete('m');
+    history.replaceState(null, '', url);
+}
+
+function openContribModal() {
+    if (!currentMemberID) return;
+    openModal('addContribModal');
+}
+
+function openDepModal() {
+    if (!currentMemberID) return;
+    openModal('addDepModal');
+}
+
+function toggleMemberStatus() {
+    if (!currentMemberID) return;
+    var btn = document.getElementById('toggleStatusBtn');
+    var action = btn._action || 'deactivate';
+    var msg = action === 'deactivate' ? 'Deactivate this member?' : 'Restore / re-activate this member?';
+    if (!confirm(msg)) return;
+    var form = document.createElement('form');
+    form.method = 'post';
+    form.action = '/welfare/members/' + currentMemberID + '/deactivate';
+    var input = document.createElement('input');
+    input.type = 'hidden'; input.name = 'action'; input.value = action;
+    form.appendChild(input);
+    document.body.appendChild(form);
+    form.submit();
+}
+
+function resignMember() {
+    if (!currentMemberID) return;
+    if (!confirm('Mark this member as resigned / removed from the welfare group? This cannot be automatically reversed.')) return;
+    var form = document.createElement('form');
+    form.method = 'post';
+    form.action = '/welfare/members/' + currentMemberID + '/deactivate';
+    var input = document.createElement('input');
+    input.type = 'hidden'; input.name = 'action'; input.value = 'resign';
+    form.appendChild(input);
+    document.body.appendChild(form);
+    form.submit();
+}
+
+function filterMembers(q) {
+    q = q.toLowerCase();
+    document.querySelectorAll('.member-card').forEach(function(card) {
+        var name = (card.dataset.name || '').toLowerCase();
+        var dept = (card.dataset.dept || '').toLowerCase();
+        var code = (card.dataset.code || '').toLowerCase();
+        card.style.display = (name.includes(q) || dept.includes(q) || code.includes(q)) ? '' : 'none';
+    });
+}
+</script>
+{{ end }}
+{{ template "welfare_base" . }}

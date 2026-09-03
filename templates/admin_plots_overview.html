@@ -1,0 +1,534 @@
+{{ define "title" }}Plots Overview - Pro-Property{{ end }}
+{{ define "content" }}
+<style>
+/* Full-height wrapper */
+.ov-wrap {
+    display: flex;
+    height: calc(100vh - 80px);
+    overflow: hidden;
+    background: #f8fafc;
+}
+
+/* LEFT LIST PANEL */
+.ov-list {
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+    border-right: 1px solid #e5e7eb;
+    transition: width .25s ease;
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+}
+.ov-list.split { width: 38%; min-width: 280px; flex-shrink: 0; }
+
+/* Tabs */
+.ov-tabs { display: flex; border-bottom: 2px solid #e5e7eb; flex-shrink: 0; }
+.ov-tab {
+    flex: 1; padding: 12px 6px; font-size: 13px; font-weight: 600;
+    text-align: center; cursor: pointer; color: #6b7280;
+    border: none; background: none;
+    border-bottom: 3px solid transparent; margin-bottom: -2px;
+}
+.ov-tab.active { color: #1e3a5f; border-bottom-color: #1e3a5f; }
+
+/* Search */
+.ov-search { padding: 10px 12px; border-bottom: 1px solid #f1f5f9; flex-shrink: 0; display: flex; gap: 8px; align-items: center; }
+.ov-search input {
+    flex: 1; padding: 8px 12px; border: 1px solid #d1d5db;
+    border-radius: 7px; font-size: 13px; outline: none;
+}
+.ov-search input:focus { border-color: #2563eb; }
+.ov-info { font-size: 11px; color: #9ca3af; flex-shrink: 0; white-space: nowrap; }
+
+/* List items */
+.ov-items { flex: 1; overflow-y: auto; }
+.ov-item {
+    padding: 11px 14px; border-bottom: 1px solid #f1f5f9;
+    cursor: pointer; transition: background .1s;
+    display: flex; flex-direction: column; gap: 2px;
+}
+.ov-item:hover  { background: #f8fafc; }
+.ov-item.active { background: #eff6ff; border-left: 3px solid #2563eb; padding-left: 11px; }
+.ov-item-top    { display: flex; justify-content: space-between; align-items: baseline; }
+.ov-item-plot   { font-size: 14px; font-weight: 700; color: #1e3a5f; }
+.ov-item-date   { font-size: 11px; color: #9ca3af; }
+.ov-item-estate { font-size: 12px; color: #374151; }
+.ov-item-agent  { font-size: 11px; color: #6b7280; margin-top: 1px; }
+
+.ov-loading { padding: 32px; text-align: center; color: #9ca3af; font-size: 13px; }
+.ov-empty   { padding: 32px; text-align: center; color: #9ca3af; font-size: 13px; }
+
+/* RIGHT DETAIL PANEL */
+.ov-detail {
+    flex: 1; overflow-y: auto; background: #f8fafc;
+    display: none;
+    transition: all .25s ease;
+}
+.ov-detail.open { display: block; }
+
+.ov-placeholder {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    height: 100%; color: #9ca3af; font-size: 14px; gap: 8px;
+}
+
+.ov-detail-inner { padding: 20px; }
+
+.ov-detail-header {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+    padding: 18px 20px; margin-bottom: 14px; position: relative;
+}
+.ov-close {
+    position: absolute; top: 12px; right: 14px;
+    background: none; border: none; font-size: 18px; color: #9ca3af;
+    cursor: pointer; line-height: 1;
+}
+.ov-close:hover { color: #374151; }
+.ov-detail-title { font-size: 16px; font-weight: 700; color: #1e3a5f; margin: 0 0 12px; padding-right: 28px; }
+.ov-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px 20px; font-size: 13px; }
+.ov-grid dt { color: #6b7280; font-weight: 600; }
+.ov-grid dd { color: #111; margin: 0; word-break: break-word; }
+
+.ov-section { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px 18px; margin-bottom: 12px; }
+.ov-section h4 {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .6px; color: #6b7280; margin: 0 0 10px;
+    padding-bottom: 6px; border-bottom: 1px solid #f1f5f9;
+}
+/* Document field bordered card */
+.ov-doc-list { display: flex; flex-direction: column; gap: 10px; }
+.ov-doc-field {
+    border: 1px solid #e5e7eb; border-radius: 8px;
+    padding: 10px 12px; background: #fafafa; overflow: hidden;
+}
+.ov-doc-field-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 8px; gap: 8px;
+}
+.ov-doc-label { font-size: 12px; font-weight: 600; color: #374151; }
+/* Chips row */
+.ov-doc-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ov-doc-chip {
+    display: inline-flex; align-items: stretch;
+    border: 1px solid #bfdbfe; border-radius: 6px;
+    background: #eff6ff; overflow: hidden;
+    max-width: 100%; min-width: 0;
+}
+.ov-doc-chip-link {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 4px 8px; font-size: 12px; color: #2563eb;
+    text-decoration: none; min-width: 0; max-width: 200px;
+}
+.ov-doc-chip-link:hover { background: #dbeafe; }
+.ov-doc-chip-name {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ov-doc-chip-dl, .ov-doc-del {
+    flex-shrink: 0; display: inline-flex; align-items: center;
+    justify-content: center; width: 26px;
+    border: none; border-left: 1px solid #bfdbfe;
+    background: none; cursor: pointer; font-size: 11px;
+    padding: 0; color: #374151; text-decoration: none;
+}
+.ov-doc-chip-dl:hover { background: #dbeafe; }
+.ov-doc-del:hover { background: #fee2e2; color: #991b1b; }
+.ov-doc-add-btn {
+    display: inline-flex; align-items: center; gap: 4px; font-size: 11px;
+    color: #16a34a; background: #f0fdf4; border: 1px dashed #86efac;
+    padding: 3px 9px; border-radius: 5px; cursor: pointer; white-space: nowrap;
+    flex-shrink: 0;
+}
+.ov-doc-add-btn:hover { background: #dcfce7; }
+.ov-no-doc { font-size: 12px; color: #9ca3af; font-style: italic; }
+
+.ov-badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 10px; border-radius: 20px; vertical-align: middle; }
+.badge-booked { background: #fef3c7; color: #92400e; }
+.badge-signed { background: #dbeafe; color: #1e40af; }
+.badge-sold   { background: #dcfce7; color: #166534; }
+
+@media (max-width: 680px) {
+    .ov-wrap { flex-direction: column; height: calc(100vh - 80px); }
+    .ov-list { width: 100%; height: 100%; }
+    .ov-items { min-height: 0; }
+    /* Drill-down instead of stacking: selecting a record hides the list
+       entirely and shows the detail panel full-screen, since stacking both
+       (list + detail) meant the detail rendered below a tall list, off-screen
+       until scrolled — which looked like the tap did nothing. */
+    .ov-list.split { display: none; }
+    .ov-detail.open { height: 100%; min-height: 0; }
+}
+</style>
+
+<div style="padding:12px 20px 6px;display:flex;align-items:center;justify-content:space-between;">
+    <h1 style="margin:0;font-size:20px;color:#1e3a5f;">Plots Overview</h1>
+</div>
+
+<div class="ov-wrap" id="ov-wrap">
+
+    <!-- LEFT: list -->
+    <div class="ov-list" id="ov-list">
+        <div class="ov-tabs">
+            <button class="ov-tab active" id="tab-booked" onclick="switchTab('booked')">
+                Booked <span id="cnt-booked">({{ .CntBooked }})</span>
+            </button>
+            <button class="ov-tab" id="tab-signed" onclick="switchTab('signed')">
+                Signed <span id="cnt-signed">({{ .CntSigned }})</span>
+            </button>
+            <button class="ov-tab" id="tab-sold" onclick="switchTab('sold')">
+                Sold <span id="cnt-sold">({{ .CntSold }})</span>
+            </button>
+        </div>
+        <div class="ov-search">
+            <input type="text" id="search-box" placeholder="Search estate, plot, buyer, agent…" oninput="onSearch()">
+            <span class="ov-info" id="result-info"></span>
+        </div>
+        <div class="ov-items" id="list-pane">
+            <div class="ov-loading">Loading…</div>
+        </div>
+    </div>
+
+    <!-- RIGHT: detail -->
+    <div class="ov-detail" id="ov-detail">
+        <div id="detail-content"></div>
+    </div>
+
+</div>
+
+<script>
+var currentTab = 'booked';
+var currentData = [];
+var searchTimer = null;
+var activeIdx = -1;
+var currentRecordID = null;
+
+// Maps the field key used by the delete/add-attachment endpoints to the
+// matching JS property name on a record (they differ for a couple of fields
+// because prop_sales uses different column names than prop_bookings).
+var FIELD_PROP = {
+    deposit_ref: 'DepositRef',
+    id_photo: 'IDPhoto',
+    kra: 'KRA',
+    passport_photo: 'Passport',
+    sale_agreement: 'SaleAgree',
+    letter_of_consent: 'LetterConsent',
+    transfer_forms: 'TransferForms',
+    title_deed: 'TitleDeed'
+};
+
+function switchTab(tab) {
+    currentTab = tab;
+    activeIdx = -1;
+    ['booked','signed','sold'].forEach(function(t) {
+        document.getElementById('tab-'+t).classList.toggle('active', t === tab);
+    });
+    document.getElementById('search-box').value = '';
+    closeDetail();
+    loadData('');
+}
+
+function onSearch() {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(function() {
+        activeIdx = -1;
+        closeDetail();
+        loadData(document.getElementById('search-box').value);
+    }, 300);
+}
+
+function loadData(q) {
+    document.getElementById('list-pane').innerHTML = '<div class="ov-loading">Loading…</div>';
+    document.getElementById('result-info').textContent = '';
+    fetch('/admin/plots-overview?api=1&tab=' + encodeURIComponent(currentTab) + '&q=' + encodeURIComponent(q))
+        .then(function(r){ return r.json(); })
+        .then(function(data) {
+            currentData = data || [];
+            if (currentData.length > 0) {
+                console.log('[PlotsOverview] first record:', JSON.stringify(currentData[0]));
+            }
+            renderList();
+        })
+        .catch(function() {
+            document.getElementById('list-pane').innerHTML = '<div class="ov-empty">Failed to load data.</div>';
+        });
+}
+
+function renderList() {
+    var pane = document.getElementById('list-pane');
+    if (!currentData.length) {
+        document.getElementById('result-info').textContent = '0 results';
+        pane.innerHTML = '<div class="ov-empty">No records found</div>';
+        return;
+    }
+    var label = currentTab === 'sold' ? 'Date Sold' : currentTab === 'signed' ? 'Date Signed' : 'Date Booked';
+    document.getElementById('result-info').textContent =
+        currentData.length === 100 ? 'First 100 of many — refine search' : currentData.length + ' result' + (currentData.length > 1 ? 's' : '');
+    pane.innerHTML = currentData.map(function(p, i) {
+        return '<div class="ov-item' + (i === activeIdx ? ' active' : '') + '" id="item-' + i + '" onclick="selectItem(' + i + ')">' +
+            '<div class="ov-item-top">' +
+                '<span class="ov-item-plot">Plot ' + esc(p.PlotNumber) + '</span>' +
+                '<span class="ov-item-date">' + esc(p.DateBooked || '') + '</span>' +
+            '</div>' +
+            '<div class="ov-item-estate">' + esc(p.EstateName) + '</div>' +
+            '<div class="ov-item-agent">' + esc(p.BuyerName || '—') + ' · ' + esc(p.AgentName || '—') + '</div>' +
+        '</div>';
+    }).join('');
+}
+
+function selectItem(i) {
+    if (activeIdx >= 0) {
+        var prev = document.getElementById('item-' + activeIdx);
+        if (prev) prev.classList.remove('active');
+    }
+    activeIdx = i;
+    var el = document.getElementById('item-' + i);
+    if (el) el.classList.add('active');
+
+    // Split the layout
+    document.getElementById('ov-list').classList.add('split');
+    var detail = document.getElementById('ov-detail');
+    detail.classList.add('open');
+
+    renderDetail(currentData[i]);
+}
+
+function closeDetail() {
+    document.getElementById('ov-list').classList.remove('split');
+    var detail = document.getElementById('ov-detail');
+    detail.classList.remove('open');
+    detail.querySelector('#detail-content').innerHTML = '';
+    if (activeIdx >= 0) {
+        var prev = document.getElementById('item-' + activeIdx);
+        if (prev) prev.classList.remove('active');
+        activeIdx = -1;
+    }
+}
+
+function truncName(name) {
+    if (name.length <= 24) return name;
+    return name.slice(0, 11) + '…' + name.slice(-9);
+}
+
+function docSection(label, raw, field) {
+    var addBtn = '<label class="ov-doc-add-btn" data-field="' + esc(field) + '">+ Add<input type="file" style="display:none;" accept="image/*,.pdf"></label>';
+    var html = '<div class="ov-doc-field">' +
+        '<div class="ov-doc-field-header">' +
+            '<span class="ov-doc-label">' + esc(label) + '</span>' +
+            addBtn +
+        '</div>';
+
+    var files = raw ? raw.split(',').map(function(f){ return f.trim(); }).filter(function(f){ return f; }) : [];
+    if (!files.length) {
+        html += '<span class="ov-no-doc">Not uploaded</span>';
+    } else {
+        html += '<div class="ov-doc-chips">' +
+            files.map(function(f) {
+                var name = f.split(/[\\/]/).pop();
+                var url = '/uploads/' + encodeURIComponent(f);
+                return '<span class="ov-doc-chip">' +
+                    '<a class="ov-doc-chip-link" href="' + url + '" target="_blank" title="' + esc(name) + '">' +
+                        '📄 <span class="ov-doc-chip-name">' + esc(truncName(name)) + '</span>' +
+                    '</a>' +
+                    '<a class="ov-doc-chip-dl" href="' + url + '" download="' + esc(name) + '" title="Download">⬇</a>' +
+                    '<button type="button" class="ov-doc-del" data-field="' + esc(field) + '" data-filename="' + esc(f) + '" title="Remove">✕</button>' +
+                    '</span>';
+            }).join('') +
+        '</div>';
+    }
+    return html + '</div>';
+}
+
+function renderDetail(p) {
+    var badgeClass = {booked:'badge-booked', signed:'badge-signed', sold:'badge-sold'}[currentTab];
+    var badgeLabel = {booked:'Booked', signed:'SA Signed', sold:'Sold'}[currentTab];
+    var dateLabel  = {booked:'Date Booked', signed:'Date Signed', sold:'Date Sold'}[currentTab];
+
+    currentRecordID = p.ID;
+
+    var kyc = '<div class="ov-section"><h4>KYC Documents</h4><div class="ov-doc-list">' +
+        docSection('Deposit Reference', p.DepositRef, 'deposit_ref') +
+        docSection('ID Photo', p.IDPhoto, 'id_photo') +
+        docSection('KRA Certificate', p.KRA, 'kra') +
+        docSection('Passport Photo', p.Passport, 'passport_photo') +
+        '</div></div>';
+
+    if (currentTab === 'signed') {
+        kyc += '<div class="ov-section"><h4>Sale Agreement</h4><div class="ov-doc-list">' +
+            docSection('Sale Agreement', p.SaleAgree, 'sale_agreement') +
+            '</div></div>';
+    }
+    if (currentTab === 'sold') {
+        kyc += '<div class="ov-section"><h4>Transfer Documents</h4><div class="ov-doc-list">' +
+            docSection('Approved Letter of Consent', p.LetterConsent, 'letter_of_consent') +
+            docSection('Signed Transfer Forms', p.TransferForms, 'transfer_forms') +
+            docSection('Title Deed', p.TitleDeed, 'title_deed') +
+            '</div></div>';
+    }
+
+    document.getElementById('detail-content').innerHTML =
+        '<div class="ov-detail-inner">' +
+            '<div class="ov-detail-header">' +
+                '<button class="ov-close" onclick="closeDetail()" title="Close">✕</button>' +
+                '<div class="ov-detail-title">' +
+                    esc(p.EstateName) + ' — Plot ' + esc(p.PlotNumber) +
+                    ' <span class="ov-badge ' + badgeClass + '">' + badgeLabel + '</span>' +
+                '</div>' +
+                '<dl class="ov-grid">' +
+                    '<dt>Buyer</dt><dd>' +
+                        '<span id="ov-buyer-display">' + esc(p.BuyerName || '—') + '</span>' +
+                        ' <button onclick="openEditName(\'' + esc(p.BuyerName || '') + '\')" style="background:none;border:none;cursor:pointer;color:#2563eb;font-size:12px;padding:0 4px;" title="Edit buyer name">✏</button>' +
+                    '</dd>' +
+                    '<dt>Phone</dt><dd>' + esc(p.BuyerPhone || '—') + '</dd>' +
+                    '<dt>Email</dt><dd>' + esc(p.BuyerEmail || '—') + '</dd>' +
+                    '<dt>Agent</dt><dd>' + esc(p.AgentName || '—') + '</dd>' +
+                    '<dt>' + dateLabel + '</dt><dd>' + esc(p.DateBooked || '—') + '</dd>' +
+                '</dl>' +
+            '</div>' +
+            kyc +
+        '</div>';
+}
+
+function esc(s) {
+    return String(s)
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function deleteAttachment(field, filename) {
+    if (!confirm('Delete this file? This cannot be undone.')) return;
+    var fd = new FormData();
+    fd.append('tab', currentTab);
+    fd.append('id', String(currentRecordID));
+    fd.append('field', field);
+    fd.append('filename', filename);
+    fetch('/admin/plots-overview/delete-attachment', { method: 'POST', body: fd })
+        .then(function(r){ return r.json(); })
+        .then(function(res) {
+            if (!res.ok) { alert('Delete failed: ' + (res.error || 'unknown error')); return; }
+            var prop = FIELD_PROP[field];
+            var p = currentData[activeIdx];
+            if (!p) return;
+            var remaining = (p[prop] || '').split(',')
+                .map(function(f){ return f.trim(); })
+                .filter(function(f){ return f && f !== filename; });
+            p[prop] = remaining.join(',');
+            renderDetail(p);
+        })
+        .catch(function(){ alert('Delete failed — network error.'); });
+}
+
+function showToast(msg, color) {
+    var t = document.createElement('div');
+    t.textContent = msg;
+    t.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:9999;background:' + (color||'#1e3a5f') +
+        ';color:#fff;padding:10px 18px;border-radius:8px;font-size:13px;font-weight:600;box-shadow:0 4px 12px rgba(0,0,0,.18);';
+    document.body.appendChild(t);
+    setTimeout(function(){ t.remove(); }, 3500);
+}
+
+function addAttachment(inputEl, field) {
+    if (!inputEl.files || !inputEl.files[0]) return;
+    var label = inputEl.closest('.ov-doc-add-btn');
+    var origText = label ? label.childNodes[0].textContent : '';
+    if (label) label.childNodes[0].textContent = 'Uploading…';
+    var fd = new FormData();
+    fd.append('tab', currentTab);
+    fd.append('id', String(currentRecordID));
+    fd.append('field', field);
+    fd.append('file', inputEl.files[0]);
+    fetch('/admin/plots-overview/add-attachment', { method: 'POST', body: fd })
+        .then(function(r){ return r.json(); })
+        .then(function(res) {
+            if (!res.ok) { showToast('Upload failed: ' + (res.error || 'unknown error'), '#dc2626'); return; }
+            var prop = FIELD_PROP[field];
+            var p = currentData[activeIdx];
+            if (!p) return;
+            var existing = (p[prop] || '').split(',').map(function(f){ return f.trim(); }).filter(function(f){ return f; });
+            p[prop] = existing.concat(res.files || []).join(',');
+            renderDetail(p);
+            if (res.zoho_queued) {
+                showToast('✅ Uploaded & sent to Zoho CRM', '#16a34a');
+            } else {
+                showToast('✅ Uploaded (no Zoho CRM deal linked)', '#6b7280');
+            }
+        })
+        .catch(function(){
+            if (label) label.childNodes[0].textContent = origText;
+            showToast('Upload failed — network error.', '#dc2626');
+        });
+}
+
+// Event delegation — #detail-content's innerHTML is replaced on every
+// renderDetail() call, so listeners are bound once here on the persistent
+// parent rather than re-bound per render.
+document.getElementById('detail-content').addEventListener('click', function(e) {
+    var delBtn = e.target.closest('.ov-doc-del');
+    if (delBtn) {
+        deleteAttachment(delBtn.dataset.field, delBtn.dataset.filename);
+    }
+});
+document.getElementById('detail-content').addEventListener('change', function(e) {
+    var label = e.target.closest('.ov-doc-add-btn');
+    if (label && e.target.type === 'file') {
+        addAttachment(e.target, label.dataset.field);
+    }
+});
+
+// Inline buyer name edit
+function openEditName(currentName) {
+    document.getElementById('ov-edit-name-input').value = currentName;
+    document.getElementById('ov-edit-name-modal').style.display = 'flex';
+    setTimeout(function(){ document.getElementById('ov-edit-name-input').focus(); }, 50);
+}
+function closeEditName() {
+    document.getElementById('ov-edit-name-modal').style.display = 'none';
+}
+function saveEditName() {
+    var newName = document.getElementById('ov-edit-name-input').value.trim();
+    if (!newName) { alert('Name cannot be empty.'); return; }
+    var btn = document.getElementById('ov-edit-name-save');
+    btn.disabled = true; btn.textContent = 'Saving…';
+    var fd = new FormData();
+    fd.append('record_id', String(currentRecordID));
+    fd.append('tab', currentTab);
+    fd.append('buyer_name', newName);
+    fetch('/admin/plots-overview/update-buyer-name', { method: 'POST', body: fd })
+        .then(function(r){ return r.json(); })
+        .then(function(res) {
+            btn.disabled = false; btn.textContent = 'Save';
+            if (!res.ok) { showToast('Update failed: ' + (res.error || 'unknown'), '#dc2626'); return; }
+            // Update local data so re-render reflects the change
+            if (currentData[activeIdx]) currentData[activeIdx].BuyerName = newName;
+            var el = document.getElementById('ov-buyer-display');
+            if (el) el.textContent = newName;
+            closeEditName();
+            showToast('Buyer name updated.', '#16a34a');
+        })
+        .catch(function(){
+            btn.disabled = false; btn.textContent = 'Save';
+            showToast('Network error.', '#dc2626');
+        });
+}
+
+// Initial load
+loadData('');
+</script>
+
+<!-- Edit buyer name modal -->
+<div id="ov-edit-name-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:9998;align-items:center;justify-content:center;">
+    <div style="background:#fff;border-radius:10px;padding:24px;max-width:380px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.18);">
+        <h3 style="margin:0 0 16px;font-size:15px;color:#1e3a5f;">Edit Buyer Name</h3>
+        <p style="font-size:12px;color:#6b7280;margin:0 0 12px;">This updates only in this system — no Zoho sync.</p>
+        <input id="ov-edit-name-input" type="text" placeholder="Full name"
+               style="width:100%;padding:9px 12px;border:1px solid #d1d5db;border-radius:7px;font-size:14px;box-sizing:border-box;margin-bottom:16px;"
+               onkeydown="if(event.key==='Enter')saveEditName();">
+        <div style="display:flex;gap:10px;justify-content:flex-end;">
+            <button onclick="closeEditName()"
+                    style="background:#f3f4f6;color:#374151;border:1px solid #d1d5db;padding:8px 16px;border-radius:6px;font-size:13px;cursor:pointer;">Cancel</button>
+            <button id="ov-edit-name-save" onclick="saveEditName()"
+                    style="background:#1e3a5f;color:#fff;border:none;padding:8px 20px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">Save</button>
+        </div>
+    </div>
+</div>
+{{ end }}
+{{ template "admin_base" . }}

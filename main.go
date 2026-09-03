@@ -1,0 +1,4880 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"html/template"
+	"io"
+	"log"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"golang.org/x/crypto/bcrypt"
+
+	"marketers_portal/vanbooking"
+	"marketers_portal/welfare"
+)
+
+// uploadsDir is where uploaded images are stored (same as PHP portal).
+// Overridden at startup by the UPLOADS_DIR environment variable.
+var uploadsDir = `d:\propropertysolutions\uploads`
+
+// pointXY is a 2D percentage-based coordinate for plot zone polygons
+type pointXY struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+}
+
+// zoneDisplay carries a plot zone with its current status for rendering
+type zoneDisplay struct {
+	PlotNumber string    `json:"plot_number"`
+	Status     string    `json:"status"`
+	Points     []pointXY `json:"points"`
+}
+
+const (
+	sessionCookie = "pp_session"
+	roleCookie    = "pp_role"
+	nameCookie    = "pp_name"
+	roleAdmin     = "admin"
+	roleAgent     = "agent"
+)
+
+var pageTemplates map[string]*template.Template
+
+var tmplFuncs = template.FuncMap{
+	"add":   func(a, b int) int { return a + b },
+	"inc":   func(i int) int { return i + 1 },
+	"upper": strings.ToUpper,
+	"lines": func(s string) []string { return strings.Split(s, "\n") },
+	"shortRef": func(s string) string {
+		if len(s) > 10 {
+			return strings.ToUpper(s[:10])
+		}
+		return strings.ToUpper(s)
+	},
+	"fmtAmount": func(s string) string {
+		var f float64
+		fmt.Sscanf(s, "%f", &f)
+		// Format with thousands separator
+		intPart := int64(f)
+		fracPart := int(f*100) % 100
+		var result []byte
+		str := fmt.Sprintf("%d", intPart)
+		for i, c := range str {
+			if i > 0 && (len(str)-i)%3 == 0 {
+				result = append(result, ',')
+			}
+			result = append(result, byte(c))
+		}
+		return fmt.Sprintf("%s.%02d", string(result), fracPart)
+	},
+}
+
+func mustParse(files ...string) *template.Template {
+	t, err := template.New("").Funcs(tmplFuncs).ParseFiles(files...)
+	if err != nil {
+		log.Fatalf("parse templates %v: %v", files, err)
+	}
+	return t
+}
+
+func main() {
+	if loc, err := time.LoadLocation("Africa/Nairobi"); err == nil {
+		time.Local = loc
+	}
+
+	// Applied before subcommand dispatch below — every subcommand that reads
+	// uploaded files (backfill-crm-attachments, etc.) needs the real uploads
+	// path, not the fallback default, and each dispatch branch returns before
+	// ever reaching the HTTP-server startup code further down.
+	if v := os.Getenv("UPLOADS_DIR"); v != "" {
+		uploadsDir = v
+	}
+
+	if len(os.Args) > 1 && os.Args[1] == "import-buyers" {
+		initDB()
+		runImportBuyers(os.Args[2:])
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "audit-crm-duplicates" {
+		runAuditCRM(os.Args[2:])
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "backfill-crm-attachments" {
+		runBackfillAttachments(os.Args[2:])
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "audit-books-placeholder" {
+		runAuditBooksPlaceholder(os.Args[2:])
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "audit-crm-placeholder" {
+		runAuditCRMPlaceholder(os.Args[2:])
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "audit-books-displayname" {
+		runAuditBooksDisplayName(os.Args[2:])
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "parse-sale-agreement" {
+		runParseSaleAgreement(os.Args[2:])
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "inspect-crm-fields" {
+		runInspectCRMFields(os.Args[2:])
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "backfill-installments" {
+		runBackfillInstallments(os.Args[2:])
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "fix-installment-linkage" {
+		runFixInstallmentLinkage(os.Args[2:])
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "sync-payment-plans" {
+		runSyncPaymentPlans(os.Args[2:])
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "reconcile-payment-plan-sold" {
+		runReconcilePaymentPlanSold(os.Args[2:])
+		return
+	}
+
+	initLoggers()
+	initDB()
+	vanbooking.Init(db, render, getAgentName, pathSegment, RegisterFeature,
+		func(r *http.Request) bool { return getRole(r) == roleSystemAdmin }, devMode)
+	vanbooking.InitTables()
+	welfare.Init(db, render, getAgentName, pathSegment,
+		RegisterFeature,
+		func(r *http.Request) bool { return getRole(r) == roleSystemAdmin },
+		hasPermission,
+		getUserID,
+	)
+	welfare.InitTables()
+	initPermissionTables()
+	init2FATables()
+	initSchedulerTables()
+	initPaymentPlanTables()
+	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN booking_deadline DATE DEFAULT NULL`)
+	db.Exec(`ALTER TABLE prop_estates ADD COLUMN plot_price DECIMAL(15,2) DEFAULT NULL`)
+	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN zoho_books_id VARCHAR(64) DEFAULT NULL`)
+	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN zoho_crm_id VARCHAR(64) DEFAULT NULL`)
+	db.Exec(`ALTER TABLE prop_sales ADD COLUMN zoho_books_id VARCHAR(64) DEFAULT NULL`)
+	db.Exec(`ALTER TABLE prop_sales ADD COLUMN zoho_crm_id VARCHAR(64) DEFAULT NULL`)
+	db.Exec(`ALTER TABLE prop_sales ADD COLUMN letter_of_consent VARCHAR(500) DEFAULT NULL`)
+	db.Exec(`ALTER TABLE prop_sales ADD COLUMN transfer_forms VARCHAR(500) DEFAULT NULL`)
+	db.Exec(`ALTER TABLE prop_sales ADD COLUMN title_deed VARCHAR(500) DEFAULT NULL`)
+	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN lead_source VARCHAR(50) DEFAULT NULL`)
+	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN sale_agreement VARCHAR(500) DEFAULT NULL`)
+	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN installment_page VARCHAR(20) DEFAULT NULL`)
+	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN batch_ref VARCHAR(64) DEFAULT NULL`)
+	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN receipt_number VARCHAR(20) DEFAULT NULL`)
+	db.Exec(`CREATE TABLE IF NOT EXISTS prop_booking_receipts (
+		id INT AUTO_INCREMENT PRIMARY KEY,
+		booking_id INT NOT NULL,
+		amount DECIMAL(15,2) NOT NULL DEFAULT 0,
+		receipt_number VARCHAR(20) NOT NULL,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		INDEX idx_br_booking (booking_id)
+	)`)
+	db.Exec(`ALTER TABLE prop_estates ADD COLUMN is_restricted TINYINT(1) DEFAULT 0`)
+	db.Exec(`CREATE TABLE IF NOT EXISTS prop_restricted_access (
+		id INT AUTO_INCREMENT PRIMARY KEY,
+		estate_id INT NOT NULL,
+		user_id VARCHAR(64) NOT NULL,
+		granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE KEY uq_ra (estate_id, user_id)
+	)`)
+	// Backfill: grant private-estate permission to any user already in prop_restricted_access
+	db.Exec(`INSERT INTO prop_permissions (user_id, feature, can_read, can_write)
+		SELECT CAST(a.id AS CHAR), IF(a.role='agent','agent.private_estates','admin.private_estates'), 1, 0
+		FROM prop_agents a
+		WHERE a.role != 'system_admin'
+		AND EXISTS (SELECT 1 FROM prop_restricted_access ra WHERE ra.user_id = CAST(a.id AS CHAR))
+		ON DUPLICATE KEY UPDATE can_read = 1`)
+	initWhatsAppLog()
+	initPlotStatusLog()
+	startOverdueBookingChecker()
+	startPaymentPlanSync()
+
+	pageTemplates = map[string]*template.Template{
+		"login":         mustParse("templates/login.html"),
+		"login_2fa":     mustParse("templates/login_2fa.html"),
+		"hub":           mustParse("templates/hub.html"),
+		"access_denied": mustParse("templates/access_denied.html"),
+		// admin pages
+		"admin_dashboard.html":             mustParse("templates/admin_base.html", "templates/admin_dashboard.html"),
+		"admin_estates.html":               mustParse("templates/admin_base.html", "templates/admin_estates.html"),
+		"admin_booked_plots.html":          mustParse("templates/admin_base.html", "templates/admin_booked_plots.html"),
+		"admin_signed_plots.html":          mustParse("templates/admin_base.html", "templates/admin_signed_plots.html"),
+		"admin_sold_plots.html":            mustParse("templates/admin_base.html", "templates/admin_sold_plots.html"),
+		"admin_placeholder.html":           mustParse("templates/admin_base.html", "templates/admin_placeholder.html"),
+		"admin_estate_detail.html":         mustParse("templates/admin_base.html", "templates/admin_estate_detail.html"),
+		"admin_estate_plots.html":          mustParse("templates/admin_base.html", "templates/admin_estate_plots.html"),
+		"admin_estate_book.html":           mustParse("templates/admin_base.html", "templates/admin_estate_book.html"),
+		"admin_estate_edit.html":           mustParse("templates/admin_base.html", "templates/admin_estate_edit.html"),
+		"admin_create_user.html":           mustParse("templates/admin_base.html", "templates/admin_create_user.html"),
+		"admin_edit_user.html":             mustParse("templates/admin_base.html", "templates/admin_edit_user.html"),
+		"admin_booking_attachments.html":   mustParse("templates/admin_base.html", "templates/admin_booking_attachments.html"),
+		"admin_mark_sold.html":             mustParse("templates/admin_base.html", "templates/admin_mark_sold.html"),
+		"admin_plots_overview.html":        mustParse("templates/admin_base.html", "templates/admin_plots_overview.html"),
+		"agent_booking_attachments.html":   mustParse("templates/agent_base.html", "templates/agent_booking_attachments.html"),
+		"admin_permissions_list.html":      mustParse("templates/admin_base.html", "templates/admin_permissions_list.html"),
+		"admin_permissions.html":           mustParse("templates/admin_base.html", "templates/admin_permissions.html"),
+		"admin_add_estate.html":            mustParse("templates/admin_base.html", "templates/admin_add_estate.html"),
+		"admin_pending_projects.html":      mustParse("templates/admin_base.html", "templates/admin_pending_projects.html"),
+		"admin_completed_projects.html":    mustParse("templates/admin_base.html", "templates/admin_completed_projects.html"),
+		"admin_export_reports.html":        mustParse("templates/admin_base.html", "templates/admin_export_reports.html"),
+		"admin_receipts_list.html":         mustParse("templates/admin_base.html", "templates/admin_receipts_list.html"),
+		"admin_payment_plans.html":         mustParse("templates/admin_base.html", "templates/admin_payment_plans.html"),
+		"admin_payment_plans_list.html":    mustParse("templates/admin_base.html", "templates/admin_payment_plans_list.html"),
+		"admin_payment_plans_deal.html":    mustParse("templates/admin_base.html", "templates/admin_payment_plans_deal.html"),
+		"admin_van_bookings.html":          mustParse("templates/vanbooking/van_admin_base.html", "templates/vanbooking/admin_van_bookings.html"),
+		"admin_van_bookings_approved.html": mustParse("templates/vanbooking/van_admin_base.html", "templates/vanbooking/admin_van_bookings_approved.html"),
+		"admin_van_bookings_done.html":     mustParse("templates/vanbooking/van_admin_base.html", "templates/vanbooking/admin_van_bookings_done.html"),
+		"admin_vans.html":                  mustParse("templates/vanbooking/van_admin_base.html", "templates/vanbooking/admin_vans.html"),
+		"admin_van_book.html":              mustParse("templates/vanbooking/van_admin_base.html", "templates/vanbooking/admin_van_book.html"),
+		"admin_van_my_bookings.html":       mustParse("templates/vanbooking/van_admin_base.html", "templates/vanbooking/admin_van_my_bookings.html"),
+		"admin_van_notifications.html":     mustParse("templates/vanbooking/van_admin_base.html", "templates/vanbooking/admin_van_notifications.html"),
+		"admin_van_maintenance.html":       mustParse("templates/vanbooking/van_admin_base.html", "templates/vanbooking/admin_van_maintenance.html"),
+		"admin_van_availability.html":      mustParse("templates/vanbooking/van_admin_base.html", "templates/vanbooking/admin_van_availability.html"),
+		"van_admin_permissions_list.html":  mustParse("templates/vanbooking/van_admin_base.html", "templates/vanbooking/van_admin_permissions_list.html"),
+		"van_admin_permissions.html":       mustParse("templates/vanbooking/van_admin_base.html", "templates/vanbooking/van_admin_permissions.html"),
+		// agent pages
+		"dashboard.html":                   mustParse("templates/agent_base.html", "templates/dashboard.html"),
+		"agent_estates.html":               mustParse("templates/agent_base.html", "templates/agent_estates.html"),
+		"agent_estate_detail.html":         mustParse("templates/agent_base.html", "templates/agent_estate_detail.html"),
+		"agent_estate_plots.html":          mustParse("templates/agent_base.html", "templates/agent_estate_plots.html"),
+		"agent_estate_book.html":           mustParse("templates/agent_base.html", "templates/agent_estate_book.html"),
+		"agent_cart.html":                  mustParse("templates/agent_base.html", "templates/agent_cart.html"),
+		"agent_receipt.html":               mustParse("templates/agent_base.html", "templates/agent_receipt.html"),
+		"agent_booking_receipt.html":       mustParse("templates/agent_base.html", "templates/agent_booking_receipt.html"),
+		"admin_cart.html":                  mustParse("templates/admin_base.html", "templates/admin_cart.html"),
+		"admin_receipt.html":               mustParse("templates/admin_base.html", "templates/admin_receipt.html"),
+		"admin_booking_receipt.html":       mustParse("templates/admin_base.html", "templates/admin_booking_receipt.html"),
+		"admin_private_estates.html":       mustParse("templates/admin_base.html", "templates/admin_private_estates.html"),
+		"admin_private_estate_plots.html":  mustParse("templates/admin_base.html", "templates/admin_private_estate_plots.html"),
+		"admin_private_estate_access.html": mustParse("templates/admin_base.html", "templates/admin_private_estate_access.html"),
+		"agent_private_estates.html":       mustParse("templates/agent_base.html", "templates/agent_private_estates.html"),
+		"agent_private_estate_plots.html":  mustParse("templates/agent_base.html", "templates/agent_private_estate_plots.html"),
+		"agent_bookings.html":              mustParse("templates/agent_base.html", "templates/agent_bookings.html"),
+		"agent_sales.html":                 mustParse("templates/agent_base.html", "templates/agent_sales.html"),
+		"agent_van_booking.html":           mustParse("templates/vanbooking/van_agent_base.html", "templates/vanbooking/agent_van_booking.html"),
+		"agent_van_bookings.html":          mustParse("templates/vanbooking/van_agent_base.html", "templates/vanbooking/agent_van_bookings.html"),
+		"agent_van_notifications.html":     mustParse("templates/vanbooking/van_agent_base.html", "templates/vanbooking/agent_van_notifications.html"),
+		"driver_sessions.html":             mustParse("templates/vanbooking/van_agent_base.html", "templates/vanbooking/driver_sessions.html"),
+		"fleet_approval.html":              mustParse("templates/vanbooking/van_agent_base.html", "templates/vanbooking/fleet_approval.html"),
+		// Welfare pages
+		"welfare_members.html":          mustParse("templates/welfare/welfare_base.html", "templates/welfare/welfare_members.html"),
+		"welfare_expenses.html":         mustParse("templates/welfare/welfare_base.html", "templates/welfare/welfare_expenses.html"),
+		"welfare_beneficiaries.html":    mustParse("templates/welfare/welfare_base.html", "templates/welfare/welfare_beneficiaries.html"),
+		"welfare_permissions_list.html": mustParse("templates/welfare/welfare_base.html", "templates/welfare/welfare_permissions_list.html"),
+		"welfare_permissions.html":      mustParse("templates/welfare/welfare_base.html", "templates/welfare/welfare_permissions.html"),
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/oauth/callback", oauthCallbackHandler)
+	mux.HandleFunc("/login", loginHandler)
+	mux.HandleFunc("/login/verify", login2faHandler)
+	mux.HandleFunc("/login/resend-2fa", resend2faHandler)
+	mux.HandleFunc("/logout", logoutHandler)
+	mux.Handle("/hub", authMiddleware(http.HandlerFunc(hubHandler)))
+	mux.Handle("/check-rebook-match", authMiddleware(http.HandlerFunc(checkRebookMatchHandler)))
+	// Admin routes
+	mux.Handle("/admin/dashboard", authMiddleware(requireRole(roleAdmin, requirePerm("admin.dashboard", "read", http.HandlerFunc(adminDashboardHandler)))))
+	mux.Handle("/admin/estates", authMiddleware(requireRole(roleAdmin, requirePerm("admin.estates", "read", http.HandlerFunc(adminEstatesHandler)))))
+	mux.Handle("/admin/estate/", authMiddleware(requireRole(roleAdmin, requirePerm("admin.estates", "read", http.HandlerFunc(adminEstateRouter)))))
+	mux.Handle("/admin/add-estate", authMiddleware(requireRole(roleAdmin, requirePerm("admin.estates", "write", http.HandlerFunc(adminAddEstateHandler)))))
+	mux.Handle("/admin/add-plots", authMiddleware(requireRole(roleAdmin, requirePerm("admin.estates", "write", http.HandlerFunc(adminAddPlotsHandler)))))
+	mux.Handle("/admin/create-user", authMiddleware(requireRole(roleAdmin, requirePerm("admin.create_user", "read", http.HandlerFunc(adminCreateUserHandler)))))
+	mux.Handle("/admin/edit-user/", authMiddleware(requireRole(roleAdmin, requirePerm("admin.create_user", "write", http.HandlerFunc(adminEditUserHandler)))))
+	mux.Handle("/admin/booking/", authMiddleware(requireRole(roleAdmin, requirePerm("admin.booked_plots", "write", http.HandlerFunc(adminBookingAttachmentsHandler)))))
+	mux.Handle("/admin/mark-sold/", authMiddleware(requireRole(roleAdmin, requirePerm("admin.signed_to_sold", "read", http.HandlerFunc(adminMarkSoldHandler)))))
+	mux.Handle("/admin/booking-extend/", authMiddleware(requireRole(roleAdmin, requirePerm("admin.extend_booking", "read", http.HandlerFunc(extendBookingHandler)))))
+	mux.Handle("/admin/booking-retry-zoho/", authMiddleware(requireRole(roleAdmin, http.HandlerFunc(adminRetryZohoHandler))))
+	mux.Handle("/admin/signed-booking-retry-zoho/", authMiddleware(requireRole(roleAdmin, http.HandlerFunc(adminRetryZohoSignedHandler))))
+	mux.Handle("/agent/booking/", authMiddleware(requireRole(roleAgent, requirePerm("agent.bookings", "write", http.HandlerFunc(agentBookingAttachmentsHandler)))))
+	mux.Handle("/admin/booking-receipt", authMiddleware(requireRole(roleAdmin, http.HandlerFunc(adminBookingReceiptHandler))))
+	mux.Handle("/admin/booking-receipt/", authMiddleware(requireRole(roleAdmin, http.HandlerFunc(adminBookingReceiptViewHandler))))
+	mux.Handle("/agent/booking-receipt", authMiddleware(requireRole(roleAgent, http.HandlerFunc(agentBookingReceiptHandler))))
+	mux.Handle("/agent/booking-receipt/", authMiddleware(requireRole(roleAgent, http.HandlerFunc(agentBookingReceiptViewHandler))))
+	mux.Handle("/admin/booked-plots", authMiddleware(requireRole(roleAdmin, requirePerm("admin.booked_plots", "read", http.HandlerFunc(adminBookedPlotsHandler)))))
+	mux.Handle("/admin/signed-plots", authMiddleware(requireRole(roleAdmin, requirePerm("admin.signed_plots", "read", http.HandlerFunc(adminSignedPlotsHandler)))))
+	mux.Handle("/admin/sold-plots", authMiddleware(requireRole(roleAdmin, requirePerm("admin.sold_plots", "read", http.HandlerFunc(adminSoldPlotsHandler)))))
+	mux.Handle("/admin/payment-plans", authMiddleware(requireRole(roleAdmin, requirePerm("admin.payment_plans", "read", http.HandlerFunc(adminPaymentPlansHandler)))))
+	mux.Handle("/admin/payment-plans/deal/", authMiddleware(requireRole(roleAdmin, requirePerm("admin.payment_plans", "read", http.HandlerFunc(paymentPlanDealRouter)))))
+	mux.Handle("/admin/payment-plans/", authMiddleware(requireRole(roleAdmin, requirePerm("admin.payment_plans", "read", http.HandlerFunc(paymentPlanListHandler)))))
+	mux.Handle("/admin/plots-overview", authMiddleware(requireRole(roleAdmin, requirePerm("admin.plots_overview", "read", http.HandlerFunc(adminPlotsOverviewHandler)))))
+	mux.Handle("/admin/plots-overview/delete-attachment", authMiddleware(requireRole(roleAdmin, requirePerm("admin.plots_overview", "write", http.HandlerFunc(adminPlotsOverviewDeleteAttachmentHandler)))))
+	mux.Handle("/admin/plots-overview/add-attachment", authMiddleware(requireRole(roleAdmin, requirePerm("admin.plots_overview", "write", http.HandlerFunc(adminPlotsOverviewAddAttachmentHandler)))))
+	mux.Handle("/admin/plots-overview/update-buyer-name", authMiddleware(requireRole(roleAdmin, requirePerm("admin.plots_overview", "write", http.HandlerFunc(adminPlotsOverviewUpdateBuyerNameHandler)))))
+	mux.Handle("/admin/pending-projects", authMiddleware(requireRole(roleAdmin, requirePerm("admin.pending_projects", "read", http.HandlerFunc(adminPendingProjectsHandler)))))
+	mux.Handle("/admin/completed-projects", authMiddleware(requireRole(roleAdmin, requirePerm("admin.completed_projects", "read", http.HandlerFunc(adminCompletedProjectsHandler)))))
+	mux.Handle("/admin/export-reports", authMiddleware(requireRole(roleAdmin, requirePerm("admin.export_reports", "read", http.HandlerFunc(adminExportReportsHandler)))))
+	mux.Handle("/admin/van-bookings", authMiddleware(requireRole(roleAdmin, requirePerm("admin.van_bookings", "read", http.HandlerFunc(vanbooking.AdminVanBookingsHandler)))))
+	mux.Handle("/admin/van-bookings/approved", authMiddleware(requireRole(roleAdmin, requirePerm("admin.van_bookings", "read", http.HandlerFunc(vanbooking.AdminVanBookingsApprovedHandler)))))
+	mux.Handle("/admin/van-bookings/done", authMiddleware(requireRole(roleAdmin, requirePerm("admin.van_bookings", "read", http.HandlerFunc(vanbooking.AdminVanBookingsDoneHandler)))))
+	mux.Handle("/admin/van-bookings/export", authMiddleware(requireRole(roleAdmin, requirePerm("admin.van_bookings", "read", http.HandlerFunc(vanbooking.AdminVanExportHandler)))))
+	mux.Handle("/admin/van-bookings/export/detailed", authMiddleware(requireRole(roleAdmin, requirePerm("admin.van_bookings", "read", http.HandlerFunc(vanbooking.AdminVanExportDetailedHandler)))))
+	mux.Handle("/admin/van-bookings/export/summary", authMiddleware(requireRole(roleAdmin, requirePerm("admin.van_bookings", "read", http.HandlerFunc(vanbooking.AdminVanExportSummaryHandler)))))
+	mux.Handle("/admin/van-booking/", authMiddleware(requireRole(roleAdmin, requirePerm("admin.van_bookings", "write", http.HandlerFunc(vanbooking.AdminVanBookingActionHandler)))))
+	mux.Handle("/admin/van-book", authMiddleware(requireRole(roleAdmin, requirePerm("admin.van_bookings", "write", http.HandlerFunc(vanbooking.AdminVanBookHandler)))))
+	mux.Handle("/admin/van-my-bookings", authMiddleware(requireRole(roleAdmin, requirePerm("admin.van_bookings", "read", http.HandlerFunc(vanbooking.AdminVanMyBookingsHandler)))))
+	mux.Handle("/admin/vans", authMiddleware(requireRole(roleAdmin, requirePerm("admin.van_manage", "read", http.HandlerFunc(vanbooking.AdminVansHandler)))))
+	mux.Handle("/admin/van-maintenance", authMiddleware(requireRole(roleAdmin, requirePerm("admin.van_manage", "write", http.HandlerFunc(vanbooking.AdminVanMaintenanceHandler)))))
+	mux.Handle("/admin/van-availability", authMiddleware(requireRole(roleAdmin, requirePerm("admin.van_manage", "read", http.HandlerFunc(vanbooking.AdminVanAvailabilityHandler)))))
+	mux.Handle("/admin/van-session/", authMiddleware(requireRole(roleAdmin, requirePerm("admin.van_manage", "write", http.HandlerFunc(vanbooking.AdminVanAssignDriverHandler)))))
+	mux.Handle("/admin/van-notify", authMiddleware(requireRole(roleAdmin, requirePerm("admin.van_manage", "write", http.HandlerFunc(vanbooking.AdminVanNotifyHandler)))))
+	mux.Handle("/admin/van-permissions", authMiddleware(http.HandlerFunc(vanPermissionsListHandler)))
+	mux.Handle("/admin/van-permissions/", authMiddleware(http.HandlerFunc(vanPermissionsHandler)))
+	mux.Handle("/admin/permissions", authMiddleware(http.HandlerFunc(adminPermissionsListHandler)))
+	mux.Handle("/admin/permissions/", authMiddleware(http.HandlerFunc(adminPermissionsHandler)))
+	// Agent routes
+	mux.Handle("/dashboard", authMiddleware(requireRole(roleAgent, requirePerm("agent.dashboard", "read", http.HandlerFunc(dashboardHandler)))))
+	mux.Handle("/agent/estates", authMiddleware(requireRole(roleAgent, requirePerm("agent.estates", "read", http.HandlerFunc(agentEstatesHandler)))))
+	mux.Handle("/agent/estate/", authMiddleware(requireRole(roleAgent, requirePerm("agent.estates", "read", http.HandlerFunc(agentEstateRouter)))))
+	mux.Handle("/agent/cart/checkout", authMiddleware(requireRole(roleAgent, requirePerm("agent.bookings", "write", http.HandlerFunc(agentCartCheckoutHandler)))))
+	mux.Handle("/agent/cart", authMiddleware(requireRole(roleAgent, requirePerm("agent.estates", "read", http.HandlerFunc(agentCartHandler)))))
+	mux.Handle("/agent/receipt/", authMiddleware(requireRole(roleAgent, http.HandlerFunc(agentReceiptHandler))))
+	mux.Handle("/admin/cart/checkout", authMiddleware(requireRole(roleAdmin, http.HandlerFunc(adminCartCheckoutHandler))))
+	mux.Handle("/admin/cart", authMiddleware(requireRole(roleAdmin, http.HandlerFunc(adminCartHandler))))
+	mux.Handle("/admin/receipt/", authMiddleware(requireRole(roleAdmin, http.HandlerFunc(adminReceiptHandler))))
+	mux.Handle("/admin/receipts", authMiddleware(requireRole(roleAdmin, http.HandlerFunc(adminReceiptsListHandler))))
+	mux.Handle("/admin/private-estates", authMiddleware(requireRole(roleAdmin, requirePerm("admin.private_estates", "read", http.HandlerFunc(adminPrivateEstatesHandler)))))
+	mux.Handle("/admin/private-estate/", authMiddleware(requireRole(roleAdmin, requirePerm("admin.private_estates", "read", http.HandlerFunc(adminPrivateEstateRouter)))))
+	mux.Handle("/agent/private-estates", authMiddleware(requireRole(roleAgent, requirePerm("agent.private_estates", "read", http.HandlerFunc(agentPrivateEstatesHandler)))))
+	mux.Handle("/agent/private-estate/", authMiddleware(requireRole(roleAgent, requirePerm("agent.private_estates", "read", http.HandlerFunc(agentPrivateEstateRouter)))))
+	mux.Handle("/agent/bookings/cancel/", authMiddleware(requireRole(roleAgent, requirePerm("agent.bookings", "write", http.HandlerFunc(agentCancelBookingHandler)))))
+	mux.Handle("/agent/bookings", authMiddleware(requireRole(roleAgent, requirePerm("agent.bookings", "read", http.HandlerFunc(agentBookingsHandler)))))
+	mux.Handle("/agent/sales", authMiddleware(requireRole(roleAgent, requirePerm("agent.sales", "read", http.HandlerFunc(agentSalesHandler)))))
+	mux.Handle("/agent/van-booking", authMiddleware(requireRole(roleAgent, requirePerm("agent.van_booking", "read", http.HandlerFunc(vanbooking.AgentVanBookingHandler)))))
+	mux.Handle("/agent/van-bookings", authMiddleware(requireRole(roleAgent, requirePerm("agent.van_booking", "read", http.HandlerFunc(vanbooking.AgentVanBookingsHandler)))))
+	mux.Handle("/agent/van-notifications", authMiddleware(requireRole(roleAgent, requirePerm("agent.van_notifications", "read", http.HandlerFunc(vanbooking.AgentVanNotificationsHandler)))))
+	mux.Handle("/agent/van-driver-sessions", authMiddleware(requireRole(roleAgent, http.HandlerFunc(vanbooking.DriverSessionsHandler))))
+	mux.Handle("/agent/van-session/", authMiddleware(requireRole(roleAgent, http.HandlerFunc(vanbooking.DriverMarkDoneHandler))))
+	mux.Handle("/agent/van-booking/", authMiddleware(requireRole(roleAgent, http.HandlerFunc(vanbooking.AgentVanCancelHandler))))
+	mux.Handle("/agent/van-fleet-approval", authMiddleware(requireRole(roleAgent, http.HandlerFunc(vanbooking.FleetApprovalHandler))))
+	mux.Handle("/agent/van-fleet-booking/", authMiddleware(requireRole(roleAgent, http.HandlerFunc(vanbooking.FleetBookingActionHandler))))
+	mux.Handle("/admin/van-notifications", authMiddleware(requireRole(roleAdmin, requirePerm("admin.van_notifications", "read", http.HandlerFunc(vanbooking.AdminVanNotificationsHandler)))))
+	mux.Handle("/admin/test-whatsapp", authMiddleware(requireRole(roleAdmin, http.HandlerFunc(testWhatsAppHandler))))
+	// Welfare permissions (system_admin only — registered before /welfare/ catch-all)
+	mux.Handle("/welfare/permissions", authMiddleware(http.HandlerFunc(welfarePermissionsListHandler)))
+	mux.Handle("/welfare/permissions/", authMiddleware(http.HandlerFunc(welfarePermissionsHandler)))
+	// Welfare routes (accessible to any authenticated user)
+	mux.Handle("/welfare/", authMiddleware(http.HandlerFunc(welfare.Router)))
+	mux.Handle("/", http.HandlerFunc(rootHandler))
+
+	fs := http.FileServer(http.Dir("static"))
+	mux.Handle("/static/", http.StripPrefix("/static/", fs))
+
+	uploads := http.FileServer(http.Dir(uploadsDir))
+	mux.Handle("/uploads/", http.StripPrefix("/uploads/", uploads))
+
+	server := &http.Server{
+		Addr:         ":8090",
+		Handler:      loggingMiddleware(mux),
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+	}
+
+	log.Println("Portal running on http://localhost:8090")
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Fatalf("server error: %v", err)
+	}
+}
+
+func isAuthenticated(r *http.Request) bool {
+	c, err := r.Cookie(sessionCookie)
+	return err == nil && c.Value == "ok"
+}
+
+func getRole(r *http.Request) string {
+	c, err := r.Cookie(roleCookie)
+	if err != nil {
+		return ""
+	}
+	switch c.Value {
+	case roleAdmin, roleAgent, roleSystemAdmin:
+		return c.Value
+	}
+	return ""
+}
+
+func setSession(w http.ResponseWriter, role, name, userID string) {
+	exp := time.Now().Add(8 * time.Hour)
+	for _, c := range []struct{ k, v string }{
+		{sessionCookie, "ok"},
+		{roleCookie, role},
+		{nameCookie, name},
+		{idCookie, userID},
+	} {
+		http.SetCookie(w, &http.Cookie{
+			Name:     c.k,
+			Value:    c.v,
+			Path:     "/",
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+			Expires:  exp,
+		})
+	}
+}
+
+func clearSession(w http.ResponseWriter) {
+	for _, n := range []string{sessionCookie, roleCookie, nameCookie, idCookie} {
+		http.SetCookie(w, &http.Cookie{
+			Name:     n,
+			Value:    "",
+			Path:     "/",
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+			Expires:  time.Unix(0, 0),
+			MaxAge:   -1,
+		})
+	}
+}
+
+func getAgentName(r *http.Request) string {
+	c, err := r.Cookie(nameCookie)
+	if err != nil {
+		return ""
+	}
+	return c.Value
+}
+
+func authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isAuthenticated(r) {
+			http.Redirect(w, r, "/login", http.StatusFound)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func requireRole(role string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		userRole := getRole(r)
+		// system_admin passes all role checks
+		if userRole == roleSystemAdmin {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if userRole != role {
+			if userRole == roleAdmin || userRole == roleAgent {
+				http.Redirect(w, r, "/hub", http.StatusFound)
+				return
+			}
+			http.Redirect(w, r, "/login", http.StatusFound)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func rootHandler(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	if !isAuthenticated(r) {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+	switch getRole(r) {
+	case roleAdmin:
+		http.Redirect(w, r, "/hub", http.StatusFound)
+	case roleAgent:
+		http.Redirect(w, r, "/hub", http.StatusFound)
+	default:
+		http.Redirect(w, r, "/login", http.StatusFound)
+	}
+}
+
+type ctxKey string
+
+const ctxID ctxKey = "id"
+const ctxPlotID ctxKey = "plotID"
+
+// pathSegment extracts the first path segment after the given prefix.
+func pathSegment(prefix, path string) string {
+	s := strings.TrimPrefix(path, prefix)
+	if i := strings.Index(s, "/"); i >= 0 {
+		return s[:i]
+	}
+	return s
+}
+
+func withID(r *http.Request, id string) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), ctxID, id))
+}
+
+func adminEstateRouter(w http.ResponseWriter, r *http.Request) {
+	id := pathSegment("/admin/estate/", r.URL.Path)
+	suffix := strings.TrimPrefix(r.URL.Path, "/admin/estate/"+id)
+	r = withID(r, id)
+
+	// Write-only sub-routes require write permission on admin.estates
+	switch suffix {
+	case "/edit", "/delete", "/zones":
+		if getRole(r) != roleSystemAdmin && !hasPermission(getUserID(r), "admin.estates", "write") {
+			w.WriteHeader(http.StatusForbidden)
+			render(w, "access_denied", nil)
+			return
+		}
+	}
+
+	switch suffix {
+	case "", "/":
+		adminEstateDetailHandler(w, r)
+	case "/edit":
+		adminEstateEditHandler(w, r)
+	case "/delete":
+		adminEstateDeleteHandler(w, r)
+	case "/zones":
+		adminSaveZonesHandler(w, r)
+	case "/plots":
+		adminEstatePlotsHandler(w, r)
+	case "/book":
+		adminEstateBookHandler(w, r)
+	case "/plot-status":
+		adminUpdatePlotStatusHandler(w, r)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func agentEstateRouter(w http.ResponseWriter, r *http.Request) {
+	id := pathSegment("/agent/estate/", r.URL.Path)
+	suffix := strings.TrimPrefix(r.URL.Path, "/agent/estate/"+id)
+	r = withID(r, id)
+	switch suffix {
+	case "", "/":
+		agentEstateDetailHandler(w, r)
+	case "/plots":
+		agentEstatePlotsHandler(w, r)
+	case "/book":
+		agentEstateBookHandler(w, r)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func oauthCallbackHandler(w http.ResponseWriter, r *http.Request) {
+	code := r.URL.Query().Get("code")
+	if code == "" {
+		http.Error(w, "Missing code parameter", http.StatusBadRequest)
+		return
+	}
+
+	clientID := r.URL.Query().Get("client_id")
+	clientSecret := r.URL.Query().Get("client_secret")
+	if clientID == "" {
+		clientID = "1000.0GHL3CW4SJUE2BJ3SOUQ6KIJB4Q2NN"
+	}
+	if clientSecret == "" {
+		clientSecret = "3c01794c2d6172f0636d041751d7562157d7e7d885"
+	}
+
+	resp, err := http.PostForm("https://accounts.zoho.com/oauth/v2/token", url.Values{
+		"grant_type":    {"authorization_code"},
+		"client_id":     {clientID},
+		"client_secret": {clientSecret},
+		"redirect_uri":  {"https://portal.proproperty.co.ke/oauth/callback"},
+		"code":          {code},
+	})
+	if err != nil {
+		http.Error(w, "Token exchange failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprintf(w, `<!DOCTYPE html><html><body style="font-family:monospace;padding:32px;max-width:800px;">
+<h2>Zoho OAuth Token</h2>
+<p>HTTP Status: %d</p>
+<pre style="background:#f3f4f6;padding:16px;border-radius:8px;white-space:pre-wrap;word-break:break-all;">%s</pre>
+<p style="color:#6b7280;font-size:13px;">Copy the <strong>refresh_token</strong> value and paste it to update integrations.go</p>
+</body></html>`, resp.StatusCode, string(body))
+}
+
+func loginHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		if isAuthenticated(r) {
+			http.Redirect(w, r, "/hub", http.StatusFound)
+			return
+		}
+		render(w, "login", map[string]any{"Title": "Login"})
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+
+	email := r.FormValue("email")
+	password := r.FormValue("password")
+
+	var id int
+	var name, hash, role, phone string
+	err := db.QueryRow(
+		`SELECT id, name, password, role, COALESCE(phone,'') FROM prop_agents WHERE email = ? LIMIT 1`, email,
+	).Scan(&id, &name, &hash, &role, &phone)
+	if err != nil || bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil {
+		logAccess("LOGIN_FAIL", email, "unknown", clientIP(r), "bad credentials")
+		render(w, "login", map[string]any{
+			"Title": "Login",
+			"Error": "Invalid email or password",
+			"Email": email,
+		})
+		return
+	}
+
+	// Check if this device is already trusted
+	trustCookieName := fmt.Sprintf("pp_trust_%d", id)
+	if tc, tcErr := r.Cookie(trustCookieName); tcErr == nil && tc.Value != "" {
+		var count int
+		db.QueryRow(
+			`SELECT COUNT(*) FROM prop_trusted_devices WHERE token = ? AND user_id = ? AND expires_at > NOW()`,
+			tc.Value, id,
+		).Scan(&count)
+		if count > 0 {
+			setSession(w, role, name, fmt.Sprintf("%d", id))
+			logAccess("LOGIN_OK", name, role, clientIP(r), "trusted_device email="+email)
+			http.Redirect(w, r, "/hub", http.StatusFound)
+			return
+		}
+	}
+
+	// Generate OTP, store it, and send via email + SMS
+	otp := generateOTP()
+	db.Exec(`DELETE FROM prop_otp_sessions WHERE user_id = ?`, id)
+	if _, err := db.Exec(
+		`INSERT INTO prop_otp_sessions (user_id, otp_code, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 10 MINUTE))`,
+		id, otp,
+	); err != nil {
+		log.Printf("ERROR inserting OTP for user %d: %v", id, err)
+		render(w, "login", map[string]any{
+			"Title": "Login",
+			"Error": "Could not send verification code. Please try again.",
+			"Email": email,
+		})
+		return
+	}
+	sendOTP(email, phone, otp)
+
+	// Set short-lived pending cookie to carry user ID to the verify page
+	http.SetCookie(w, &http.Cookie{
+		Name:     otpPendingCookie,
+		Value:    fmt.Sprintf("%d", id),
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Expires:  time.Now().Add(15 * time.Minute),
+	})
+
+	logAccess("LOGIN_2FA_SENT", name, role, clientIP(r), "email="+email)
+	http.Redirect(w, r, "/login/verify", http.StatusSeeOther)
+}
+
+func logoutHandler(w http.ResponseWriter, r *http.Request) {
+	clearSession(w)
+	http.Redirect(w, r, "/login", http.StatusFound)
+}
+
+func hubHandler(w http.ResponseWriter, r *http.Request) {
+	role := getRole(r)
+	portalURL := "/dashboard"
+	vanBookingURL := "/agent/van-bookings"
+	if role == roleAdmin || role == roleSystemAdmin {
+		portalURL = "/admin/dashboard"
+		vanBookingURL = "/admin/van-bookings"
+	}
+	render(w, "hub", map[string]any{
+		"Title":         "Portal Hub",
+		"UserName":      getAgentName(r),
+		"PortalURL":     portalURL,
+		"VanBookingURL": vanBookingURL,
+	})
+}
+
+// checkRebookMatchHandler is the client-side pre-check the booking forms call
+// before submitting — for each plot being booked, reports whether the buyer
+// name/phone matches a prior (cancelled/expired) booking on that same plot,
+// so the form can prompt the agent to confirm a rebook before finalizing.
+// Read-only; the actual reuse-vs-create decision is re-verified server-side
+// in createBooksRecordForBooking using the same helpers — this endpoint only
+// drives the popup, it's never trusted as the authoritative answer.
+func checkRebookMatchHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	plotIDStrs := strings.Split(r.URL.Query().Get("plot_ids"), ",")
+	buyerName := strings.TrimSpace(r.URL.Query().Get("buyer_name"))
+	buyerPhone := strings.TrimSpace(r.URL.Query().Get("buyer_phone"))
+
+	type match struct {
+		PlotID            int    `json:"plot_id"`
+		PlotNumber        string `json:"plot_number"`
+		EstateName        string `json:"estate_name"`
+		PreviousBuyerName string `json:"previous_buyer_name"`
+	}
+	var matches []match
+
+	for _, idStr := range plotIDStrs {
+		pid, err := strconv.Atoi(strings.TrimSpace(idStr))
+		if err != nil || pid == 0 {
+			continue
+		}
+		prior, err := findPriorBookingHistory(pid)
+		if err != nil || prior == nil {
+			continue
+		}
+		if !buyerMatchesPrior(prior, buyerName, buyerPhone) {
+			continue
+		}
+		var plotNumber, estateName string
+		db.QueryRow(`SELECT p.plot_number, e.name FROM prop_plots p JOIN prop_estates e ON e.id = p.estate_id WHERE p.id = ?`, pid).
+			Scan(&plotNumber, &estateName)
+		matches = append(matches, match{PlotID: pid, PlotNumber: plotNumber, EstateName: estateName, PreviousBuyerName: prior.BuyerName})
+	}
+
+	if matches == nil {
+		matches = []match{}
+	}
+	json.NewEncoder(w).Encode(matches)
+}
+
+// Admin dashboard: overview with bar charts per estate
+func adminDashboardHandler(w http.ResponseWriter, r *http.Request) {
+	selectedMonth := r.URL.Query().Get("month")
+
+	// Estate plot counts — total and available always reflect current stock.
+	// Booked/SA Signed/Sold are filtered by month when selected.
+	rows, err := db.Query(`
+		SELECT e.name,
+			COUNT(p.id),
+			COALESCE(SUM(p.status = 'available'), 0)
+		FROM prop_estates e
+		LEFT JOIN prop_plots p ON p.estate_id = e.id
+		WHERE COALESCE(e.is_restricted,0)=0
+		GROUP BY e.id, e.name
+		ORDER BY e.name`)
+	if err != nil {
+		log.Printf("dashboard query: %v", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var estates []string
+	var totalPlots, availablePlots []int
+	for rows.Next() {
+		var name string
+		var total, available int
+		if err := rows.Scan(&name, &total, &available); err != nil {
+			log.Printf("dashboard scan: %v", err)
+			continue
+		}
+		estates = append(estates, name)
+		totalPlots = append(totalPlots, total)
+		availablePlots = append(availablePlots, available)
+	}
+
+	// Build per-estate maps for booked/sa_signed/sold, month-filtered when selected.
+	bookedByEstate := map[string]int{}
+	saSignedByEstate := map[string]int{}
+	soldByEstate := map[string]int{}
+
+	if selectedMonth != "" {
+		if br, e := db.Query(`
+			SELECT e.name, COUNT(b.id)
+			FROM prop_bookings b JOIN prop_estates e ON e.id = b.estate_id
+			WHERE DATE_FORMAT(b.date_booked,'%Y-%m') = ?
+			  AND COALESCE(e.is_restricted,0)=0
+			GROUP BY e.id, e.name`, selectedMonth); e == nil {
+			defer br.Close()
+			for br.Next() {
+				var n string
+				var c int
+				if br.Scan(&n, &c) == nil {
+					bookedByEstate[n] = c
+				}
+			}
+		}
+		if sr, e := db.Query(`
+			SELECT e.name, COUNT(b.id)
+			FROM prop_bookings b JOIN prop_estates e ON e.id = b.estate_id
+			WHERE b.status IN ('sa_signed','completed')
+			  AND DATE_FORMAT(COALESCE(b.date_signed, b.date_booked),'%Y-%m') = ?
+			  AND COALESCE(e.is_restricted,0)=0
+			GROUP BY e.id, e.name`, selectedMonth); e == nil {
+			defer sr.Close()
+			for sr.Next() {
+				var n string
+				var c int
+				if sr.Scan(&n, &c) == nil {
+					saSignedByEstate[n] = c
+				}
+			}
+		}
+		if vr, e := db.Query(`
+			SELECT e.name, COUNT(s.id)
+			FROM prop_sales s JOIN prop_estates e ON e.id = s.estate_id
+			WHERE DATE_FORMAT(s.sale_date,'%Y-%m') = ?
+			  AND COALESCE(e.is_restricted,0)=0
+			GROUP BY e.id, e.name`, selectedMonth); e == nil {
+			defer vr.Close()
+			for vr.Next() {
+				var n string
+				var c int
+				if vr.Scan(&n, &c) == nil {
+					soldByEstate[n] = c
+				}
+			}
+		}
+	} else {
+		if br, e := db.Query(`
+			SELECT e.name, SUM(p.status='booked'), SUM(p.status='sa_signed'), SUM(p.status='sold')
+			FROM prop_estates e LEFT JOIN prop_plots p ON p.estate_id = e.id
+			WHERE COALESCE(e.is_restricted,0)=0
+			GROUP BY e.id, e.name ORDER BY e.name`); e == nil {
+			defer br.Close()
+			for br.Next() {
+				var n string
+				var b, s, v int
+				if br.Scan(&n, &b, &s, &v) == nil {
+					bookedByEstate[n] = b
+					saSignedByEstate[n] = s
+					soldByEstate[n] = v
+				}
+			}
+		}
+	}
+
+	var bookedPlots, saSignedPlots, soldPlots []int
+	for _, name := range estates {
+		bookedPlots = append(bookedPlots, bookedByEstate[name])
+		saSignedPlots = append(saSignedPlots, saSignedByEstate[name])
+		soldPlots = append(soldPlots, soldByEstate[name])
+	}
+
+	// Top agents by value of plots sa_signed, filtered by month when selected.
+	// Uses prop_bookings: status 'completed' means the plot later went to sold but was still sa_signed.
+	// COALESCE(date_signed, date_booked) handles older bookings where date_signed was not yet recorded.
+	agentQuery := `
+		SELECT b.agent_name, COALESCE(SUM(e.plot_price), 0) AS total_value
+		FROM prop_bookings b
+		JOIN prop_estates e ON e.id = b.estate_id
+		WHERE b.status IN ('sa_signed', 'completed')
+		  AND b.agent_name IS NOT NULL AND b.agent_name != ''
+		  AND b.agent_name NOT IN ('Daniel Mwangi', 'Kevin Magua', 'James Maina')
+		GROUP BY b.agent_name
+		ORDER BY total_value DESC
+		LIMIT 10`
+	agentArgs := []any{}
+	if selectedMonth != "" {
+		agentQuery = `
+			SELECT b.agent_name, COALESCE(SUM(e.plot_price), 0) AS total_value
+			FROM prop_bookings b
+			JOIN prop_estates e ON e.id = b.estate_id
+			WHERE b.status IN ('sa_signed', 'completed')
+			  AND b.agent_name IS NOT NULL AND b.agent_name != ''
+			  AND b.agent_name NOT IN ('Daniel Mwangi', 'Kevin Magua', 'James Maina')
+			  AND DATE_FORMAT(COALESCE(b.date_signed, b.date_booked), '%Y-%m') = ?
+			GROUP BY b.agent_name
+			ORDER BY total_value DESC
+			LIMIT 10`
+		agentArgs = []any{selectedMonth}
+	}
+	var agents []string
+	var agentValues []float64
+	if agentRows, err := db.Query(agentQuery, agentArgs...); err == nil {
+		defer agentRows.Close()
+		for agentRows.Next() {
+			var name string
+			var val float64
+			if agentRows.Scan(&name, &val) == nil {
+				agents = append(agents, name)
+				agentValues = append(agentValues, val)
+			}
+		}
+	}
+
+	// Plots fully sold per agent (from prop_sales), always all-time, no month filter.
+	soldAgentQ := `
+		SELECT s.agent_name, COUNT(*) AS cnt
+		FROM prop_sales s
+		WHERE s.agent_name IS NOT NULL AND s.agent_name != ''
+		  AND s.agent_name NOT IN ('Joseph Maina', 'Lucy Wambui', 'James Maina', 'Daniel Mwangi', 'Kevin Magua')
+		GROUP BY s.agent_name ORDER BY cnt DESC LIMIT 10`
+	var soldAgents []string
+	var soldAgentCounts []int
+	if sar, err2 := db.Query(soldAgentQ); err2 == nil {
+		defer sar.Close()
+		for sar.Next() {
+			var n string
+			var c int
+			if sar.Scan(&n, &c) == nil {
+				soldAgents = append(soldAgents, n)
+				soldAgentCounts = append(soldAgentCounts, c)
+			}
+		}
+	}
+
+	// Months dropdown — union of booking, sale, and sa_signed transition months
+	monthRows, _ := db.Query(`
+		SELECT DISTINCT month FROM (
+			SELECT DATE_FORMAT(date_booked, '%Y-%m') AS month FROM prop_bookings WHERE date_booked IS NOT NULL
+			UNION
+			SELECT DATE_FORMAT(sale_date, '%Y-%m') AS month FROM prop_sales WHERE sale_date IS NOT NULL
+			UNION
+			SELECT DATE_FORMAT(changed_at, '%Y-%m') AS month FROM prop_plot_status_log WHERE new_status = 'sa_signed'
+		) t
+		ORDER BY month DESC`)
+	var months []string
+	if monthRows != nil {
+		defer monthRows.Close()
+		for monthRows.Next() {
+			var m string
+			if err := monthRows.Scan(&m); err == nil {
+				months = append(months, m)
+			}
+		}
+	}
+
+	// Summary stat cards — filter by month when selected
+	type statTotals struct {
+		Estates       int
+		Available     int
+		Booked        int
+		SaSigned      int
+		Sold          int
+		MonthFiltered bool
+	}
+	var stats statTotals
+	db.QueryRow(`SELECT COUNT(*) FROM prop_estates WHERE COALESCE(is_restricted,0)=0`).Scan(&stats.Estates)
+	db.QueryRow(`SELECT COUNT(*) FROM prop_plots p JOIN prop_estates e ON e.id=p.estate_id WHERE p.status='available' AND COALESCE(e.is_restricted,0)=0`).Scan(&stats.Available)
+	if selectedMonth != "" {
+		stats.MonthFiltered = true
+		db.QueryRow(`SELECT COUNT(*) FROM prop_bookings b JOIN prop_estates e ON e.id=b.estate_id WHERE DATE_FORMAT(b.date_booked,'%Y-%m')=? AND b.status IN ('active','sa_signed','completed') AND COALESCE(e.is_restricted,0)=0`, selectedMonth).Scan(&stats.Booked)
+		db.QueryRow(`SELECT COUNT(*) FROM prop_bookings b JOIN prop_estates e ON e.id=b.estate_id WHERE DATE_FORMAT(b.date_booked,'%Y-%m')=? AND b.status='sa_signed' AND COALESCE(e.is_restricted,0)=0`, selectedMonth).Scan(&stats.SaSigned)
+		db.QueryRow(`SELECT COUNT(*) FROM prop_sales s JOIN prop_estates e ON e.id=s.estate_id WHERE DATE_FORMAT(s.sale_date,'%Y-%m')=? AND COALESCE(e.is_restricted,0)=0`, selectedMonth).Scan(&stats.Sold)
+	} else {
+		db.QueryRow(`SELECT COUNT(*) FROM prop_plots p JOIN prop_estates e ON e.id=p.estate_id WHERE p.status='booked' AND COALESCE(e.is_restricted,0)=0`).Scan(&stats.Booked)
+		db.QueryRow(`SELECT COUNT(*) FROM prop_plots p JOIN prop_estates e ON e.id=p.estate_id WHERE p.status='sa_signed' AND COALESCE(e.is_restricted,0)=0`).Scan(&stats.SaSigned)
+		db.QueryRow(`SELECT COUNT(*) FROM prop_plots p JOIN prop_estates e ON e.id=p.estate_id WHERE p.status='sold' AND COALESCE(e.is_restricted,0)=0`).Scan(&stats.Sold)
+	}
+
+	chartData := map[string]any{
+		"estates":         estates,
+		"totalPlots":      totalPlots,
+		"availablePlots":  availablePlots,
+		"bookedPlots":     bookedPlots,
+		"soldPlots":       soldPlots,
+		"saSignedPlots":   saSignedPlots,
+		"agents":          agents,
+		"agentValues":     agentValues,
+		"soldAgents":      soldAgents,
+		"soldAgentCounts": soldAgentCounts,
+	}
+	chartJSON, _ := json.Marshal(chartData)
+
+	renderAdmin(w, r, "admin_dashboard.html", map[string]any{
+		"Title":         "Dashboard Overview",
+		"Active":        "dashboard",
+		"Months":        months,
+		"SelectedMonth": selectedMonth,
+		"ChartData":     template.JS(chartJSON),
+		"Stats":         stats,
+	})
+}
+
+func adminEstatesHandler(w http.ResponseWriter, r *http.Request) {
+	type estateRow struct {
+		ID        int
+		Name      string
+		Total     int
+		Available int
+		Booked    int
+		SaSigned  int
+		Sold      int
+	}
+	rows, err := db.Query(`
+		SELECT e.id, e.name,
+			COUNT(p.id),
+			COALESCE(SUM(p.status = 'available'), 0),
+			COALESCE(SUM(p.status = 'booked'), 0),
+			COALESCE(SUM(p.status = 'sa_signed'), 0),
+			COALESCE(SUM(p.status = 'sold'), 0)
+		FROM prop_estates e
+		LEFT JOIN prop_plots p ON p.estate_id = e.id
+		WHERE COALESCE(e.is_restricted, 0) = 0
+		GROUP BY e.id, e.name
+		ORDER BY e.name`)
+	if err != nil {
+		log.Printf("estates query: %v", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+	var estates []estateRow
+	for rows.Next() {
+		var e estateRow
+		if err := rows.Scan(&e.ID, &e.Name, &e.Total, &e.Available, &e.Booked, &e.SaSigned, &e.Sold); err != nil {
+			log.Printf("estates scan: %v", err)
+			continue
+		}
+		estates = append(estates, e)
+	}
+	renderAdmin(w, r, "admin_estates.html", map[string]any{"Title": "Estates", "Active": "estates", "Estates": estates})
+}
+
+func adminEstateDetailHandler(w http.ResponseWriter, r *http.Request) {
+	id := r.Context().Value(ctxID).(string)
+	status := r.URL.Query().Get("status")
+	if status == "" {
+		status = "available"
+	}
+
+	// Estate info
+	var estateName, image, mutationImage, plotInfo string
+	err := db.QueryRow(`SELECT name, COALESCE(image,''), COALESCE(mutation_image,''), COALESCE(prop_plotinfo,'') FROM prop_estates WHERE id = ?`, id).
+		Scan(&estateName, &image, &mutationImage, &plotInfo)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	displayImage := mutationImage
+	if displayImage == "" {
+		displayImage = image
+	}
+
+	// Status counts
+	counts := map[string]int{"available": 0, "booked": 0, "sa_signed": 0, "sold": 0}
+	cRows, _ := db.Query(`SELECT status, COUNT(*) FROM prop_plots WHERE estate_id=? GROUP BY status`, id)
+	if cRows != nil {
+		defer cRows.Close()
+		for cRows.Next() {
+			var s string
+			var c int
+			if cRows.Scan(&s, &c) == nil {
+				counts[s] = c
+			}
+		}
+	}
+
+	// Plot zones with current status
+	zones := []zoneDisplay{}
+	zRows, _ := db.Query(`
+		SELECT pz.plot_number, COALESCE(pz.points_json,'[]'), COALESCE(pp.status,'available')
+		FROM prop_plot_zones pz
+		LEFT JOIN prop_plots pp ON pp.estate_id = pz.estate_id AND pp.plot_number = pz.plot_number
+		WHERE pz.estate_id = ?
+		ORDER BY pz.id`, id)
+	if zRows != nil {
+		defer zRows.Close()
+		for zRows.Next() {
+			var pn, pj, st string
+			if err := zRows.Scan(&pn, &pj, &st); err == nil {
+				var pts []pointXY
+				json.Unmarshal([]byte(pj), &pts)
+				zones = append(zones, zoneDisplay{PlotNumber: pn, Status: st, Points: pts})
+			}
+		}
+	}
+	zonesJSON, _ := json.Marshal(zones)
+
+	// Plots filtered by selected status tab
+	type plotRow struct {
+		ID     int
+		Number string
+		Status string
+	}
+	pRows, _ := db.Query(`SELECT id, plot_number, status FROM prop_plots WHERE estate_id=? AND status=? ORDER BY id`, id, status)
+	var plots []plotRow
+	if pRows != nil {
+		defer pRows.Close()
+		for pRows.Next() {
+			var p plotRow
+			if pRows.Scan(&p.ID, &p.Number, &p.Status) == nil {
+				plots = append(plots, p)
+			}
+		}
+	}
+
+	plotInfo = strings.ReplaceAll(plotInfo, `\r\n`, "\n")
+	plotInfo = strings.ReplaceAll(plotInfo, `\n`, "\n")
+	plotInfo = strings.ReplaceAll(plotInfo, "\r", "")
+
+	plotInfoLinesJSON, _ := json.Marshal(strings.Split(plotInfo, "\n"))
+
+	canWrite := getRole(r) == roleSystemAdmin || hasPermission(getUserID(r), "admin.estates", "write")
+	renderAdmin(w, r, "admin_estate_detail.html", map[string]any{
+		"Title":        estateName,
+		"Active":       "estates",
+		"EstateName":   estateName,
+		"EstateID":     id,
+		"DisplayImage": displayImage,
+		"PlotInfo":     plotInfo,
+		"PlotInfoJSON": template.JS(plotInfoLinesJSON),
+		"Plots":        plots,
+		"Counts":       counts,
+		"Status":       status,
+		"ZonesJSON":    template.JS(zonesJSON),
+		"CanWrite":     canWrite,
+	})
+}
+
+// saveUploadedFiles saves multipart uploaded files and returns comma-separated filenames.
+func saveUploadedFiles(r *http.Request, fieldName string) string {
+	if r.MultipartForm == nil {
+		return ""
+	}
+	var saved []string
+	for _, fh := range r.MultipartForm.File[fieldName] {
+		if fh.Size == 0 {
+			continue // skip empty file parts (common on mobile when no file selected)
+		}
+		f, err := fh.Open()
+		if err != nil {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(fh.Filename))
+		// Mobile browsers (especially iOS camera) often send files with no extension;
+		// fall back to Content-Type to determine the correct extension.
+		if ext == "" {
+			switch fh.Header.Get("Content-Type") {
+			case "image/jpeg":
+				ext = ".jpg"
+			case "image/png":
+				ext = ".png"
+			case "image/heic", "image/heif":
+				ext = ".heic"
+			case "image/webp":
+				ext = ".webp"
+			case "application/pdf":
+				ext = ".pdf"
+			default:
+				ext = ".bin"
+			}
+		}
+		safe := strings.Map(func(ch rune) rune {
+			if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-' {
+				return ch
+			}
+			return '_'
+		}, strings.TrimSuffix(fh.Filename, filepath.Ext(fh.Filename)))
+		if safe == "" {
+			safe = fieldName // fallback when browser sends no filename (e.g. camera shot)
+		}
+		fname := fmt.Sprintf("%s_%d_%s%s", fieldName, time.Now().UnixNano(), safe, ext)
+		dst, err := os.Create(filepath.Join(uploadsDir, fname))
+		if err != nil {
+			f.Close()
+			continue
+		}
+		io.Copy(dst, f)
+		dst.Close()
+		f.Close()
+		saved = append(saved, fname)
+	}
+	return strings.Join(saved, ",")
+}
+
+func adminEstatePlotsHandler(w http.ResponseWriter, r *http.Request) {
+	id := r.Context().Value(ctxID).(string)
+	status := r.URL.Query().Get("status")
+	if status == "" {
+		status = "available"
+	}
+
+	var estateName string
+	if err := db.QueryRow(`SELECT name FROM prop_estates WHERE id=?`, id).Scan(&estateName); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	counts := map[string]int{"available": 0, "booked": 0, "sa_signed": 0, "sold": 0}
+	cRows, _ := db.Query(`SELECT status, COUNT(*) FROM prop_plots WHERE estate_id=? GROUP BY status`, id)
+	if cRows != nil {
+		defer cRows.Close()
+		for cRows.Next() {
+			var s string
+			var c int
+			if cRows.Scan(&s, &c) == nil {
+				counts[s] = c
+			}
+		}
+	}
+
+	type plotRow struct {
+		ID         int
+		Number     string
+		Status     string
+		BuyerName  string
+		BuyerPhone string
+		AgentName  string
+		DateBooked string
+	}
+	var plots []plotRow
+	if status == "booked" || status == "sa_signed" {
+		pRows, _ := db.Query(`
+			SELECT p.id, p.plot_number, p.status,
+				COALESCE(b.buyer_name,''), COALESCE(b.buyer_phone,''),
+				COALESCE(b.agent_name,''), COALESCE(DATE_FORMAT(b.date_booked,'%d %b %Y %H:%i'),'')
+			FROM prop_plots p
+			LEFT JOIN prop_bookings b ON b.id = (
+				SELECT id FROM prop_bookings
+				WHERE plot_id = p.id AND status NOT IN ('cancelled','expired')
+				ORDER BY id DESC LIMIT 1
+			)
+			WHERE p.estate_id=? AND p.status=?
+			ORDER BY p.id`, id, status)
+		if pRows != nil {
+			defer pRows.Close()
+			for pRows.Next() {
+				var p plotRow
+				if pRows.Scan(&p.ID, &p.Number, &p.Status, &p.BuyerName, &p.BuyerPhone, &p.AgentName, &p.DateBooked) == nil {
+					plots = append(plots, p)
+				}
+			}
+		}
+	} else {
+		pRows, _ := db.Query(`SELECT id, plot_number, status FROM prop_plots WHERE estate_id=? AND status=? ORDER BY id`, id, status)
+		if pRows != nil {
+			defer pRows.Close()
+			for pRows.Next() {
+				var p plotRow
+				if pRows.Scan(&p.ID, &p.Number, &p.Status) == nil {
+					plots = append(plots, p)
+				}
+			}
+		}
+	}
+
+	renderAdmin(w, r, "admin_estate_plots.html", map[string]any{
+		"Title":      estateName + " – Plots",
+		"Active":     "estates",
+		"EstateName": estateName,
+		"EstateID":   id,
+		"Status":     status,
+		"Plots":      plots,
+		"Counts":     counts,
+	})
+}
+
+func adminUpdatePlotStatusHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/admin/estates", http.StatusFound)
+		return
+	}
+	id := r.Context().Value(ctxID).(string)
+	r.ParseMultipartForm(10 << 20)
+	plotID := r.FormValue("plot_id")
+	newStatus := r.FormValue("status")
+
+	// Allow forward transitions and revert to available
+	allowed := map[string]bool{"sa_signed": true, "sold": true, "available": true}
+	if !allowed[newStatus] || plotID == "" {
+		http.Redirect(w, r, "/admin/estate/"+id+"/plots?status=booked", http.StatusFound)
+		return
+	}
+
+	// Verify plot belongs to this estate and is in a transitionable state
+	var currentStatus, plotNumber, plotEstateName string
+	var estateID int
+	err := db.QueryRow(`SELECT p.status, p.estate_id, p.plot_number, e.name
+		FROM prop_plots p JOIN prop_estates e ON e.id = p.estate_id
+		WHERE p.id=? AND p.estate_id=?`, plotID, id).
+		Scan(&currentStatus, &estateID, &plotNumber, &plotEstateName)
+	if err != nil || (currentStatus != "booked" && currentStatus != "sa_signed" && currentStatus != "sold") {
+		http.Redirect(w, r, "/admin/estate/"+id+"/plots?status=booked", http.StatusFound)
+		return
+	}
+
+	// Server-side permission check for the specific action
+	uid := getUserID(r)
+	var requiredFeature string
+	switch {
+	case currentStatus == "booked" && newStatus == "sa_signed":
+		requiredFeature = "admin.booked_to_signed"
+	case currentStatus == "booked" && newStatus == "available":
+		requiredFeature = "admin.booked_to_available"
+	case currentStatus == "sa_signed" && newStatus == "sold":
+		requiredFeature = "admin.signed_to_sold"
+		// Permission check happens below; redirect after.
+	case currentStatus == "sa_signed" && newStatus == "available":
+		requiredFeature = "admin.signed_to_available"
+	case currentStatus == "sold" && newStatus == "available":
+		requiredFeature = "admin.sold_to_available"
+	}
+	if requiredFeature != "" && getRole(r) != roleSystemAdmin && !hasPermission(uid, requiredFeature, "read") {
+		w.WriteHeader(http.StatusForbidden)
+		render(w, "access_denied", nil)
+		return
+	}
+
+	// sa_signed → sold requires document upload — hand off to dedicated page.
+	if currentStatus == "sa_signed" && newStatus == "sold" {
+		http.Redirect(w, r, "/admin/mark-sold/"+plotID+"?estate_id="+id, http.StatusFound)
+		return
+	}
+
+	db.Exec(`UPDATE prop_plots SET status=? WHERE id=?`, newStatus, plotID)
+	if plotIDInt, err2 := strconv.Atoi(plotID); err2 == nil {
+		logPlotStatus(plotIDInt, plotNumber, plotEstateName, estateID, currentStatus, newStatus, getAgentName(r), "admin action")
+	}
+
+	// Sync booking/sales records
+	if newStatus == "sold" {
+		db.Exec(`UPDATE prop_bookings SET status='completed' WHERE plot_id=? AND status IN ('active','sa_signed')`, plotID)
+		// Create a sales record from the booking if one doesn't exist
+		var buyerName, buyerPhone, buyerEmail, agentName, paymentPlan, depositRef, idPhoto, kra, passportPhoto string
+		var deposit float64
+		db.QueryRow(`SELECT buyer_name, COALESCE(buyer_phone,''), COALESCE(buyer_email,''), COALESCE(agent_name,''), COALESCE(deposit,0), COALESCE(payment_plan,''), COALESCE(deposit_ref,''), COALESCE(id_photo,''), COALESCE(kra,''), COALESCE(passport_photo,'') FROM prop_bookings WHERE plot_id=? ORDER BY id DESC LIMIT 1`, plotID).
+			Scan(&buyerName, &buyerPhone, &buyerEmail, &agentName, &deposit, &paymentPlan, &depositRef, &idPhoto, &kra, &passportPhoto)
+		db.Exec(`INSERT IGNORE INTO prop_sales (plot_id, estate_id, buyer_name, buyer_phone, buyer_email, agent_name, amount, payment_plan, deposit_doc, id_doc, kra_doc, passport_photo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+			plotID, id, buyerName, buyerPhone, buyerEmail, agentName, deposit, paymentPlan, depositRef, idPhoto, kra, passportPhoto)
+	} else if newStatus == "sa_signed" {
+		db.Exec(`UPDATE prop_bookings SET status='sa_signed', date_signed=NOW() WHERE plot_id=? AND status='active'`, plotID)
+		if saleAgreement := saveUploadedFiles(r, "sale_agreement"); saleAgreement != "" {
+			installmentPage := strings.TrimSpace(r.FormValue("installment_page"))
+			db.Exec(`UPDATE prop_bookings SET sale_agreement=?, installment_page=? WHERE plot_id=? AND status='sa_signed'`, saleAgreement, installmentPage, plotID)
+		}
+		if plotIDInt, err2 := strconv.Atoi(plotID); err2 == nil {
+			processSignedIntegrations(plotIDInt, plotNumber, plotEstateName)
+		}
+	} else if newStatus == "available" {
+		// Fetch zoho_books_id before cancelling so we can void the estimate in Zoho Books
+		var zohoBookID string
+		db.QueryRow(`SELECT COALESCE(zoho_books_id,'') FROM prop_bookings WHERE plot_id=? AND status IN ('active','sa_signed','completed') ORDER BY id DESC LIMIT 1`, plotID).Scan(&zohoBookID)
+		db.Exec(`UPDATE prop_bookings SET status='cancelled' WHERE plot_id=? AND status IN ('active','sa_signed','completed')`, plotID)
+		db.Exec(`DELETE FROM prop_sales WHERE plot_id=?`, plotID)
+		if zohoBookID != "" {
+			go cancelBooksEstimate(zohoBookID)
+		}
+	}
+
+	redirectStatus := newStatus
+	if newStatus == "available" {
+		redirectStatus = "available"
+	}
+	http.Redirect(w, r, "/admin/estate/"+id+"/plots?status="+redirectStatus, http.StatusFound)
+}
+
+func adminMarkSoldHandler(w http.ResponseWriter, r *http.Request) {
+	plotID := strings.TrimPrefix(r.URL.Path, "/admin/mark-sold/")
+	plotID = strings.TrimSuffix(plotID, "/")
+	estateID := r.URL.Query().Get("estate_id")
+	if plotID == "" || estateID == "" {
+		http.Redirect(w, r, "/admin/signed-plots", http.StatusFound)
+		return
+	}
+
+	type markSoldInfo struct {
+		PlotID              string
+		EstateID            string
+		PlotNumber          string
+		EstateName          string
+		BuyerName           string
+		BuyerPhone          string
+		BuyerEmail          string
+		AgentName           string
+		LetterOfConsent     string
+		TransferForms       string
+		TitleDeed           string
+		LetterOfConsentFiles []string
+		TransferFormsFiles   []string
+		TitleDeedFiles       []string
+		AllDocsPresent      bool
+	}
+
+	var info markSoldInfo
+	info.PlotID = plotID
+	info.EstateID = estateID
+	err := db.QueryRow(`
+		SELECT p.plot_number, e.name,
+		       COALESCE(b.buyer_name,''), COALESCE(b.buyer_phone,''), COALESCE(b.buyer_email,''), COALESCE(b.agent_name,'')
+		FROM prop_plots p
+		JOIN prop_estates e ON e.id = p.estate_id
+		LEFT JOIN prop_bookings b ON b.plot_id = p.id AND b.status = 'sa_signed'
+		WHERE p.id = ?
+		ORDER BY b.id DESC LIMIT 1`, plotID).
+		Scan(&info.PlotNumber, &info.EstateName, &info.BuyerName, &info.BuyerPhone, &info.BuyerEmail, &info.AgentName)
+	if err != nil {
+		http.Redirect(w, r, "/admin/signed-plots", http.StatusFound)
+		return
+	}
+
+	// Helper to split comma-separated filenames
+	splitSoldFiles := func(s string) []string {
+		if s == "" {
+			return nil
+		}
+		var out []string
+		for _, f := range strings.Split(s, ",") {
+			f = strings.TrimSpace(f)
+			if f != "" {
+				out = append(out, f)
+			}
+		}
+		return out
+	}
+
+	// Fetch already-saved docs from prop_sales staging row
+	loadSoldDocs := func() {
+		db.QueryRow(`SELECT COALESCE(letter_of_consent,''), COALESCE(transfer_forms,''), COALESCE(title_deed,'') FROM prop_sales WHERE plot_id=? ORDER BY id DESC LIMIT 1`, plotID).
+			Scan(&info.LetterOfConsent, &info.TransferForms, &info.TitleDeed)
+		info.LetterOfConsentFiles = splitSoldFiles(info.LetterOfConsent)
+		info.TransferFormsFiles = splitSoldFiles(info.TransferForms)
+		info.TitleDeedFiles = splitSoldFiles(info.TitleDeed)
+		info.AllDocsPresent = info.LetterOfConsent != "" && info.TransferForms != "" && info.TitleDeed != ""
+	}
+
+	// Fetch buyer info from the booking (needed for upsert)
+	fetchBuyerInfo := func() (buyerName, buyerPhone, buyerEmail, agentName, paymentPlan, depositRef, idPhoto, kra, passportPhoto string, deposit float64) {
+		db.QueryRow(`SELECT buyer_name, COALESCE(buyer_phone,''), COALESCE(buyer_email,''), COALESCE(agent_name,''),
+			COALESCE(deposit,0), COALESCE(payment_plan,''), COALESCE(deposit_ref,''), COALESCE(id_photo,''),
+			COALESCE(kra,''), COALESCE(passport_photo,'')
+			FROM prop_bookings WHERE plot_id=? ORDER BY id DESC LIMIT 1`, plotID).
+			Scan(&buyerName, &buyerPhone, &buyerEmail, &agentName, &deposit, &paymentPlan, &depositRef, &idPhoto, &kra, &passportPhoto)
+		return
+	}
+
+	if r.Method == http.MethodPost {
+		action := r.FormValue("action")
+
+		if action == "upload_doc" {
+			r.ParseMultipartForm(32 << 20)
+			docField := r.FormValue("doc_field")
+			if docField != "letter_of_consent" && docField != "transfer_forms" && docField != "title_deed" {
+				http.Error(w, "invalid doc field", http.StatusBadRequest)
+				return
+			}
+
+			loadSoldDocs()
+			newFiles := saveUploadedFiles(r, docField)
+			if newFiles == "" {
+				http.Redirect(w, r, r.URL.String(), http.StatusFound)
+				return
+			}
+
+			// Append to existing
+			loc := info.LetterOfConsent
+			tf := info.TransferForms
+			td := info.TitleDeed
+			appendTo := func(existing, added string) string {
+				if existing == "" {
+					return added
+				}
+				return existing + "," + added
+			}
+			switch docField {
+			case "letter_of_consent":
+				loc = appendTo(loc, newFiles)
+			case "transfer_forms":
+				tf = appendTo(tf, newFiles)
+			case "title_deed":
+				td = appendTo(td, newFiles)
+			}
+
+			buyerName2, buyerPhone2, buyerEmail2, agentName2, paymentPlan, depositRef, idPhoto, kra, passportPhoto, deposit := fetchBuyerInfo()
+			var existingSalesID int
+			db.QueryRow(`SELECT id FROM prop_sales WHERE plot_id=? ORDER BY id DESC LIMIT 1`, plotID).Scan(&existingSalesID)
+			if existingSalesID > 0 {
+				db.Exec(`UPDATE prop_sales SET letter_of_consent=?, transfer_forms=?, title_deed=? WHERE id=?`, loc, tf, td, existingSalesID)
+			} else {
+				db.Exec(`INSERT INTO prop_sales
+					(plot_id, estate_id, buyer_name, buyer_phone, buyer_email, agent_name, amount, payment_plan,
+					 deposit_doc, id_doc, kra_doc, passport_photo, letter_of_consent, transfer_forms, title_deed)
+					VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+					plotID, estateID, buyerName2, buyerPhone2, buyerEmail2, agentName2, deposit, paymentPlan,
+					depositRef, idPhoto, kra, passportPhoto, loc, tf, td)
+			}
+
+			http.Redirect(w, r, r.URL.String()+"&saved="+docField, http.StatusFound)
+			return
+		}
+
+		if action == "mark_sold" {
+			// Re-read docs to confirm all present
+			var loc, tf, td string
+			db.QueryRow(`SELECT COALESCE(letter_of_consent,''), COALESCE(transfer_forms,''), COALESCE(title_deed,'') FROM prop_sales WHERE plot_id=? ORDER BY id DESC LIMIT 1`, plotID).
+				Scan(&loc, &tf, &td)
+			if loc == "" || tf == "" || td == "" {
+				http.Redirect(w, r, r.URL.String()+"&err=missing_docs", http.StatusFound)
+				return
+			}
+
+			db.Exec(`UPDATE prop_plots SET status='sold' WHERE id=?`, plotID)
+			db.Exec(`UPDATE prop_bookings SET status='completed' WHERE plot_id=? AND status='sa_signed'`, plotID)
+
+			if plotIDInt, err2 := strconv.Atoi(plotID); err2 == nil {
+				logPlotStatus(plotIDInt, info.PlotNumber, info.EstateName, 0, "sa_signed", "sold", getAgentName(r), "admin action")
+				processSoldAttachments(plotIDInt, loc, tf, td)
+			}
+
+			buyerName2, buyerPhone2, buyerEmail2, agentName2, paymentPlan, _, _, _, _, deposit := fetchBuyerInfo()
+			go func() {
+				b := bookingInfo{
+					PlotNumbers: []string{info.PlotNumber},
+					EstateName:  info.EstateName,
+					BuyerName:   buyerName2,
+					BuyerPhone:  buyerPhone2,
+					BuyerEmail:  buyerEmail2,
+					AgentName:   agentName2,
+					Deposit:     fmt.Sprintf("%.2f", deposit),
+					PaymentPlan: paymentPlan,
+				}
+				if err := sendSoldEmail(b); err != nil {
+					log.Printf("[sold-email] error: %v", err)
+				}
+			}()
+
+			http.Redirect(w, r, "/admin/estate/"+estateID+"/plots?status=sold", http.StatusFound)
+			return
+		}
+	}
+
+	loadSoldDocs()
+	savedField := r.URL.Query().Get("saved")
+	errMsg := r.URL.Query().Get("err")
+	renderAdmin(w, r, "admin_mark_sold.html", map[string]any{
+		"Title":      "Mark as Sold — " + info.PlotNumber,
+		"Info":       info,
+		"SavedField": savedField,
+		"ErrMsg":     errMsg,
+	})
+}
+
+func adminEstateBookHandler(w http.ResponseWriter, r *http.Request) {
+	id := r.Context().Value(ctxID).(string)
+	agentName := getAgentName(r)
+
+	type plotRow struct {
+		ID         int
+		Number     string
+		EstateName string
+	}
+
+	fetchPlots := func(ids []string) ([]plotRow, string) {
+		var rows []plotRow
+		var estateName string
+		for _, pid := range ids {
+			var p plotRow
+			if err := db.QueryRow(`SELECT pp.id, pp.plot_number, e.name FROM prop_plots pp JOIN prop_estates e ON e.id=pp.estate_id WHERE pp.id=? AND pp.status='available'`, pid).
+				Scan(&p.ID, &p.Number, &p.EstateName); err == nil {
+				rows = append(rows, p)
+				estateName = p.EstateName
+			}
+		}
+		return rows, estateName
+	}
+
+	renderBookForm := func(plots []plotRow, estateName, formErr string) {
+		title := fmt.Sprintf("Book Plot %s", plots[0].Number)
+		if len(plots) > 1 {
+			title = fmt.Sprintf("Book %d Plots", len(plots))
+		}
+		renderAdmin(w, r, "admin_estate_book.html", map[string]any{
+			"Title":      title,
+			"Active":     "estates",
+			"Plots":      plots,
+			"EstateName": estateName,
+			"EstateID":   id,
+			"FormError":  formErr,
+		})
+	}
+
+	if r.Method == http.MethodPost {
+		r.ParseMultipartForm(32 << 20)
+		plotIDs := r.Form["plot_ids"]
+		buyerName := strings.TrimSpace(r.FormValue("buyer_name"))
+		buyerPhone := strings.TrimSpace(r.FormValue("buyer_phone"))
+		buyerEmail := r.FormValue("buyer_email")
+		deposit := strings.TrimSpace(r.FormValue("deposit"))
+		paymentPlan := r.FormValue("payment_plan")
+		leadSource := r.FormValue("lead_source")
+		notes := strings.TrimSpace(r.FormValue("notes"))
+		rebookConfirmed := r.FormValue("rebook_confirmed") == "1"
+
+		plots, estateName := fetchPlots(plotIDs)
+
+		switch {
+		case buyerName == "":
+			renderBookForm(plots, estateName, "Buyer name is required.")
+			return
+		case buyerPhone == "":
+			renderBookForm(plots, estateName, "Buyer phone number is required.")
+			return
+		case deposit == "" || deposit == "0":
+			renderBookForm(plots, estateName, "Deposit amount is required.")
+			return
+		case leadSource == "":
+			renderBookForm(plots, estateName, "Lead source is required.")
+			return
+		}
+
+		hasDepositRef := false
+		if r.MultipartForm != nil {
+			for _, fh := range r.MultipartForm.File["deposit_ref"] {
+				if fh.Size > 0 {
+					hasDepositRef = true
+					break
+				}
+			}
+		}
+		if !hasDepositRef {
+			renderBookForm(plots, estateName, "Payment reference attachment is required.")
+			return
+		}
+
+		if len(plots) == 0 {
+			http.Redirect(w, r, "/admin/estate/"+id+"/plots?status=available&err=unavailable", http.StatusFound)
+			return
+		}
+
+		depositRef := saveUploadedFiles(r, "deposit_ref")
+		idPhoto := saveUploadedFiles(r, "id_photo")
+		kra := saveUploadedFiles(r, "kra")
+		passportPhoto := saveUploadedFiles(r, "passport_photo")
+
+		var plotNumbers []string
+		var bookedPlotIDs []int
+		estateIDInt, _ := strconv.Atoi(id)
+		for _, p := range plots {
+			if _, err := db.Exec(`INSERT INTO prop_bookings (plot_id, estate_id, buyer_name, buyer_phone, buyer_email, agent_name, deposit, payment_plan, deposit_ref, id_photo, kra, passport_photo, lead_source, notes, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active')`,
+				p.ID, id, buyerName, buyerPhone, buyerEmail, agentName, deposit, paymentPlan, depositRef, idPhoto, kra, passportPhoto, leadSource, notes); err != nil {
+				log.Printf("adminBook: booking insert failed for plot %d: %v", p.ID, err)
+			}
+			if _, err := db.Exec(`UPDATE prop_plots SET status='booked' WHERE id=?`, p.ID); err != nil {
+				log.Printf("adminBook: plot status update failed for plot %d: %v", p.ID, err)
+			}
+			logPlotStatus(p.ID, p.Number, estateName, estateIDInt, "available", "booked", agentName, "booked")
+			plotNumbers = append(plotNumbers, p.Number)
+			bookedPlotIDs = append(bookedPlotIDs, p.ID)
+		}
+		log.Printf("adminBook: %d plots booked for %s by %s", len(plots), buyerName, agentName)
+		logBooking("PLOT_BOOKED", agentName, buyerName,
+			strings.Join(plotNumbers, ", ")+" — "+estateName,
+			fmt.Sprintf("Deposit: KES %s | Plan: %s | Docs: %v", deposit, paymentPlan, hasAllAttachments(bookingInfo{DepositRef: depositRef, IDPhoto: idPhoto, KRA: kra, PassportPhoto: passportPhoto})))
+		processBookingIntegrations(bookingInfo{
+			PlotIDs: bookedPlotIDs, BuyerName: buyerName, BuyerPhone: buyerPhone, BuyerEmail: buyerEmail,
+			PlotNumbers: plotNumbers, EstateName: estateName,
+			Deposit: deposit, PaymentPlan: paymentPlan, AgentName: agentName,
+			DepositRef: depositRef, IDPhoto: idPhoto, KRA: kra, PassportPhoto: passportPhoto,
+			Notes: notes, RebookConfirmed: rebookConfirmed,
+		})
+		http.Redirect(w, r, "/admin/estate/"+id+"/plots?status=booked", http.StatusFound)
+		return
+	}
+
+	// GET: ?plots=1,2,3
+	plotIDStrs := strings.Split(r.URL.Query().Get("plots"), ",")
+	plots, estateName := fetchPlots(plotIDStrs)
+	if len(plots) == 0 {
+		http.Redirect(w, r, "/admin/estate/"+id+"/plots?status=available", http.StatusFound)
+		return
+	}
+	renderBookForm(plots, estateName, "")
+}
+
+func adminAddEstateHandler(w http.ResponseWriter, r *http.Request) {
+	var formErr string
+	if r.Method == http.MethodPost {
+		if err := r.ParseMultipartForm(10 << 20); err != nil {
+			http.Error(w, "form error", http.StatusBadRequest)
+			return
+		}
+		name := strings.TrimSpace(r.FormValue("name"))
+		plotInfo := r.FormValue("prop_plotinfo")
+		plotPrice := r.FormValue("plot_price")
+		if name == "" {
+			formErr = "Estate name is required"
+		} else {
+			var mutationImage string
+			file, header, ferr := r.FormFile("mutation_image")
+			if ferr == nil {
+				defer file.Close()
+				ext := filepath.Ext(header.Filename)
+				base := strings.TrimSuffix(header.Filename, ext)
+				safe := strings.Map(func(r rune) rune {
+					if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+						return r
+					}
+					return '_'
+				}, base)
+				filename := fmt.Sprintf("mutation_%d_%s%s", time.Now().Unix(), safe, ext)
+				dst, oerr := os.Create(filepath.Join(uploadsDir, filename))
+				if oerr == nil {
+					io.Copy(dst, file)
+					dst.Close()
+					mutationImage = filename
+				}
+			}
+			var plotPriceVal interface{}
+			if plotPrice != "" {
+				plotPriceVal = plotPrice
+			}
+			isRestricted := 0
+			if r.FormValue("visibility") == "hide" {
+				isRestricted = 1
+			}
+			res, ierr := db.Exec(`INSERT INTO prop_estates (name, prop_plotinfo, mutation_image, plot_price, is_restricted) VALUES (?,?,?,?,?)`,
+				name, plotInfo, mutationImage, plotPriceVal, isRestricted)
+			if ierr != nil {
+				log.Printf("add estate: %v", ierr)
+				formErr = "Database error creating estate"
+			} else {
+				newID, _ := res.LastInsertId()
+				http.Redirect(w, r, fmt.Sprintf("/admin/estate/%d/edit", newID), http.StatusFound)
+				return
+			}
+		}
+	}
+	renderAdmin(w, r, "admin_add_estate.html", map[string]any{
+		"Title":     "Add Estate",
+		"Active":    "add-estate",
+		"FormError": formErr,
+	})
+}
+func adminAddPlotsHandler(w http.ResponseWriter, r *http.Request) {
+	renderAdmin(w, r, "admin_placeholder.html", map[string]any{"Title": "Add Plots", "Active": "add-plots", "Message": "Add Plots form (placeholder)."})
+}
+func adminCreateUserHandler(w http.ResponseWriter, r *http.Request) {
+	type userRow struct {
+		ID    int
+		Name  string
+		Email string
+		Phone string
+		Role  string
+	}
+
+	var formErr, formSuccess string
+
+	if r.Method == http.MethodPost {
+		r.ParseForm()
+		name := strings.TrimSpace(r.FormValue("name"))
+		email := strings.TrimSpace(r.FormValue("email"))
+		password := r.FormValue("password")
+		phone := strings.TrimSpace(r.FormValue("phone"))
+		role := r.FormValue("role")
+
+		switch {
+		case name == "":
+			formErr = "Name is required"
+		case email == "":
+			formErr = "Email is required"
+		case len(password) < 6:
+			formErr = "Password must be at least 6 characters"
+		case role != roleAdmin && role != roleAgent:
+			formErr = "Invalid role"
+		default:
+			var cnt int
+			db.QueryRow(`SELECT COUNT(*) FROM prop_agents WHERE email=?`, email).Scan(&cnt)
+			if cnt > 0 {
+				formErr = "A user with that email already exists"
+			} else {
+				hash, herr := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+				if herr != nil {
+					formErr = "Could not hash password"
+				} else {
+					_, ierr := db.Exec(`INSERT INTO prop_agents (name, email, password, phone, role) VALUES (?,?,?,?,?)`,
+						name, email, string(hash), phone, role)
+					if ierr != nil {
+						log.Printf("create user: %v", ierr)
+						formErr = "Database error"
+					} else {
+						formSuccess = "User created successfully"
+					}
+				}
+			}
+		}
+	}
+
+	// Handle delete
+	if r.Method == http.MethodGet {
+		if del := r.URL.Query().Get("delete"); del != "" {
+			db.Exec(`DELETE FROM prop_agents WHERE id=?`, del)
+			http.Redirect(w, r, "/admin/create-user", http.StatusFound)
+			return
+		}
+	}
+
+	rows, _ := db.Query(`SELECT id, name, email, COALESCE(phone,''), role FROM prop_agents ORDER BY name`)
+	var users []userRow
+	if rows != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var u userRow
+			if rows.Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &u.Role) == nil {
+				users = append(users, u)
+			}
+		}
+	}
+
+	renderAdmin(w, r, "admin_create_user.html", map[string]any{
+		"Title":       "Create User",
+		"Active":      "create-user",
+		"Users":       users,
+		"FormError":   formErr,
+		"FormSuccess": formSuccess,
+	})
+}
+
+func adminEditUserHandler(w http.ResponseWriter, r *http.Request) {
+	userID := strings.TrimPrefix(r.URL.Path, "/admin/edit-user/")
+	userID = strings.Trim(userID, "/")
+	if userID == "" {
+		http.Redirect(w, r, "/admin/create-user", http.StatusFound)
+		return
+	}
+
+	type userRow struct {
+		ID    int
+		Name  string
+		Email string
+		Phone string
+		Role  string
+	}
+
+	var u userRow
+	err := db.QueryRow(`SELECT id, name, email, COALESCE(phone,''), role FROM prop_agents WHERE id=?`, userID).
+		Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &u.Role)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	var formErr, formSuccess string
+
+	if r.Method == http.MethodPost {
+		r.ParseForm()
+		name := strings.TrimSpace(r.FormValue("name"))
+		email := strings.TrimSpace(r.FormValue("email"))
+		phone := strings.TrimSpace(r.FormValue("phone"))
+		role := r.FormValue("role")
+		newPassword := r.FormValue("new_password")
+
+		switch {
+		case name == "":
+			formErr = "Name is required"
+		case email == "":
+			formErr = "Email is required"
+		case role != roleAdmin && role != roleAgent:
+			formErr = "Invalid role"
+		default:
+			// Check email uniqueness (excluding this user)
+			var cnt int
+			db.QueryRow(`SELECT COUNT(*) FROM prop_agents WHERE email=? AND id!=?`, email, userID).Scan(&cnt)
+			if cnt > 0 {
+				formErr = "Another user with that email already exists"
+			} else if newPassword != "" && len(newPassword) < 6 {
+				formErr = "New password must be at least 6 characters"
+			} else {
+				if newPassword != "" {
+					hash, herr := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+					if herr != nil {
+						formErr = "Could not hash password"
+					} else {
+						db.Exec(`UPDATE prop_agents SET name=?, email=?, phone=?, role=?, password=? WHERE id=?`,
+							name, email, phone, role, string(hash), userID)
+					}
+				} else {
+					db.Exec(`UPDATE prop_agents SET name=?, email=?, phone=?, role=? WHERE id=?`,
+						name, email, phone, role, userID)
+				}
+				if formErr == "" {
+					formSuccess = "User updated successfully"
+					u.Name = name
+					u.Email = email
+					u.Phone = phone
+					u.Role = role
+				}
+			}
+		}
+	}
+
+	renderAdmin(w, r, "admin_edit_user.html", map[string]any{
+		"Title":       "Edit User — " + u.Name,
+		"Active":      "create-user",
+		"User":        u,
+		"FormError":   formErr,
+		"FormSuccess": formSuccess,
+	})
+}
+
+// filterAgentsAndEstates loads dropdown data for the filter bar.
+type filterOption struct {
+	ID   string
+	Name string
+}
+
+func loadFilterOptions() (agents []filterOption, estates []filterOption) {
+	ar, _ := db.Query(`SELECT DISTINCT COALESCE(agent_name,'') FROM prop_bookings WHERE agent_name != '' ORDER BY agent_name`)
+	if ar != nil {
+		defer ar.Close()
+		for ar.Next() {
+			var n string
+			ar.Scan(&n)
+			agents = append(agents, filterOption{ID: n, Name: n})
+		}
+	}
+	er, _ := db.Query(`SELECT id, name FROM prop_estates ORDER BY name`)
+	if er != nil {
+		defer er.Close()
+		for er.Next() {
+			var id int
+			var name string
+			er.Scan(&id, &name)
+			estates = append(estates, filterOption{ID: fmt.Sprintf("%d", id), Name: name})
+		}
+	}
+	return
+}
+
+func adminBookedPlotsHandler(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	fAgent := q.Get("agent")
+	fEstate := q.Get("estate")
+	fFrom := q.Get("date_from")
+	fTo := q.Get("date_to")
+
+	query := `
+		SELECT b.id, p.id, e.id, b.buyer_name, COALESCE(b.buyer_phone,''), e.name, p.plot_number,
+			COALESCE(b.agent_name,''), DATE_FORMAT(b.date_booked,'%d %b %Y %H:%i'), b.status,
+			DATEDIFF(NOW(), b.date_booked),
+			COALESCE(DATE_FORMAT(b.booking_deadline,'%d %b %Y'),
+			         DATE_FORMAT(DATE_ADD(b.date_booked, INTERVAL 14 DAY),'%d %b %Y')),
+			DATEDIFF(COALESCE(b.booking_deadline, DATE_ADD(b.date_booked, INTERVAL 14 DAY)), NOW()),
+			COALESCE(b.zoho_books_id,''), COALESCE(b.batch_ref,'')
+		FROM prop_bookings b
+		JOIN prop_estates e ON b.estate_id = e.id
+		JOIN prop_plots p ON b.plot_id = p.id
+		JOIN (
+			SELECT plot_id, MAX(id) AS latest_id
+			FROM prop_bookings
+			WHERE status NOT IN ('cancelled','expired')
+			GROUP BY plot_id
+		) latest ON b.id = latest.latest_id
+		WHERE p.status = 'booked'`
+	var args []any
+	if fAgent != "" {
+		query += " AND b.agent_name = ?"
+		args = append(args, fAgent)
+	}
+	if fEstate != "" {
+		query += " AND e.id = ?"
+		args = append(args, fEstate)
+	}
+	if fFrom != "" {
+		query += " AND DATE(b.date_booked) >= ?"
+		args = append(args, fFrom)
+	}
+	if fTo != "" {
+		query += " AND DATE(b.date_booked) <= ?"
+		args = append(args, fTo)
+	}
+	query += " ORDER BY b.date_booked DESC"
+
+	type bookingRow struct {
+		BookingID     int
+		PlotID        int
+		EstateID      int
+		BuyerName     string
+		BuyerPhone    string
+		EstateName    string
+		PlotNumber    string
+		AgentName     string
+		DateBooked    string
+		Status        string
+		DaysBooked    int
+		Deadline      string
+		DaysRemaining int
+		ZohoBooksID   string
+		BatchRef      string
+	}
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		log.Printf("booked plots query: %v", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+	var bookings []bookingRow
+	for rows.Next() {
+		var b bookingRow
+		if err := rows.Scan(&b.BookingID, &b.PlotID, &b.EstateID, &b.BuyerName, &b.BuyerPhone, &b.EstateName, &b.PlotNumber, &b.AgentName, &b.DateBooked, &b.Status, &b.DaysBooked, &b.Deadline, &b.DaysRemaining, &b.ZohoBooksID, &b.BatchRef); err != nil {
+			log.Printf("booked scan: %v", err)
+			continue
+		}
+		bookings = append(bookings, b)
+	}
+	agents, estates := loadFilterOptions()
+	uid := getUserID(r)
+	isSA := getRole(r) == roleSystemAdmin
+	renderAdmin(w, r, "admin_booked_plots.html", map[string]any{
+		"Title":                "Booked Plots",
+		"Active":               "booked-plots",
+		"Bookings":             bookings,
+		"Agents":               agents,
+		"Estates":              estates,
+		"FAgent":               fAgent,
+		"FEstate":              fEstate,
+		"FFrom":                fFrom,
+		"FTo":                  fTo,
+		"CanBookedToSigned":    isSA || hasPermission(uid, "admin.booked_to_signed", "read"),
+		"CanBookedToAvailable": isSA || hasPermission(uid, "admin.booked_to_available", "read"),
+		"CanExtendBooking":     isSA || hasPermission(uid, "admin.extend_booking", "read"),
+		"Success":              r.URL.Query().Get("extended"),
+		"ZohoRetry":            r.URL.Query().Get("zoho_retry"),
+	})
+}
+
+func adminRetryZohoHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.NotFound(w, r)
+		return
+	}
+	bookingID := pathSegment("/admin/booking-retry-zoho/", r.URL.Path)
+	if bookingID == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	var plotID int
+	var deposit float64
+	var zohoBookID string
+	var b bookingInfo
+	var plotNumber string
+	err := db.QueryRow(`
+		SELECT p.id, b.buyer_name, COALESCE(b.buyer_phone,''), COALESCE(b.buyer_email,''),
+		       COALESCE(b.agent_name,''), COALESCE(b.deposit,0), COALESCE(b.payment_plan,''),
+		       p.plot_number, e.name, COALESCE(b.zoho_books_id,'')
+		FROM prop_bookings b
+		JOIN prop_plots p ON b.plot_id = p.id
+		JOIN prop_estates e ON b.estate_id = e.id
+		WHERE b.id = ?`, bookingID).Scan(
+		&plotID, &b.BuyerName, &b.BuyerPhone, &b.BuyerEmail,
+		&b.AgentName, &deposit, &b.PaymentPlan,
+		&plotNumber, &b.EstateName, &zohoBookID)
+	if err != nil {
+		http.Error(w, "Booking not found", http.StatusNotFound)
+		return
+	}
+	if zohoBookID != "" {
+		http.Redirect(w, r, "/admin/booked-plots", http.StatusFound)
+		return
+	}
+	b.PlotIDs = []int{plotID}
+	b.PlotNumbers = []string{plotNumber}
+	b.Deposit = fmt.Sprintf("%.0f", deposit)
+	go createBooksRecordForBooking(b)
+	http.Redirect(w, r, "/admin/booked-plots?zoho_retry=1", http.StatusFound)
+}
+
+// adminRetryZohoSignedHandler retries Zoho Books creation for SA Signed plots
+// where zoho_books_id is NULL (e.g. old bookings predating the integration).
+func adminRetryZohoSignedHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.NotFound(w, r)
+		return
+	}
+	bookingID := pathSegment("/admin/signed-booking-retry-zoho/", r.URL.Path)
+	if bookingID == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	var plotID int
+	var deposit float64
+	var zohoBookID string
+	var b bookingInfo
+	var plotNumber string
+	err := db.QueryRow(`
+		SELECT p.id, b.buyer_name, COALESCE(b.buyer_phone,''), COALESCE(b.buyer_email,''),
+		       COALESCE(b.agent_name,''), COALESCE(b.deposit,0), COALESCE(b.payment_plan,''),
+		       p.plot_number, e.name, COALESCE(b.zoho_books_id,'')
+		FROM prop_bookings b
+		JOIN prop_plots p ON b.plot_id = p.id
+		JOIN prop_estates e ON b.estate_id = e.id
+		WHERE b.id = ? AND b.status = 'sa_signed'`, bookingID).Scan(
+		&plotID, &b.BuyerName, &b.BuyerPhone, &b.BuyerEmail,
+		&b.AgentName, &deposit, &b.PaymentPlan,
+		&plotNumber, &b.EstateName, &zohoBookID)
+	if err != nil {
+		http.Error(w, "Booking not found", http.StatusNotFound)
+		return
+	}
+	if zohoBookID != "" {
+		http.Redirect(w, r, "/admin/signed-plots", http.StatusFound)
+		return
+	}
+	b.PlotIDs = []int{plotID}
+	b.PlotNumbers = []string{plotNumber}
+	b.Deposit = fmt.Sprintf("%.0f", deposit)
+
+	go func() {
+		booksID, err := createBooksRecord(b)
+		if err != nil {
+			log.Printf("[zoho-books] signed retry error for %s plot %s: %v", b.BuyerName, plotNumber, err)
+			return
+		}
+		db.Exec(`UPDATE prop_bookings SET zoho_books_id=? WHERE id=? AND zoho_books_id IS NULL`, booksID, bookingID)
+		log.Printf("[zoho-books] signed retry stored estimate %s for booking %s", booksID, bookingID)
+	}()
+
+	http.Redirect(w, r, "/admin/signed-plots?zoho_retry=1", http.StatusFound)
+}
+
+// extendBookingHandler handles POST /admin/booking-extend/{id}
+// It adds the requested number of days to the booking deadline.
+func extendBookingHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.NotFound(w, r)
+		return
+	}
+	bookingID := pathSegment("/admin/booking-extend/", r.URL.Path)
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+	days, _ := strconv.Atoi(strings.TrimSpace(r.FormValue("days")))
+	if days <= 0 {
+		http.Redirect(w, r, "/admin/booked-plots", http.StatusFound)
+		return
+	}
+	// Extend: move deadline forward by N days from current deadline (or date_booked+14 if none set)
+	db.Exec(`
+		UPDATE prop_bookings
+		SET booking_deadline = DATE_ADD(
+			COALESCE(booking_deadline, DATE_ADD(date_booked, INTERVAL 14 DAY)),
+			INTERVAL ? DAY
+		)
+		WHERE id = ?`, days, bookingID)
+
+	http.Redirect(w, r, "/admin/booked-plots?extended=1", http.StatusFound)
+}
+
+func adminSignedPlotsHandler(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	fAgent := q.Get("agent")
+	fEstate := q.Get("estate")
+	fFrom := q.Get("date_from")
+	fTo := q.Get("date_to")
+
+	query := `
+		SELECT b.id, p.id, b.estate_id, b.buyer_name, COALESCE(b.buyer_phone,''), e.name, p.plot_number,
+			COALESCE(b.agent_name,''), DATE_FORMAT(b.date_booked,'%d %b %Y'),
+			COALESCE(DATE_FORMAT(b.date_signed,'%d %b %Y'),'—'),
+			COALESCE(b.zoho_books_id,'')
+		FROM prop_bookings b
+		JOIN prop_estates e ON b.estate_id = e.id
+		JOIN prop_plots p ON b.plot_id = p.id
+		JOIN (
+			SELECT plot_id, MAX(id) AS latest_id
+			FROM prop_bookings
+			WHERE status NOT IN ('cancelled','expired')
+			GROUP BY plot_id
+		) latest ON b.id = latest.latest_id
+		WHERE p.status = 'sa_signed'`
+	var args []any
+	if fAgent != "" {
+		query += " AND b.agent_name = ?"
+		args = append(args, fAgent)
+	}
+	if fEstate != "" {
+		query += " AND b.estate_id = ?"
+		args = append(args, fEstate)
+	}
+	if fFrom != "" {
+		query += " AND DATE(b.date_signed) >= ?"
+		args = append(args, fFrom)
+	}
+	if fTo != "" {
+		query += " AND DATE(b.date_signed) <= ?"
+		args = append(args, fTo)
+	}
+	query += " ORDER BY b.date_signed DESC"
+
+	type bookingRow struct {
+		BookingID   int
+		PlotID      int
+		EstateID    int
+		BuyerName   string
+		BuyerPhone  string
+		EstateName  string
+		PlotNumber  string
+		AgentName   string
+		DateBooked  string
+		DateSigned  string
+		ZohoBooksID string
+	}
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		log.Printf("signed plots query: %v", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+	var bookings []bookingRow
+	for rows.Next() {
+		var b bookingRow
+		if err := rows.Scan(&b.BookingID, &b.PlotID, &b.EstateID, &b.BuyerName, &b.BuyerPhone, &b.EstateName, &b.PlotNumber, &b.AgentName, &b.DateBooked, &b.DateSigned, &b.ZohoBooksID); err != nil {
+			log.Printf("signed scan: %v", err)
+			continue
+		}
+		bookings = append(bookings, b)
+	}
+	agents, estates := loadFilterOptions()
+	uid2 := getUserID(r)
+	isSA2 := getRole(r) == roleSystemAdmin
+	renderAdmin(w, r, "admin_signed_plots.html", map[string]any{
+		"Title":                "Signed Plots",
+		"Active":               "signed-plots",
+		"Bookings":             bookings,
+		"Agents":               agents,
+		"Estates":              estates,
+		"FAgent":               fAgent,
+		"FEstate":              fEstate,
+		"FFrom":                fFrom,
+		"FTo":                  fTo,
+		"CanSignedToSold":      isSA2 || hasPermission(uid2, "admin.signed_to_sold", "read"),
+		"CanSignedToAvailable": isSA2 || hasPermission(uid2, "admin.signed_to_available", "read"),
+		"CanRetryZoho":         isSA2,
+		"Success":              r.URL.Query().Get("zoho_retry"),
+	})
+}
+
+func adminSoldPlotsHandler(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	fAgent := q.Get("agent")
+	fEstate := q.Get("estate")
+	fFrom := q.Get("date_from")
+	fTo := q.Get("date_to")
+
+	query := `
+		SELECT s.plot_id, s.estate_id, s.buyer_name, COALESCE(s.buyer_phone,''), e.name, p.plot_number,
+			COALESCE(s.agent_name,''), COALESCE(s.amount,0),
+			COALESCE(s.payment_plan,''), DATE_FORMAT(s.date_sold,'%d %b %Y')
+		FROM prop_sales s
+		JOIN prop_estates e ON s.estate_id = e.id
+		JOIN prop_plots p ON s.plot_id = p.id
+		WHERE 1=1`
+	var args []any
+	if fAgent != "" {
+		query += " AND s.agent_name = ?"
+		args = append(args, fAgent)
+	}
+	if fEstate != "" {
+		query += " AND s.estate_id = ?"
+		args = append(args, fEstate)
+	}
+	if fFrom != "" {
+		query += " AND DATE(s.date_sold) >= ?"
+		args = append(args, fFrom)
+	}
+	if fTo != "" {
+		query += " AND DATE(s.date_sold) <= ?"
+		args = append(args, fTo)
+	}
+	query += " ORDER BY s.date_sold DESC"
+
+	type saleRow struct {
+		PlotID      int
+		EstateID    int
+		BuyerName   string
+		BuyerPhone  string
+		EstateName  string
+		PlotNumber  string
+		AgentName   string
+		Amount      float64
+		PaymentPlan string
+		DateSold    string
+	}
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		log.Printf("sold plots query: %v", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+	var sales []saleRow
+	for rows.Next() {
+		var s saleRow
+		if err := rows.Scan(&s.PlotID, &s.EstateID, &s.BuyerName, &s.BuyerPhone, &s.EstateName, &s.PlotNumber, &s.AgentName, &s.Amount, &s.PaymentPlan, &s.DateSold); err != nil {
+			log.Printf("sold scan: %v", err)
+			continue
+		}
+		sales = append(sales, s)
+	}
+	agents, estates := loadFilterOptions()
+	uid3 := getUserID(r)
+	isSA3 := getRole(r) == roleSystemAdmin
+	renderAdmin(w, r, "admin_sold_plots.html", map[string]any{
+		"Title":              "Sold Plots",
+		"Active":             "sold-plots",
+		"Sales":              sales,
+		"Agents":             agents,
+		"Estates":            estates,
+		"FAgent":             fAgent,
+		"FEstate":            fEstate,
+		"FFrom":              fFrom,
+		"FTo":                fTo,
+		"CanSoldToAvailable": isSA3 || hasPermission(uid3, "admin.sold_to_available", "read"),
+	})
+}
+func adminPlotsOverviewHandler(w http.ResponseWriter, r *http.Request) {
+	// AJAX search endpoint
+	if r.URL.Query().Get("api") == "1" {
+		adminPlotsOverviewSearchHandler(w, r)
+		return
+	}
+
+	// Count totals for tab badges
+	var cntBooked, cntSigned, cntSold int
+	db.QueryRow(`SELECT COUNT(*) FROM prop_bookings WHERE status='active'`).Scan(&cntBooked)
+	db.QueryRow(`SELECT COUNT(*) FROM prop_bookings WHERE status='sa_signed'`).Scan(&cntSigned)
+	db.QueryRow(`SELECT COUNT(*) FROM prop_sales`).Scan(&cntSold)
+
+	renderAdmin(w, r, "admin_plots_overview.html", map[string]any{
+		"Title":     "Plots Overview",
+		"Active":    "plots-overview",
+		"CntBooked": cntBooked,
+		"CntSigned": cntSigned,
+		"CntSold":   cntSold,
+	})
+}
+
+func adminPlotsOverviewSearchHandler(w http.ResponseWriter, r *http.Request) {
+	type plotEntry struct {
+		ID            int
+		PlotNumber    string
+		EstateName    string
+		AgentName     string
+		BuyerName     string
+		BuyerPhone    string
+		BuyerEmail    string
+		DateBooked    string
+		DepositRef    string
+		IDPhoto       string
+		KRA           string
+		Passport      string
+		SaleAgree     string
+		LetterConsent string
+		TransferForms string
+		TitleDeed     string
+	}
+
+	tab := r.URL.Query().Get("tab")
+	rawQ := strings.TrimSpace(r.URL.Query().Get("q"))
+	hasSearch := rawQ != ""
+	q := "%" + rawQ + "%"
+
+	w.Header().Set("Content-Type", "application/json")
+
+	var out []plotEntry
+
+	queryAndScan := func(query string, args ...any) {
+		rows, err := db.Query(query, args...)
+		if err != nil {
+			return
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var pe plotEntry
+			switch tab {
+			case "signed":
+				rows.Scan(&pe.ID, &pe.PlotNumber, &pe.EstateName, &pe.AgentName, &pe.BuyerName,
+					&pe.BuyerPhone, &pe.BuyerEmail, &pe.DateBooked,
+					&pe.DepositRef, &pe.IDPhoto, &pe.KRA, &pe.Passport, &pe.SaleAgree)
+			case "sold":
+				rows.Scan(&pe.ID, &pe.PlotNumber, &pe.EstateName, &pe.AgentName, &pe.BuyerName,
+					&pe.BuyerPhone, &pe.BuyerEmail, &pe.DateBooked,
+					&pe.DepositRef, &pe.IDPhoto, &pe.KRA, &pe.Passport,
+					&pe.LetterConsent, &pe.TransferForms, &pe.TitleDeed)
+			default:
+				rows.Scan(&pe.ID, &pe.PlotNumber, &pe.EstateName, &pe.AgentName, &pe.BuyerName,
+					&pe.BuyerPhone, &pe.BuyerEmail, &pe.DateBooked,
+					&pe.DepositRef, &pe.IDPhoto, &pe.KRA, &pe.Passport)
+			}
+			out = append(out, pe)
+		}
+	}
+
+	switch tab {
+	case "signed":
+		if hasSearch {
+			queryAndScan(`
+				SELECT b.id, p.plot_number, e.name,
+				       COALESCE(b.agent_name,''), COALESCE(b.buyer_name,''),
+				       COALESCE(b.buyer_phone,''), COALESCE(b.buyer_email,''),
+				       DATE_FORMAT(b.date_signed,'%d %b %Y'),
+				       COALESCE(b.deposit_ref,''), COALESCE(b.id_photo,''),
+				       COALESCE(b.kra,''), COALESCE(b.passport_photo,''),
+				       COALESCE(b.sale_agreement,'')
+				FROM prop_bookings b
+				JOIN prop_plots p ON p.id = b.plot_id
+				JOIN prop_estates e ON e.id = p.estate_id
+				WHERE b.status = 'sa_signed'
+				  AND (e.name LIKE ? OR p.plot_number LIKE ? OR b.agent_name LIKE ? OR b.buyer_name LIKE ?)
+				ORDER BY (b.deposit_ref IS NOT NULL AND b.deposit_ref != '') DESC, b.date_signed DESC
+				LIMIT 100`, q, q, q, q)
+		} else {
+			queryAndScan(`
+				SELECT b.id, p.plot_number, e.name,
+				       COALESCE(b.agent_name,''), COALESCE(b.buyer_name,''),
+				       COALESCE(b.buyer_phone,''), COALESCE(b.buyer_email,''),
+				       DATE_FORMAT(b.date_signed,'%d %b %Y'),
+				       COALESCE(b.deposit_ref,''), COALESCE(b.id_photo,''),
+				       COALESCE(b.kra,''), COALESCE(b.passport_photo,''),
+				       COALESCE(b.sale_agreement,'')
+				FROM prop_bookings b
+				JOIN prop_plots p ON p.id = b.plot_id
+				JOIN prop_estates e ON e.id = p.estate_id
+				WHERE b.status = 'sa_signed'
+				ORDER BY (b.deposit_ref IS NOT NULL AND b.deposit_ref != '') DESC, b.date_signed DESC
+				LIMIT 100`)
+		}
+	case "sold":
+		if hasSearch {
+			queryAndScan(`
+				SELECT s.id, p.plot_number, e.name,
+				       COALESCE(s.agent_name,''), COALESCE(s.buyer_name,''),
+				       COALESCE(s.buyer_phone,''), COALESCE(s.buyer_email,''),
+				       DATE_FORMAT(s.date_sold,'%d %b %Y'),
+				       COALESCE(s.deposit_doc,''), COALESCE(s.id_doc,''),
+				       COALESCE(s.kra_doc,''), COALESCE(s.passport_photo,''),
+				       COALESCE(s.letter_of_consent,''), COALESCE(s.transfer_forms,''),
+				       COALESCE(s.title_deed,'')
+				FROM prop_sales s
+				JOIN prop_plots p ON p.id = s.plot_id
+				JOIN prop_estates e ON e.id = s.estate_id
+				WHERE (e.name LIKE ? OR p.plot_number LIKE ? OR s.agent_name LIKE ? OR s.buyer_name LIKE ?)
+				ORDER BY s.date_sold DESC LIMIT 100`, q, q, q, q)
+		} else {
+			queryAndScan(`
+				SELECT s.id, p.plot_number, e.name,
+				       COALESCE(s.agent_name,''), COALESCE(s.buyer_name,''),
+				       COALESCE(s.buyer_phone,''), COALESCE(s.buyer_email,''),
+				       DATE_FORMAT(s.date_sold,'%d %b %Y'),
+				       COALESCE(s.deposit_doc,''), COALESCE(s.id_doc,''),
+				       COALESCE(s.kra_doc,''), COALESCE(s.passport_photo,''),
+				       COALESCE(s.letter_of_consent,''), COALESCE(s.transfer_forms,''),
+				       COALESCE(s.title_deed,'')
+				FROM prop_sales s
+				JOIN prop_plots p ON p.id = s.plot_id
+				JOIN prop_estates e ON e.id = s.estate_id
+				ORDER BY s.date_sold DESC LIMIT 100`)
+		}
+	default: // booked
+		if hasSearch {
+			queryAndScan(`
+				SELECT b.id, p.plot_number, e.name,
+				       COALESCE(b.agent_name,''), COALESCE(b.buyer_name,''),
+				       COALESCE(b.buyer_phone,''), COALESCE(b.buyer_email,''),
+				       DATE_FORMAT(b.date_booked,'%d %b %Y'),
+				       COALESCE(b.deposit_ref,''), COALESCE(b.id_photo,''),
+				       COALESCE(b.kra,''), COALESCE(b.passport_photo,'')
+				FROM prop_bookings b
+				JOIN prop_plots p ON p.id = b.plot_id
+				JOIN prop_estates e ON e.id = p.estate_id
+				WHERE b.status = 'active'
+				  AND (e.name LIKE ? OR p.plot_number LIKE ? OR b.agent_name LIKE ? OR b.buyer_name LIKE ?)
+				ORDER BY (b.deposit_ref IS NOT NULL AND b.deposit_ref != '') DESC, b.date_booked DESC
+				LIMIT 100`, q, q, q, q)
+		} else {
+			queryAndScan(`
+				SELECT b.id, p.plot_number, e.name,
+				       COALESCE(b.agent_name,''), COALESCE(b.buyer_name,''),
+				       COALESCE(b.buyer_phone,''), COALESCE(b.buyer_email,''),
+				       DATE_FORMAT(b.date_booked,'%d %b %Y'),
+				       COALESCE(b.deposit_ref,''), COALESCE(b.id_photo,''),
+				       COALESCE(b.kra,''), COALESCE(b.passport_photo,'')
+				FROM prop_bookings b
+				JOIN prop_plots p ON p.id = b.plot_id
+				JOIN prop_estates e ON e.id = p.estate_id
+				WHERE b.status = 'active'
+				ORDER BY (b.deposit_ref IS NOT NULL AND b.deposit_ref != '') DESC, b.date_booked DESC
+				LIMIT 100`)
+		}
+	}
+
+	if out == nil {
+		out = []plotEntry{}
+	}
+	json.NewEncoder(w).Encode(out)
+}
+
+// docFieldColumn maps a Plots Overview (tab, field) pair to the actual
+// table/column it lives in — prop_bookings for booked/signed, prop_sales for
+// sold (which uses different column names for the same documents). Column
+// names can't be parameterized in SQL, so this whitelist is what keeps the
+// delete/add-attachment endpoints below safe from arbitrary column access.
+func docFieldColumn(tab, field string) (table, column string, ok bool) {
+	switch tab {
+	case "booked", "signed":
+		switch field {
+		case "deposit_ref":
+			return "prop_bookings", "deposit_ref", true
+		case "id_photo":
+			return "prop_bookings", "id_photo", true
+		case "kra":
+			return "prop_bookings", "kra", true
+		case "passport_photo":
+			return "prop_bookings", "passport_photo", true
+		case "sale_agreement":
+			if tab == "signed" {
+				return "prop_bookings", "sale_agreement", true
+			}
+		}
+	case "sold":
+		switch field {
+		case "deposit_ref":
+			return "prop_sales", "deposit_doc", true
+		case "id_photo":
+			return "prop_sales", "id_doc", true
+		case "kra":
+			return "prop_sales", "kra_doc", true
+		case "passport_photo":
+			return "prop_sales", "passport_photo", true
+		case "letter_of_consent":
+			return "prop_sales", "letter_of_consent", true
+		case "transfer_forms":
+			return "prop_sales", "transfer_forms", true
+		case "title_deed":
+			return "prop_sales", "title_deed", true
+		}
+	}
+	return "", "", false
+}
+
+// adminPlotsOverviewDeleteAttachmentHandler removes a single filename from a
+// (possibly multi-file, comma-separated) document field and deletes the file
+// from disk — for correcting a wrongly-uploaded document from the Plots
+// Overview detail view.
+func adminPlotsOverviewDeleteAttachmentHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	tab := r.FormValue("tab")
+	id := r.FormValue("id")
+	field := r.FormValue("field")
+	filename := strings.TrimSpace(r.FormValue("filename"))
+	table, column, ok := docFieldColumn(tab, field)
+	if !ok || id == "" || filename == "" {
+		json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "invalid request"})
+		return
+	}
+
+	var current string
+	if err := db.QueryRow(fmt.Sprintf("SELECT COALESCE(%s,'') FROM %s WHERE id=?", column, table), id).Scan(&current); err != nil {
+		json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "record not found"})
+		return
+	}
+
+	var remaining []string
+	found := false
+	for _, f := range strings.Split(current, ",") {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		if f == filename {
+			found = true
+			continue
+		}
+		remaining = append(remaining, f)
+	}
+	if !found {
+		json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "file not found on this record"})
+		return
+	}
+
+	if _, err := db.Exec(fmt.Sprintf("UPDATE %s SET %s=? WHERE id=?", table, column), strings.Join(remaining, ","), id); err != nil {
+		log.Printf("delete-attachment: update failed: %v", err)
+		json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "database update failed"})
+		return
+	}
+
+	if err := os.Remove(filepath.Join(uploadsDir, filename)); err != nil && !os.IsNotExist(err) {
+		log.Printf("delete-attachment: file remove warning for %s: %v", filename, err)
+	}
+
+	json.NewEncoder(w).Encode(map[string]any{"ok": true})
+}
+
+// adminPlotsOverviewAddAttachmentHandler appends a newly uploaded file to a
+// document field and, if the record has a zoho_crm_id, pushes the file to
+// that Zoho CRM deal as an attachment.
+func adminPlotsOverviewAddAttachmentHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	r.ParseMultipartForm(32 << 20)
+	tab := r.FormValue("tab")
+	id := r.FormValue("id")
+	field := r.FormValue("field")
+	table, column, ok := docFieldColumn(tab, field)
+	if !ok || id == "" {
+		json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "invalid request"})
+		return
+	}
+
+	newFiles := saveUploadedFiles(r, "file")
+	if newFiles == "" {
+		json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "no file uploaded"})
+		return
+	}
+
+	var current string
+	db.QueryRow(fmt.Sprintf("SELECT COALESCE(%s,'') FROM %s WHERE id=?", column, table), id).Scan(&current)
+
+	merged := newFiles
+	if current != "" {
+		merged = current + "," + newFiles
+	}
+	if _, err := db.Exec(fmt.Sprintf("UPDATE %s SET %s=? WHERE id=?", table, column), merged, id); err != nil {
+		log.Printf("add-attachment: update failed: %v", err)
+		json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "database update failed"})
+		return
+	}
+
+	// Push new file(s) to the Zoho CRM deal if one exists for this record.
+	var zohoQueued bool
+	var crmID string
+	switch tab {
+	case "booked", "signed":
+		db.QueryRow(`SELECT COALESCE(zoho_crm_id,'') FROM prop_bookings WHERE id=?`, id).Scan(&crmID)
+	case "sold":
+		db.QueryRow(`SELECT COALESCE(zoho_crm_id,'') FROM prop_sales WHERE id=?`, id).Scan(&crmID)
+	}
+	if crmID != "" {
+		zohoQueued = true
+		go func(dealID string, files []string) {
+			for _, f := range files {
+				if f == "" {
+					continue
+				}
+				if err := uploadCRMAttachment(dealID, f); err != nil {
+					log.Printf("[plots-overview] zoho attachment %s → deal %s: %v", f, dealID, err)
+				} else {
+					log.Printf("[plots-overview] zoho attachment %s → deal %s: OK", f, dealID)
+				}
+			}
+		}(crmID, strings.Split(newFiles, ","))
+	}
+
+	json.NewEncoder(w).Encode(map[string]any{
+		"ok":          true,
+		"files":       strings.Split(newFiles, ","),
+		"zoho_queued": zohoQueued,
+	})
+}
+
+func adminPlotsOverviewUpdateBuyerNameHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	r.ParseMultipartForm(32 << 20)
+	recordID := strings.TrimSpace(r.FormValue("record_id"))
+	tab := strings.TrimSpace(r.FormValue("tab"))
+	newName := strings.TrimSpace(r.FormValue("buyer_name"))
+	w.Header().Set("Content-Type", "application/json")
+	if recordID == "" || newName == "" {
+		json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "missing fields"})
+		return
+	}
+	var execErr error
+	if tab == "sold" {
+		_, execErr = db.Exec(`UPDATE prop_sales SET buyer_name=? WHERE id=?`, newName, recordID)
+	} else {
+		_, execErr = db.Exec(`UPDATE prop_bookings SET buyer_name=? WHERE id=?`, newName, recordID)
+	}
+	if execErr != nil {
+		json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": execErr.Error()})
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]any{"ok": true})
+}
+
+func adminPendingProjectsHandler(w http.ResponseWriter, r *http.Request) {
+	type estateRow struct {
+		ID        int
+		Name      string
+		Total     int
+		Available int
+		Booked    int
+		SaSigned  int
+		Sold      int
+	}
+	rows, err := db.Query(`
+		SELECT e.id, e.name,
+			COUNT(p.id),
+			COALESCE(SUM(p.status = 'available'),0),
+			COALESCE(SUM(p.status = 'booked'),0),
+			COALESCE(SUM(p.status = 'sa_signed'),0),
+			COALESCE(SUM(p.status = 'sold'),0)
+		FROM prop_estates e
+		LEFT JOIN prop_plots p ON p.estate_id = e.id
+		GROUP BY e.id, e.name
+		HAVING COUNT(p.id) = 0
+			OR COALESCE(SUM(p.status = 'available'),0) > 0
+			OR COALESCE(SUM(p.status = 'booked'),0) > 0
+			OR COALESCE(SUM(p.status = 'sa_signed'),0) > 0
+		ORDER BY e.name`)
+	if err != nil {
+		log.Printf("pending projects query: %v", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+	var estates []estateRow
+	for rows.Next() {
+		var e estateRow
+		if err := rows.Scan(&e.ID, &e.Name, &e.Total, &e.Available, &e.Booked, &e.SaSigned, &e.Sold); err != nil {
+			continue
+		}
+		estates = append(estates, e)
+	}
+	renderAdmin(w, r, "admin_pending_projects.html", map[string]any{
+		"Title":   "Pending Projects",
+		"Active":  "pending-projects",
+		"Estates": estates,
+	})
+}
+func adminCompletedProjectsHandler(w http.ResponseWriter, r *http.Request) {
+	type estateRow struct {
+		ID       int
+		Name     string
+		Total    int
+		Sold     int
+		LastSale string
+	}
+	rows, err := db.Query(`
+		SELECT e.id, e.name,
+			COUNT(p.id),
+			COALESCE(SUM(p.status = 'sold'),0),
+			COALESCE((SELECT DATE_FORMAT(MAX(s.date_sold),'%d %b %Y') FROM prop_sales s WHERE s.estate_id = e.id),'—')
+		FROM prop_estates e
+		LEFT JOIN prop_plots p ON p.estate_id = e.id
+		GROUP BY e.id, e.name
+		HAVING COUNT(p.id) > 0
+			AND COALESCE(SUM(p.status = 'available'),0) = 0
+			AND COALESCE(SUM(p.status = 'booked'),0) = 0
+			AND COALESCE(SUM(p.status = 'sa_signed'),0) = 0
+		ORDER BY e.name`)
+	if err != nil {
+		log.Printf("completed projects query: %v", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+	var estates []estateRow
+	for rows.Next() {
+		var e estateRow
+		if err := rows.Scan(&e.ID, &e.Name, &e.Total, &e.Sold, &e.LastSale); err != nil {
+			continue
+		}
+		estates = append(estates, e)
+	}
+	renderAdmin(w, r, "admin_completed_projects.html", map[string]any{
+		"Title":   "Completed Projects",
+		"Active":  "completed-projects",
+		"Estates": estates,
+	})
+}
+func adminExportReportsHandler(w http.ResponseWriter, r *http.Request) {
+	tab := r.URL.Query().Get("tab")
+	if tab != "signed" && tab != "sold" && tab != "salesleader" && tab != "soldsummary" && tab != "sasigned" {
+		tab = "booked"
+	}
+	agent := r.URL.Query().Get("agent")
+	estateID := r.URL.Query().Get("estate")
+	fromDate := r.URL.Query().Get("from")
+	toDate := r.URL.Query().Get("to")
+	doExport := r.URL.Query().Get("export") == "1"
+
+	type option struct{ Value, Label string }
+
+	// Agent dropdown options
+	var agentOptions []option
+	if agRows, _ := db.Query(
+		`SELECT DISTINCT agent_name FROM prop_bookings
+		 WHERE agent_name IS NOT NULL AND agent_name != ''
+		 ORDER BY agent_name`); agRows != nil {
+		defer agRows.Close()
+		for agRows.Next() {
+			var v string
+			if agRows.Scan(&v) == nil {
+				agentOptions = append(agentOptions, option{v, v})
+			}
+		}
+	}
+
+	// Estate dropdown options
+	var estateOptions []option
+	if esRows, _ := db.Query(`SELECT id, name FROM prop_estates ORDER BY name`); esRows != nil {
+		defer esRows.Close()
+		for esRows.Next() {
+			var id int
+			var name string
+			if esRows.Scan(&id, &name) == nil {
+				estateOptions = append(estateOptions, option{fmt.Sprintf("%d", id), name})
+			}
+		}
+	}
+
+	type exportRow struct {
+		Plot, Estate, Client, Phone, Agent, Date string
+		Days                                     int
+		Amount, PaymentPlan, Source              string
+	}
+	type leaderRow struct {
+		Month     string
+		Agent     string
+		Count     int
+		SoldCount int
+		Value     string
+	}
+	type agentRow struct {
+		Agent string
+		Count int
+		Value string
+	}
+
+	var rows []exportRow
+	var leaderRows []leaderRow
+	var soldSummaryRows []agentRow
+	var saSignedRows []agentRow
+	var args []any
+	var baseQuery, filename string
+
+	switch tab {
+	case "soldsummary":
+		filename = "fully_sold_by_agent.csv"
+		ssQ := `
+			SELECT a.agent_name, COUNT(s.id) AS cnt,
+			       COALESCE(SUM(e.plot_price), 0) AS total
+			FROM (
+				SELECT DISTINCT agent_name FROM prop_bookings
+				WHERE agent_name IS NOT NULL AND agent_name != ''
+				  AND agent_name NOT IN ('Joseph Maina', 'Lucy Wambui', 'Daniel Mwangi', 'Kevin Magua', 'James Maina')
+			) a
+			LEFT JOIN prop_sales s ON s.agent_name = a.agent_name
+			LEFT JOIN prop_estates e ON e.id = s.estate_id
+			GROUP BY a.agent_name
+			ORDER BY cnt DESC, a.agent_name`
+		if ss, _ := db.Query(ssQ); ss != nil {
+			defer ss.Close()
+			for ss.Next() {
+				var row agentRow
+				var val float64
+				if ss.Scan(&row.Agent, &row.Count, &val) == nil {
+					row.Value = fmt.Sprintf("%.0f", val)
+					soldSummaryRows = append(soldSummaryRows, row)
+				}
+			}
+		}
+
+	case "sasigned":
+		filename = "sa_signed_by_agent.csv"
+		saQ := `
+			SELECT b.agent_name, COUNT(*) AS cnt,
+			       COALESCE(SUM(e.plot_price), 0) AS total
+			FROM prop_bookings b
+			JOIN prop_estates e ON e.id = b.estate_id
+			WHERE b.status IN ('sa_signed', 'completed')
+			  AND b.agent_name IS NOT NULL AND b.agent_name != ''
+			  AND b.agent_name NOT IN ('Daniel Mwangi', 'Kevin Magua', 'James Maina', 'Joseph Maina', 'Lucy Wambui')
+			GROUP BY b.agent_name ORDER BY cnt DESC`
+		if sa, _ := db.Query(saQ); sa != nil {
+			defer sa.Close()
+			for sa.Next() {
+				var row agentRow
+				var val float64
+				if sa.Scan(&row.Agent, &row.Count, &val) == nil {
+					row.Value = fmt.Sprintf("%.0f", val)
+					saSignedRows = append(saSignedRows, row)
+				}
+			}
+		}
+
+	case "salesleader":
+		filename = "best_salespeople_by_month.csv"
+		leaderQ := `
+			SELECT DATE_FORMAT(COALESCE(b.date_signed, b.date_booked), '%Y-%m') AS month,
+			       b.agent_name, COUNT(*) AS cnt,
+			       SUM(CASE WHEN b.status = 'completed' THEN 1 ELSE 0 END) AS sold_cnt,
+			       COALESCE(SUM(e.plot_price), 0) AS total
+			FROM prop_bookings b
+			JOIN prop_estates e ON e.id = b.estate_id
+			WHERE b.status IN ('sa_signed', 'completed')
+			  AND b.agent_name IS NOT NULL AND b.agent_name != ''
+			  AND b.agent_name NOT IN ('Daniel Mwangi', 'Kevin Magua', 'James Maina', 'Joseph Maina')`
+		var lArgs []any
+		if fromDate != "" {
+			leaderQ += ` AND COALESCE(b.date_signed, b.date_booked) >= ?`
+			lArgs = append(lArgs, fromDate)
+		}
+		if toDate != "" {
+			leaderQ += ` AND COALESCE(b.date_signed, b.date_booked) <= ?`
+			lArgs = append(lArgs, toDate+" 23:59:59")
+		}
+		leaderQ += ` GROUP BY DATE_FORMAT(COALESCE(b.date_signed, b.date_booked), '%Y-%m'), b.agent_name ORDER BY month DESC, total DESC`
+		if lr, _ := db.Query(leaderQ, lArgs...); lr != nil {
+			defer lr.Close()
+			for lr.Next() {
+				var row leaderRow
+				var val float64
+				if lr.Scan(&row.Month, &row.Agent, &row.Count, &row.SoldCount, &val) == nil {
+					row.Value = fmt.Sprintf("%.0f", val)
+					leaderRows = append(leaderRows, row)
+				}
+			}
+		}
+
+	case "booked":
+		filename = "booked_plots.csv"
+		baseQuery = `
+			SELECT p.plot_number, e.name, COALESCE(b.buyer_name,''), COALESCE(b.buyer_phone,''),
+			       COALESCE(b.agent_name,''), DATE_FORMAT(b.date_booked,'%d %b %Y'),
+			       DATEDIFF(NOW(), b.date_booked), COALESCE(b.lead_source,'')
+			FROM prop_bookings b
+			JOIN prop_plots   p ON p.id = b.plot_id
+			JOIN prop_estates e ON e.id = b.estate_id
+			WHERE b.status = 'active' AND p.status = 'booked'`
+		if agent != "" {
+			baseQuery += ` AND b.agent_name = ?`
+			args = append(args, agent)
+		}
+		if estateID != "" {
+			baseQuery += ` AND b.estate_id = ?`
+			args = append(args, estateID)
+		}
+		if fromDate != "" {
+			baseQuery += ` AND b.date_booked >= ?`
+			args = append(args, fromDate)
+		}
+		if toDate != "" {
+			baseQuery += ` AND b.date_booked <= ?`
+			args = append(args, toDate+" 23:59:59")
+		}
+		baseQuery += ` ORDER BY b.date_booked DESC`
+		if dbRows, _ := db.Query(baseQuery, args...); dbRows != nil {
+			defer dbRows.Close()
+			for dbRows.Next() {
+				var r exportRow
+				if dbRows.Scan(&r.Plot, &r.Estate, &r.Client, &r.Phone, &r.Agent, &r.Date, &r.Days, &r.Source) == nil {
+					rows = append(rows, r)
+				}
+			}
+		}
+
+	case "signed":
+		filename = "signed_plots.csv"
+		baseQuery = `
+			SELECT p.plot_number, COALESCE(e.name,''), COALESCE(b.buyer_name,''), COALESCE(b.buyer_phone,''),
+			       COALESCE(b.agent_name,''), COALESCE(DATE_FORMAT(COALESCE(b.date_signed, b.date_booked),'%d %b %Y'),''),
+			       COALESCE(b.lead_source,'')
+			FROM prop_plots p
+			LEFT JOIN prop_estates e ON e.id = p.estate_id
+			LEFT JOIN prop_bookings b ON b.id = (
+				SELECT id FROM prop_bookings
+				WHERE plot_id = p.id
+				ORDER BY id DESC LIMIT 1
+			)
+			WHERE p.status = 'sa_signed'`
+		if agent != "" {
+			baseQuery += ` AND b.agent_name = ?`
+			args = append(args, agent)
+		}
+		if estateID != "" {
+			baseQuery += ` AND p.estate_id = ?`
+			args = append(args, estateID)
+		}
+		if fromDate != "" {
+			baseQuery += ` AND COALESCE(b.date_signed, b.date_booked) >= ?`
+			args = append(args, fromDate)
+		}
+		if toDate != "" {
+			baseQuery += ` AND COALESCE(b.date_signed, b.date_booked) <= ?`
+			args = append(args, toDate+" 23:59:59")
+		}
+		baseQuery += ` ORDER BY COALESCE(b.date_signed, b.date_booked) DESC`
+		if dbRows, _ := db.Query(baseQuery, args...); dbRows != nil {
+			defer dbRows.Close()
+			for dbRows.Next() {
+				var r exportRow
+				if dbRows.Scan(&r.Plot, &r.Estate, &r.Client, &r.Phone, &r.Agent, &r.Date, &r.Source) == nil {
+					rows = append(rows, r)
+				}
+			}
+		}
+
+	case "sold":
+		filename = "sold_plots.csv"
+		baseQuery = `
+			SELECT p.plot_number, COALESCE(e.name,''), COALESCE(s.buyer_name,''), COALESCE(s.buyer_phone,''),
+			       COALESCE(s.agent_name,''), COALESCE(CAST(s.amount AS CHAR),'0'),
+			       COALESCE(s.payment_plan,''), COALESCE(DATE_FORMAT(s.date_sold,'%d %b %Y'),''),
+			       COALESCE(b.lead_source,'')
+			FROM prop_plots p
+			LEFT JOIN prop_estates e ON e.id = p.estate_id
+			LEFT JOIN prop_sales s ON s.id = (
+				SELECT id FROM prop_sales
+				WHERE plot_id = p.id
+				ORDER BY id DESC LIMIT 1
+			)
+			LEFT JOIN prop_bookings b ON b.id = (
+				SELECT id FROM prop_bookings
+				WHERE plot_id = p.id
+				ORDER BY id DESC LIMIT 1
+			)
+			WHERE p.status = 'sold'`
+		if agent != "" {
+			baseQuery += ` AND s.agent_name = ?`
+			args = append(args, agent)
+		}
+		if estateID != "" {
+			baseQuery += ` AND p.estate_id = ?`
+			args = append(args, estateID)
+		}
+		if fromDate != "" {
+			baseQuery += ` AND s.date_sold >= ?`
+			args = append(args, fromDate)
+		}
+		if toDate != "" {
+			baseQuery += ` AND s.date_sold <= ?`
+			args = append(args, toDate+" 23:59:59")
+		}
+		baseQuery += ` ORDER BY s.date_sold DESC`
+		if dbRows, _ := db.Query(baseQuery, args...); dbRows != nil {
+			defer dbRows.Close()
+			for dbRows.Next() {
+				var r exportRow
+				if dbRows.Scan(&r.Plot, &r.Estate, &r.Client, &r.Phone, &r.Agent, &r.Amount, &r.PaymentPlan, &r.Date, &r.Source) == nil {
+					rows = append(rows, r)
+				}
+			}
+		}
+	}
+
+	// CSV export
+	if doExport {
+		var buf bytes.Buffer
+		switch tab {
+		case "booked":
+			buf.WriteString("Plot,Estate,Client,Phone,Agent,Date Booked,Days Booked,Source\n")
+			for _, r := range rows {
+				fmt.Fprintf(&buf, "%s,%s,%s,%s,%s,%s,%d,%s\n",
+					csvEscape(r.Plot), csvEscape(r.Estate), csvEscape(r.Client),
+					csvEscape(r.Phone), csvEscape(r.Agent), csvEscape(r.Date), r.Days, csvEscape(r.Source))
+			}
+		case "signed":
+			buf.WriteString("Plot,Estate,Client,Phone,Agent,Date Signed,Source\n")
+			for _, r := range rows {
+				fmt.Fprintf(&buf, "%s,%s,%s,%s,%s,%s,%s\n",
+					csvEscape(r.Plot), csvEscape(r.Estate), csvEscape(r.Client),
+					csvEscape(r.Phone), csvEscape(r.Agent), csvEscape(r.Date), csvEscape(r.Source))
+			}
+		case "sold":
+			buf.WriteString("Plot,Estate,Client,Phone,Agent,Amount,Payment Plan,Date Sold,Source\n")
+			for _, r := range rows {
+				fmt.Fprintf(&buf, "%s,%s,%s,%s,%s,%s,%s,%s,%s\n",
+					csvEscape(r.Plot), csvEscape(r.Estate), csvEscape(r.Client),
+					csvEscape(r.Phone), csvEscape(r.Agent), csvEscape(r.Amount),
+					csvEscape(r.PaymentPlan), csvEscape(r.Date), csvEscape(r.Source))
+			}
+		case "salesleader":
+			buf.WriteString("Month,Agent,Plots SA Signed,Plots Fully Sold,Total Value (KES)\n")
+			for _, r := range leaderRows {
+				fmt.Fprintf(&buf, "%s,%s,%d,%d,%s\n",
+					r.Month, csvEscape(r.Agent), r.Count, r.SoldCount, r.Value)
+			}
+		case "soldsummary":
+			buf.WriteString("Agent,Plots Fully Sold,Total Value (KES)\n")
+			for _, r := range soldSummaryRows {
+				fmt.Fprintf(&buf, "%s,%d,%s\n",
+					csvEscape(r.Agent), r.Count, r.Value)
+			}
+		case "sasigned":
+			buf.WriteString("Agent,Plots SA Signed,Total Value (KES)\n")
+			for _, r := range saSignedRows {
+				fmt.Fprintf(&buf, "%s,%d,%s\n",
+					csvEscape(r.Agent), r.Count, r.Value)
+			}
+		}
+		w.Header().Set("Content-Type", "text/csv")
+		w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+		w.Write(buf.Bytes())
+		return
+	}
+
+	count := len(rows)
+	if tab == "salesleader" {
+		count = len(leaderRows)
+	} else if tab == "soldsummary" {
+		count = len(soldSummaryRows)
+	} else if tab == "sasigned" {
+		count = len(saSignedRows)
+	}
+	renderAdmin(w, r, "admin_export_reports.html", map[string]any{
+		"Title":           "Export Reports",
+		"Active":          "export-reports",
+		"Tab":             tab,
+		"Rows":            rows,
+		"LeaderRows":      leaderRows,
+		"SoldSummaryRows": soldSummaryRows,
+		"SASignedRows":    saSignedRows,
+		"Count":           count,
+		"AgentOptions":    agentOptions,
+		"EstateOptions":   estateOptions,
+		"FAgent":          agent,
+		"FEstate":         estateID,
+		"FFrom":           fromDate,
+		"FTo":             toDate,
+	})
+}
+
+func csvEscape(s string) string {
+	if strings.ContainsAny(s, ",\"\n\r") {
+		return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
+	}
+	return s
+}
+
+// ── Agent handlers ──────────────────────────────────────────────────────────
+
+func dashboardHandler(w http.ResponseWriter, r *http.Request) {
+	agentName := getAgentName(r)
+
+	var totalEstates, totalAvailable, agentBooked, agentSaSigned, agentSold int
+	db.QueryRow(`SELECT COUNT(*) FROM prop_estates WHERE COALESCE(is_restricted,0)=0`).Scan(&totalEstates)
+	db.QueryRow(`SELECT COUNT(*) FROM prop_plots WHERE status='available'`).Scan(&totalAvailable)
+	db.QueryRow(`SELECT COUNT(*) FROM prop_bookings WHERE agent_name=? AND status='active'`, agentName).Scan(&agentBooked)
+	db.QueryRow(`SELECT COUNT(*) FROM prop_bookings WHERE agent_name=? AND status='sa_signed'`, agentName).Scan(&agentSaSigned)
+	db.QueryRow(`SELECT COUNT(*) FROM prop_sales WHERE agent_name=?`, agentName).Scan(&agentSold)
+
+	// Per-estate chart data
+	rows, _ := db.Query(`
+		SELECT e.name,
+			SUM(p.status='available'),
+			SUM(p.status='booked'),
+			SUM(p.status='sold')
+		FROM prop_estates e
+		LEFT JOIN prop_plots p ON p.estate_id = e.id
+		GROUP BY e.id, e.name ORDER BY e.name`)
+	var estates []string
+	var avail, booked, sold []int
+	if rows != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var n string
+			var a, b, s int
+			if rows.Scan(&n, &a, &b, &s) == nil {
+				estates = append(estates, n)
+				avail = append(avail, a)
+				booked = append(booked, b)
+				sold = append(sold, s)
+			}
+		}
+	}
+	chartData := map[string]any{
+		"estates":        estates,
+		"availablePlots": avail,
+		"bookedPlots":    booked,
+		"soldPlots":      sold,
+	}
+	chartJSON, _ := json.Marshal(chartData)
+
+	render(w, "dashboard.html", map[string]any{
+		"Title":          "Dashboard",
+		"Active":         "dashboard",
+		"AgentName":      agentName,
+		"TotalEstates":   totalEstates,
+		"TotalAvailable": totalAvailable,
+		"AgentBooked":    agentBooked,
+		"AgentSaSigned":  agentSaSigned,
+		"AgentSold":      agentSold,
+		"ChartData":      template.JS(chartJSON),
+	})
+}
+
+func agentEstatesHandler(w http.ResponseWriter, r *http.Request) {
+	type estateRow struct {
+		ID        int
+		Name      string
+		Total     int
+		Available int
+		Booked    int
+		SaSigned  int
+		Sold      int
+	}
+	rows, err := db.Query(`
+		SELECT e.id, e.name,
+			COUNT(p.id),
+			SUM(p.status='available'),
+			SUM(p.status='booked'),
+			SUM(p.status='sa_signed'),
+			SUM(p.status='sold')
+		FROM prop_estates e
+		LEFT JOIN prop_plots p ON p.estate_id = e.id
+		WHERE COALESCE(e.is_restricted, 0) = 0
+		GROUP BY e.id, e.name ORDER BY e.name`)
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+	var estates []estateRow
+	for rows.Next() {
+		var e estateRow
+		if rows.Scan(&e.ID, &e.Name, &e.Total, &e.Available, &e.Booked, &e.SaSigned, &e.Sold) == nil {
+			estates = append(estates, e)
+		}
+	}
+	renderAgent(w, r, "agent_estates.html", map[string]any{
+		"Title":   "Estates",
+		"Active":  "estates",
+		"Estates": estates,
+	})
+}
+
+func agentEstateDetailHandler(w http.ResponseWriter, r *http.Request) {
+	id := r.Context().Value(ctxID).(string)
+
+	var estateName, image, mutationImage, plotInfo string
+	if err := db.QueryRow(`SELECT name, COALESCE(image,''), COALESCE(mutation_image,''), COALESCE(prop_plotinfo,'') FROM prop_estates WHERE id=?`, id).
+		Scan(&estateName, &image, &mutationImage, &plotInfo); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	displayImage := mutationImage
+	if displayImage == "" {
+		displayImage = image
+	}
+
+	counts := map[string]int{"available": 0, "booked": 0, "sa_signed": 0, "sold": 0}
+	cRows, _ := db.Query(`SELECT status, COUNT(*) FROM prop_plots WHERE estate_id=? GROUP BY status`, id)
+	if cRows != nil {
+		defer cRows.Close()
+		for cRows.Next() {
+			var s string
+			var c int
+			if cRows.Scan(&s, &c) == nil {
+				counts[s] = c
+			}
+		}
+	}
+
+	zones := []zoneDisplay{}
+	zRows, _ := db.Query(`
+		SELECT pz.plot_number, COALESCE(pz.points_json,'[]'), COALESCE(pp.status,'available')
+		FROM prop_plot_zones pz
+		LEFT JOIN prop_plots pp ON pp.estate_id = pz.estate_id AND pp.plot_number = pz.plot_number
+		WHERE pz.estate_id = ?
+		ORDER BY pz.id`, id)
+	if zRows != nil {
+		defer zRows.Close()
+		for zRows.Next() {
+			var pn, pj, st string
+			if zRows.Scan(&pn, &pj, &st) == nil {
+				var pts []pointXY
+				json.Unmarshal([]byte(pj), &pts)
+				zones = append(zones, zoneDisplay{PlotNumber: pn, Status: st, Points: pts})
+			}
+		}
+	}
+	zonesJSON, _ := json.Marshal(zones)
+
+	plotInfo = strings.ReplaceAll(plotInfo, `\r\n`, "\n")
+	plotInfo = strings.ReplaceAll(plotInfo, `\n`, "\n")
+	plotInfo = strings.ReplaceAll(plotInfo, "\r", "")
+
+	plotInfoLinesJSON, _ := json.Marshal(strings.Split(plotInfo, "\n"))
+
+	renderAgent(w, r, "agent_estate_detail.html", map[string]any{
+		"Title":        estateName,
+		"Active":       "estates",
+		"EstateID":     id,
+		"EstateName":   estateName,
+		"DisplayImage": displayImage,
+		"PlotInfo":     plotInfo,
+		"PlotInfoJSON": template.JS(plotInfoLinesJSON),
+		"Counts":       counts,
+		"ZonesJSON":    template.JS(zonesJSON),
+	})
+}
+
+func agentEstatePlotsHandler(w http.ResponseWriter, r *http.Request) {
+	id := r.Context().Value(ctxID).(string)
+	status := r.URL.Query().Get("status")
+	if status == "" {
+		status = "available"
+	}
+
+	var estateName string
+	if err := db.QueryRow(`SELECT name FROM prop_estates WHERE id=?`, id).Scan(&estateName); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	counts := map[string]int{"available": 0, "booked": 0, "sa_signed": 0, "sold": 0}
+	cRows, _ := db.Query(`SELECT status, COUNT(*) FROM prop_plots WHERE estate_id=? GROUP BY status`, id)
+	if cRows != nil {
+		defer cRows.Close()
+		for cRows.Next() {
+			var s string
+			var c int
+			if cRows.Scan(&s, &c) == nil {
+				counts[s] = c
+			}
+		}
+	}
+
+	type plotRow struct {
+		ID     int
+		Number string
+		Status string
+	}
+	pRows, _ := db.Query(`SELECT id, plot_number, status FROM prop_plots WHERE estate_id=? AND status=? ORDER BY id`, id, status)
+	var plots []plotRow
+	if pRows != nil {
+		defer pRows.Close()
+		for pRows.Next() {
+			var p plotRow
+			if pRows.Scan(&p.ID, &p.Number, &p.Status) == nil {
+				plots = append(plots, p)
+			}
+		}
+	}
+
+	renderAgent(w, r, "agent_estate_plots.html", map[string]any{
+		"Title":          estateName + " – Plots",
+		"Active":         "estates",
+		"EstateName":     estateName,
+		"EstateID":       id,
+		"Status":         status,
+		"Plots":          plots,
+		"Counts":         counts,
+		"BookingSuccess": r.URL.Query().Get("booked") == "1",
+	})
+}
+
+func agentEstateBookHandler(w http.ResponseWriter, r *http.Request) {
+	id := r.Context().Value(ctxID).(string)
+	agentName := getAgentName(r)
+
+	type plotRow struct {
+		ID         int
+		Number     string
+		EstateName string
+	}
+
+	fetchPlots := func(ids []string) ([]plotRow, string) {
+		var rows []plotRow
+		var estateName string
+		for _, pid := range ids {
+			var p plotRow
+			if err := db.QueryRow(`SELECT pp.id, pp.plot_number, e.name FROM prop_plots pp JOIN prop_estates e ON e.id=pp.estate_id WHERE pp.id=? AND pp.status='available'`, pid).
+				Scan(&p.ID, &p.Number, &p.EstateName); err == nil {
+				rows = append(rows, p)
+				estateName = p.EstateName
+			}
+		}
+		return rows, estateName
+	}
+
+	renderAgentBookForm := func(plots []plotRow, estateName, formErr string) {
+		title := fmt.Sprintf("Book Plot %s", plots[0].Number)
+		if len(plots) > 1 {
+			title = fmt.Sprintf("Book %d Plots", len(plots))
+		}
+		renderAgent(w, r, "agent_estate_book.html", map[string]any{
+			"Title":      title,
+			"Active":     "estates",
+			"Plots":      plots,
+			"EstateName": estateName,
+			"EstateID":   id,
+			"FormError":  formErr,
+		})
+	}
+
+	if r.Method == http.MethodPost {
+		r.ParseMultipartForm(32 << 20)
+		plotIDs := r.Form["plot_ids"]
+		buyerName := strings.TrimSpace(r.FormValue("buyer_name"))
+		buyerPhone := strings.TrimSpace(r.FormValue("buyer_phone"))
+		buyerEmail := r.FormValue("buyer_email")
+		deposit := strings.TrimSpace(r.FormValue("deposit"))
+		paymentPlan := r.FormValue("payment_plan")
+		leadSource := r.FormValue("lead_source")
+		notes := strings.TrimSpace(r.FormValue("notes"))
+		rebookConfirmed := r.FormValue("rebook_confirmed") == "1"
+
+		plots, estateName := fetchPlots(plotIDs)
+
+		switch {
+		case buyerName == "":
+			renderAgentBookForm(plots, estateName, "Buyer name is required.")
+			return
+		case buyerPhone == "":
+			renderAgentBookForm(plots, estateName, "Buyer phone number is required.")
+			return
+		case deposit == "" || deposit == "0":
+			renderAgentBookForm(plots, estateName, "Deposit amount is required.")
+			return
+		case leadSource == "":
+			renderAgentBookForm(plots, estateName, "Lead source is required.")
+			return
+		}
+
+		hasDepositRef := false
+		if r.MultipartForm != nil {
+			for _, fh := range r.MultipartForm.File["deposit_ref"] {
+				if fh.Size > 0 {
+					hasDepositRef = true
+					break
+				}
+			}
+		}
+		if !hasDepositRef {
+			renderAgentBookForm(plots, estateName, "Payment reference attachment is required.")
+			return
+		}
+
+		if len(plots) == 0 {
+			http.Redirect(w, r, "/agent/estate/"+id+"/plots?status=available&err=unavailable", http.StatusFound)
+			return
+		}
+
+		depositRef := saveUploadedFiles(r, "deposit_ref")
+		idPhoto := saveUploadedFiles(r, "id_photo")
+		kra := saveUploadedFiles(r, "kra")
+		passportPhoto := saveUploadedFiles(r, "passport_photo")
+
+		var plotNumbers []string
+		var bookedPlotIDs []int
+		agentEstateIDInt, _ := strconv.Atoi(id)
+		for _, p := range plots {
+			if _, err := db.Exec(`INSERT INTO prop_bookings (plot_id, estate_id, buyer_name, buyer_phone, buyer_email, agent_name, deposit, payment_plan, deposit_ref, id_photo, kra, passport_photo, lead_source, notes, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active')`,
+				p.ID, id, buyerName, buyerPhone, buyerEmail, agentName, deposit, paymentPlan, depositRef, idPhoto, kra, passportPhoto, leadSource, notes); err != nil {
+				log.Printf("agentBook: booking insert failed for plot %d: %v", p.ID, err)
+			}
+			if _, err := db.Exec(`UPDATE prop_plots SET status='booked' WHERE id=?`, p.ID); err != nil {
+				log.Printf("agentBook: plot status update failed for plot %d: %v", p.ID, err)
+			}
+			logPlotStatus(p.ID, p.Number, estateName, agentEstateIDInt, "available", "booked", agentName, "booked")
+			plotNumbers = append(plotNumbers, p.Number)
+			bookedPlotIDs = append(bookedPlotIDs, p.ID)
+		}
+		log.Printf("agentBook: %d plots booked for %s by %s", len(plots), buyerName, agentName)
+		logBooking("PLOT_BOOKED", agentName, buyerName,
+			strings.Join(plotNumbers, ", ")+" — "+estateName,
+			fmt.Sprintf("Deposit: KES %s | Plan: %s | Docs: %v", deposit, paymentPlan, hasAllAttachments(bookingInfo{DepositRef: depositRef, IDPhoto: idPhoto, KRA: kra, PassportPhoto: passportPhoto})))
+		processBookingIntegrations(bookingInfo{
+			PlotIDs: bookedPlotIDs, BuyerName: buyerName, BuyerPhone: buyerPhone, BuyerEmail: buyerEmail,
+			PlotNumbers: plotNumbers, EstateName: estateName,
+			Deposit: deposit, PaymentPlan: paymentPlan, AgentName: agentName,
+			DepositRef: depositRef, IDPhoto: idPhoto, KRA: kra, PassportPhoto: passportPhoto,
+			Notes: notes, RebookConfirmed: rebookConfirmed,
+		})
+		http.Redirect(w, r, "/agent/estate/"+id+"/plots?status=booked&booked=1", http.StatusFound)
+		return
+	}
+
+	// GET: ?plots=1,2,3
+	plotIDStrs := strings.Split(r.URL.Query().Get("plots"), ",")
+	plots, estateName := fetchPlots(plotIDStrs)
+	if len(plots) == 0 {
+		http.Redirect(w, r, "/agent/estate/"+id+"/plots?status=available", http.StatusFound)
+		return
+	}
+
+	renderAgentBookForm(plots, estateName, "")
+}
+
+func agentCartHandler(w http.ResponseWriter, r *http.Request) {
+	renderAgent(w, r, "agent_cart.html", map[string]any{"Title": "My Cart", "Active": "cart"})
+}
+
+func adminCartHandler(w http.ResponseWriter, r *http.Request) {
+	renderAdmin(w, r, "admin_cart.html", map[string]any{"Title": "Booking Cart", "Active": "cart"})
+}
+
+func agentCartCheckoutHandler(w http.ResponseWriter, r *http.Request) {
+	cartCheckoutHandler(w, r, "/agent/cart", "/agent/receipt/")
+}
+
+func adminCartCheckoutHandler(w http.ResponseWriter, r *http.Request) {
+	cartCheckoutHandler(w, r, "/admin/cart", "/admin/receipt/")
+}
+
+func cartCheckoutHandler(w http.ResponseWriter, r *http.Request, cartPath, receiptBasePath string) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, cartPath, http.StatusFound)
+		return
+	}
+	agentName := getAgentName(r)
+	r.ParseMultipartForm(32 << 20)
+
+	plotIDStrs := r.Form["plot_ids"]
+	buyerName := strings.TrimSpace(r.FormValue("buyer_name"))
+	buyerPhone := strings.TrimSpace(r.FormValue("buyer_phone"))
+	buyerEmail := r.FormValue("buyer_email")
+	deposit := strings.TrimSpace(r.FormValue("deposit"))
+	paymentPlan := r.FormValue("payment_plan")
+	leadSource := r.FormValue("lead_source")
+	notes := strings.TrimSpace(r.FormValue("notes"))
+	rebookConfirmed := r.FormValue("rebook_confirmed") == "1"
+
+	switch {
+	case buyerName == "":
+		http.Redirect(w, r, cartPath+"?err=name", http.StatusFound)
+		return
+	case buyerPhone == "":
+		http.Redirect(w, r, cartPath+"?err=phone", http.StatusFound)
+		return
+	case deposit == "" || deposit == "0":
+		http.Redirect(w, r, cartPath+"?err=deposit_amt", http.StatusFound)
+		return
+	case leadSource == "":
+		http.Redirect(w, r, cartPath+"?err=source", http.StatusFound)
+		return
+	}
+
+	hasDepositRef := false
+	if r.MultipartForm != nil {
+		for _, fh := range r.MultipartForm.File["deposit_ref"] {
+			if fh.Size > 0 {
+				hasDepositRef = true
+				break
+			}
+		}
+	}
+	if !hasDepositRef {
+		http.Redirect(w, r, cartPath+"?err=deposit_ref", http.StatusFound)
+		return
+	}
+
+	type cartPlot struct {
+		ID         int
+		Number     string
+		EstateID   int
+		EstateName string
+	}
+
+	var plots []cartPlot
+	for _, idStr := range plotIDStrs {
+		pid, _ := strconv.Atoi(idStr)
+		if pid == 0 {
+			continue
+		}
+		var cp cartPlot
+		cp.ID = pid
+		if err := db.QueryRow(`SELECT pp.plot_number, pp.estate_id, e.name FROM prop_plots pp JOIN prop_estates e ON e.id=pp.estate_id WHERE pp.id=? AND pp.status='available'`, pid).
+			Scan(&cp.Number, &cp.EstateID, &cp.EstateName); err != nil {
+			continue
+		}
+		plots = append(plots, cp)
+	}
+
+	if len(plots) == 0 {
+		http.Redirect(w, r, cartPath+"?err=unavailable", http.StatusFound)
+		return
+	}
+
+	depositRef := saveUploadedFiles(r, "deposit_ref")
+	idPhoto := saveUploadedFiles(r, "id_photo")
+	kra := saveUploadedFiles(r, "kra")
+	passportPhoto := saveUploadedFiles(r, "passport_photo")
+
+	batchRef := generateToken()[:20]
+
+	// Generate sequential receipt number: PPSL{year}{padded count}
+	year := time.Now().Year()
+	var receiptSeq int
+	db.QueryRow(`SELECT COUNT(DISTINCT batch_ref) FROM prop_bookings WHERE batch_ref IS NOT NULL AND YEAR(date_booked) = ?`, year).Scan(&receiptSeq)
+	receiptNumber := fmt.Sprintf("PPSL%d%03d", year, receiptSeq+1)
+
+	type estateGroup struct {
+		name     string
+		plotIDs  []int
+		plotNums []string
+	}
+	groups := map[int]*estateGroup{}
+
+	for _, cp := range plots {
+		db.Exec(`INSERT INTO prop_bookings (plot_id, estate_id, buyer_name, buyer_phone, buyer_email, agent_name, deposit, payment_plan, deposit_ref, id_photo, kra, passport_photo, lead_source, notes, batch_ref, receipt_number, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active')`,
+			cp.ID, cp.EstateID, buyerName, buyerPhone, buyerEmail, agentName, deposit, paymentPlan, depositRef, idPhoto, kra, passportPhoto, leadSource, notes, batchRef, receiptNumber)
+		db.Exec(`UPDATE prop_plots SET status='booked' WHERE id=?`, cp.ID)
+		logPlotStatus(cp.ID, cp.Number, cp.EstateName, cp.EstateID, "available", "booked", agentName, "booked")
+
+		if groups[cp.EstateID] == nil {
+			groups[cp.EstateID] = &estateGroup{name: cp.EstateName}
+		}
+		groups[cp.EstateID].plotIDs = append(groups[cp.EstateID].plotIDs, cp.ID)
+		groups[cp.EstateID].plotNums = append(groups[cp.EstateID].plotNums, cp.Number)
+	}
+
+	for _, eg := range groups {
+		processBookingIntegrations(bookingInfo{
+			PlotIDs: eg.plotIDs, BuyerName: buyerName, BuyerPhone: buyerPhone, BuyerEmail: buyerEmail,
+			PlotNumbers: eg.plotNums, EstateName: eg.name,
+			Deposit: deposit, PaymentPlan: paymentPlan, AgentName: agentName,
+			DepositRef: depositRef, IDPhoto: idPhoto, KRA: kra, PassportPhoto: passportPhoto,
+			Notes: notes, RebookConfirmed: rebookConfirmed,
+		})
+	}
+
+	var allNums []string
+	for _, cp := range plots {
+		allNums = append(allNums, cp.Number)
+	}
+	logBooking("PLOT_BOOKED", agentName, buyerName,
+		strings.Join(allNums, ", "),
+		fmt.Sprintf("Deposit: KES %s | Plan: %s | Batch: %s", deposit, paymentPlan, batchRef))
+
+	http.Redirect(w, r, receiptBasePath+batchRef, http.StatusFound)
+}
+
+func agentReceiptHandler(w http.ResponseWriter, r *http.Request) {
+	renderReceiptPage(w, r, strings.Trim(strings.TrimPrefix(r.URL.Path, "/agent/receipt/"), "/"), "agent_receipt.html")
+}
+
+func adminReceiptHandler(w http.ResponseWriter, r *http.Request) {
+	renderReceiptPage(w, r, strings.Trim(strings.TrimPrefix(r.URL.Path, "/admin/receipt/"), "/"), "admin_receipt.html")
+}
+
+func adminReceiptsListHandler(w http.ResponseWriter, r *http.Request) {
+	type receiptRow struct {
+		BatchRef      string
+		ReceiptNumber string
+		BuyerName     string
+		BuyerPhone    string
+		AgentName     string
+		DateBooked    string
+		PlotCount     int
+		Plots         string
+		Status        string
+	}
+
+	search := strings.TrimSpace(r.URL.Query().Get("q"))
+
+	q := `
+		SELECT b.batch_ref,
+		       COALESCE(MAX(b.receipt_number),'—'),
+		       COALESCE(MAX(b.buyer_name),''),
+		       COALESCE(MAX(b.buyer_phone),''),
+		       COALESCE(MAX(b.agent_name),''),
+		       DATE_FORMAT(MAX(b.date_booked),'%d %b %Y'),
+		       COUNT(*) AS plot_count,
+		       GROUP_CONCAT(pp.plot_number ORDER BY pp.plot_number SEPARATOR ', '),
+		       MAX(b.status)
+		FROM prop_bookings b
+		JOIN prop_plots pp ON pp.id = b.plot_id
+		WHERE b.batch_ref IS NOT NULL AND b.batch_ref != ''`
+	var args []any
+	if search != "" {
+		q += ` AND (b.buyer_name LIKE ? OR b.buyer_phone LIKE ? OR b.receipt_number LIKE ? OR b.agent_name LIKE ?)`
+		like := "%" + search + "%"
+		args = append(args, like, like, like, like)
+	}
+	q += ` GROUP BY b.batch_ref ORDER BY MAX(b.date_booked) DESC`
+
+	var rows []receiptRow
+	if dbRows, err := db.Query(q, args...); err == nil {
+		defer dbRows.Close()
+		for dbRows.Next() {
+			var row receiptRow
+			if dbRows.Scan(&row.BatchRef, &row.ReceiptNumber, &row.BuyerName, &row.BuyerPhone,
+				&row.AgentName, &row.DateBooked, &row.PlotCount, &row.Plots, &row.Status) == nil {
+				rows = append(rows, row)
+			}
+		}
+	}
+
+	renderAdmin(w, r, "admin_receipts_list.html", map[string]any{
+		"Title":  "All Receipts",
+		"Active": "receipts",
+		"Rows":   rows,
+		"Search": search,
+		"Count":  len(rows),
+	})
+}
+
+func renderReceiptPage(w http.ResponseWriter, r *http.Request, batchRef, tmplName string) {
+	_ = r // satisfies signature; render/renderAdmin called below via tmplName
+	if batchRef == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	type receiptPlot struct {
+		PlotNumber string
+		EstateName string
+	}
+	type receiptData struct {
+		BuyerName     string
+		BuyerPhone    string
+		BuyerEmail    string
+		AgentName     string
+		Deposit       string
+		PaymentPlan   string
+		LeadSource    string
+		DateBooked    string
+		BatchRef      string
+		ReceiptNumber string
+		Plots         []receiptPlot
+	}
+
+	rows, err := db.Query(`
+		SELECT pp.plot_number, e.name,
+		       b.buyer_name, b.buyer_phone, COALESCE(b.buyer_email,''),
+		       b.agent_name, COALESCE(CAST(b.deposit AS CHAR),'0'),
+		       COALESCE(b.payment_plan,''), COALESCE(b.lead_source,''),
+		       DATE_FORMAT(b.date_booked,'%d %b %Y %H:%i'),
+		       COALESCE(b.receipt_number,'')
+		FROM prop_bookings b
+		JOIN prop_plots pp ON pp.id = b.plot_id
+		JOIN prop_estates e ON e.id = b.estate_id
+		WHERE b.batch_ref = ?
+		ORDER BY b.id`, batchRef)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer rows.Close()
+
+	var data receiptData
+	data.BatchRef = batchRef
+	first := true
+	for rows.Next() {
+		var rp receiptPlot
+		var buyerName, buyerPhone, buyerEmail, agentName, deposit, paymentPlan, leadSource, dateBooked, receiptNumber string
+		rows.Scan(&rp.PlotNumber, &rp.EstateName, &buyerName, &buyerPhone, &buyerEmail, &agentName, &deposit, &paymentPlan, &leadSource, &dateBooked, &receiptNumber)
+		if first {
+			data.BuyerName = buyerName
+			data.BuyerPhone = buyerPhone
+			data.BuyerEmail = buyerEmail
+			data.AgentName = agentName
+			data.Deposit = deposit
+			data.PaymentPlan = paymentPlan
+			data.LeadSource = leadSource
+			data.DateBooked = dateBooked
+			data.ReceiptNumber = receiptNumber
+			first = false
+		}
+		data.Plots = append(data.Plots, rp)
+	}
+	if len(data.Plots) == 0 {
+		http.NotFound(w, r)
+		return
+	}
+
+	pageData := map[string]any{
+		"Title":   "Booking Receipt",
+		"Active":  "bookings",
+		"Receipt": data,
+	}
+	if tmplName == "admin_receipt.html" {
+		renderAdmin(w, r, tmplName, pageData)
+	} else {
+		renderAgent(w, r, tmplName, pageData)
+	}
+}
+
+func agentBookingsHandler(w http.ResponseWriter, r *http.Request) {
+	agentName := getAgentName(r)
+	estateFilter := r.URL.Query().Get("estate_id")
+	search := r.URL.Query().Get("search")
+
+	type bookingRow struct {
+		BookingID  int
+		PlotID     int
+		PlotNumber string
+		EstateName string
+		BuyerName  string
+		BuyerPhone string
+		BuyerEmail string
+		Notes      string
+		DateBooked string
+		BatchRef   string
+	}
+
+	query := `SELECT b.id, p.id, p.plot_number, e.name, b.buyer_name, COALESCE(b.buyer_phone,''), COALESCE(b.buyer_email,''), COALESCE(b.notes,''), DATE_FORMAT(b.date_booked,'%d %b %Y'), COALESCE(b.batch_ref,'')
+		FROM prop_bookings b
+		JOIN prop_plots p ON p.id=b.plot_id
+		JOIN prop_estates e ON e.id=p.estate_id
+		WHERE b.status='active' AND b.agent_name=?`
+	args := []any{agentName}
+
+	if estateFilter != "" && estateFilter != "0" {
+		query += " AND p.estate_id=?"
+		args = append(args, estateFilter)
+	}
+	if search != "" {
+		query += " AND (b.buyer_name LIKE ? OR p.plot_number LIKE ?)"
+		args = append(args, "%"+search+"%", "%"+search+"%")
+	}
+	query += " ORDER BY b.date_booked DESC"
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		log.Printf("agentBookings: %v", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+	var bookings []bookingRow
+	for rows.Next() {
+		var b bookingRow
+		if rows.Scan(&b.BookingID, &b.PlotID, &b.PlotNumber, &b.EstateName, &b.BuyerName, &b.BuyerPhone, &b.BuyerEmail, &b.Notes, &b.DateBooked, &b.BatchRef) == nil {
+			bookings = append(bookings, b)
+		}
+	}
+
+	// Estates for filter dropdown
+	eRows, _ := db.Query(`SELECT id, name FROM prop_estates ORDER BY name`)
+	type estOption struct {
+		ID   int
+		Name string
+	}
+	var estateOptions []estOption
+	if eRows != nil {
+		defer eRows.Close()
+		for eRows.Next() {
+			var e estOption
+			if eRows.Scan(&e.ID, &e.Name) == nil {
+				estateOptions = append(estateOptions, e)
+			}
+		}
+	}
+
+	renderAgent(w, r, "agent_bookings.html", map[string]any{
+		"Title":        "My Bookings",
+		"Active":       "bookings",
+		"Bookings":     bookings,
+		"Estates":      estateOptions,
+		"EstateFilter": estateFilter,
+		"Search":       search,
+	})
+}
+
+func bookingAttachmentsHandler(w http.ResponseWriter, r *http.Request, tmplName, backURL string, isAdmin bool) {
+	// Extract booking ID from URL: /admin/booking/{id}/attachments or /agent/booking/{id}/attachments
+	var prefix string
+	if isAdmin {
+		prefix = "/admin/booking/"
+	} else {
+		prefix = "/agent/booking/"
+	}
+	bookingID := strings.TrimPrefix(r.URL.Path, prefix)
+	bookingID = strings.TrimSuffix(bookingID, "/attachments")
+	bookingID = strings.Trim(bookingID, "/")
+	if bookingID == "" {
+		http.Redirect(w, r, backURL, http.StatusFound)
+		return
+	}
+
+	type attachInfo struct {
+		BookingID          int
+		BuyerName          string
+		BuyerPhone         string
+		BuyerEmail         string
+		EstateName         string
+		PlotNumber         string
+		DepositRef         string
+		IDPhoto            string
+		KRA                string
+		PassportPhoto      string
+		PlotID             int
+		EstateID           int
+		AgentName          string
+		PaymentPlan        string
+		Deposit            string
+		Notes              string
+		ZohoBooksID        string
+		DepositRefFiles    []string
+		IDPhotoFiles       []string
+		KRAFiles           []string
+		PassportPhotoFiles []string
+	}
+	var info attachInfo
+	err := db.QueryRow(`
+		SELECT b.id, b.buyer_name, COALESCE(b.buyer_phone,''), COALESCE(b.buyer_email,''),
+		       e.name, p.plot_number,
+		       COALESCE(b.deposit_ref,''), COALESCE(b.id_photo,''),
+		       COALESCE(b.kra,''), COALESCE(b.passport_photo,''),
+		       b.plot_id, b.estate_id, COALESCE(b.agent_name,''),
+		       COALESCE(b.payment_plan,''), COALESCE(CAST(b.deposit AS CHAR),'0'),
+		       COALESCE(b.notes,''), COALESCE(b.zoho_books_id,'')
+		FROM prop_bookings b
+		JOIN prop_plots p ON p.id = b.plot_id
+		JOIN prop_estates e ON e.id = b.estate_id
+		WHERE b.id = ?`, bookingID).
+		Scan(&info.BookingID, &info.BuyerName, &info.BuyerPhone, &info.BuyerEmail,
+			&info.EstateName, &info.PlotNumber,
+			&info.DepositRef, &info.IDPhoto, &info.KRA, &info.PassportPhoto,
+			&info.PlotID, &info.EstateID, &info.AgentName, &info.PaymentPlan, &info.Deposit,
+			&info.Notes, &info.ZohoBooksID)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	// Populate file lists for template display
+	splitFiles := func(s string) []string {
+		if s == "" {
+			return nil
+		}
+		var out []string
+		for _, f := range strings.Split(s, ",") {
+			f = strings.TrimSpace(f)
+			if f != "" {
+				out = append(out, f)
+			}
+		}
+		return out
+	}
+	info.DepositRefFiles = splitFiles(info.DepositRef)
+	info.IDPhotoFiles = splitFiles(info.IDPhoto)
+	info.KRAFiles = splitFiles(info.KRA)
+	info.PassportPhotoFiles = splitFiles(info.PassportPhoto)
+
+	// appendFiles joins new uploads with existing ones
+	appendFiles := func(newFiles, existing string) string {
+		if newFiles == "" {
+			return existing
+		}
+		if existing == "" {
+			return newFiles
+		}
+		return existing + "," + newFiles
+	}
+
+	if r.Method == http.MethodPost {
+		r.ParseMultipartForm(32 << 20)
+
+		// Allow buyer name/phone to be corrected during doc upload
+		if name := strings.TrimSpace(r.FormValue("buyer_name")); name != "" {
+			info.BuyerName = name
+		}
+		if phone := strings.TrimSpace(r.FormValue("buyer_phone")); phone != "" {
+			info.BuyerPhone = phone
+		}
+		if email := strings.TrimSpace(r.FormValue("buyer_email")); email != "" {
+			info.BuyerEmail = email
+		}
+
+		// Append new files to existing ones for each field
+		depositRef := appendFiles(saveUploadedFiles(r, "deposit_ref"), info.DepositRef)
+		idPhoto := appendFiles(saveUploadedFiles(r, "id_photo"), info.IDPhoto)
+		kra := appendFiles(saveUploadedFiles(r, "kra"), info.KRA)
+		passportPhoto := appendFiles(saveUploadedFiles(r, "passport_photo"), info.PassportPhoto)
+
+		notes := strings.TrimSpace(r.FormValue("notes"))
+		if pp := r.FormValue("payment_plan"); pp != "" {
+			info.PaymentPlan = pp
+		}
+		db.Exec(`UPDATE prop_bookings SET buyer_name=?, buyer_phone=?, buyer_email=?, payment_plan=?, deposit_ref=?, id_photo=?, kra=?, passport_photo=?, notes=? WHERE id=?`,
+			info.BuyerName, info.BuyerPhone, info.BuyerEmail, info.PaymentPlan, depositRef, idPhoto, kra, passportPhoto, notes, bookingID)
+
+		// Push buyer info update to Zoho Books if a Books record exists
+		if info.ZohoBooksID != "" {
+			go func(estimateID, name, phone, email, estateName, plotNumber string) {
+				if err := updateBooksContact(estimateID, name, phone, email, estateName, plotNumber); err != nil {
+					log.Printf("[zoho-books] contact update error: %v", err)
+				}
+			}(info.ZohoBooksID, info.BuyerName, info.BuyerPhone, info.BuyerEmail, info.EstateName, info.PlotNumber)
+		}
+
+		allDocs := hasAllAttachments(bookingInfo{DepositRef: depositRef, IDPhoto: idPhoto, KRA: kra, PassportPhoto: passportPhoto})
+		docStatus := "incomplete"
+		if allDocs {
+			docStatus = "all 4 docs present — integrations triggered"
+		}
+		logBooking("DOCS_UPLOADED", info.AgentName, info.BuyerName,
+			info.PlotNumber+" — "+info.EstateName, docStatus)
+
+		// When all docs are now present, notify sales and systemadmin only.
+		// Info and accounts were already notified at booking time.
+		if allDocs {
+			go func() {
+				b := bookingInfo{
+					PlotIDs: []int{info.PlotID}, BuyerName: info.BuyerName, BuyerPhone: info.BuyerPhone, BuyerEmail: info.BuyerEmail,
+					EstateName: info.EstateName, PlotNumbers: []string{info.PlotNumber},
+					Deposit: info.Deposit, PaymentPlan: info.PaymentPlan, AgentName: info.AgentName,
+					DepositRef: depositRef, IDPhoto: idPhoto, KRA: kra, PassportPhoto: passportPhoto,
+					Notes: notes,
+				}
+				if err := sendDocsCompletedEmail(b); err != nil {
+					log.Printf("[docs-completed] email error: %v", err)
+				}
+			}()
+		}
+		http.Redirect(w, r, r.URL.Path+"?uploaded=1", http.StatusFound)
+		return
+	}
+
+	// Fetch existing booking receipts for this booking
+	type bookingReceipt struct {
+		ID            int
+		ReceiptNumber string
+		Amount        string
+		CreatedAt     string
+	}
+	var receipts []bookingReceipt
+	if rrows, rerr := db.Query(`SELECT id, receipt_number, CAST(amount AS CHAR), DATE_FORMAT(created_at,'%d %b %Y %H:%i') FROM prop_booking_receipts WHERE booking_id=? ORDER BY id DESC`, info.BookingID); rerr == nil {
+		defer rrows.Close()
+		for rrows.Next() {
+			var br bookingReceipt
+			rrows.Scan(&br.ID, &br.ReceiptNumber, &br.Amount, &br.CreatedAt)
+			receipts = append(receipts, br)
+		}
+	}
+
+	receiptPrefix := "/agent"
+	if isAdmin {
+		receiptPrefix = "/admin"
+	}
+
+	data := map[string]any{
+		"Title":         "Upload Documents — " + info.BuyerName,
+		"Active":        "booked-plots",
+		"Info":          info,
+		"BackURL":       backURL,
+		"SaveOK":        r.URL.Query().Get("uploaded") == "1",
+		"Receipts":      receipts,
+		"ReceiptPrefix": receiptPrefix,
+	}
+	if isAdmin {
+		renderAdmin(w, r, tmplName, data)
+	} else {
+		renderAgent(w, r, tmplName, data)
+	}
+}
+
+func adminBookingAttachmentsHandler(w http.ResponseWriter, r *http.Request) {
+	bookingAttachmentsHandler(w, r, "admin_booking_attachments.html", "/admin/booked-plots", true)
+}
+
+func agentBookingAttachmentsHandler(w http.ResponseWriter, r *http.Request) {
+	bookingAttachmentsHandler(w, r, "agent_booking_attachments.html", "/agent/bookings", false)
+}
+
+// bookingReceiptGenerateHandler creates a new booking confirmation receipt record.
+func bookingReceiptGenerateHandler(w http.ResponseWriter, r *http.Request, isAdmin bool) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	bookingIDStr := strings.TrimSpace(r.FormValue("booking_id"))
+	amountStr := strings.TrimSpace(r.FormValue("amount"))
+	if bookingIDStr == "" || amountStr == "" {
+		http.Error(w, "missing fields", http.StatusBadRequest)
+		return
+	}
+
+	// Verify booking exists
+	var bookingID int
+	if err := db.QueryRow(`SELECT id FROM prop_bookings WHERE id=?`, bookingIDStr).Scan(&bookingID); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	// Generate sequential receipt number: PPL{year}{padded_seq}
+	year := time.Now().Year()
+	var seq int
+	db.QueryRow(`SELECT COUNT(*) FROM prop_booking_receipts WHERE YEAR(created_at)=?`, year).Scan(&seq)
+	receiptNumber := fmt.Sprintf("PPSL%d%03d", year, seq+1)
+
+	var newID int64
+	res, err := db.Exec(`INSERT INTO prop_booking_receipts (booking_id, amount, receipt_number) VALUES (?,?,?)`,
+		bookingID, amountStr, receiptNumber)
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	newID, _ = res.LastInsertId()
+
+	prefix := "/agent"
+	if isAdmin {
+		prefix = "/admin"
+	}
+	http.Redirect(w, r, fmt.Sprintf("%s/booking-receipt/%d", prefix, newID), http.StatusFound)
+}
+
+// bookingReceiptViewHandler renders a previously generated booking receipt.
+func bookingReceiptViewHandler(w http.ResponseWriter, r *http.Request, tmplName, prefix string, isAdmin bool) {
+	receiptID := strings.Trim(strings.TrimPrefix(r.URL.Path, prefix+"/booking-receipt/"), "/")
+	if receiptID == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	type receiptView struct {
+		ReceiptID     int
+		ReceiptNumber string
+		Amount        string
+		CreatedAt     string
+		BuyerName     string
+		BuyerPhone    string
+		BuyerEmail    string
+		AgentName     string
+		EstateName    string
+		PlotNumber    string
+		PaymentPlan   string
+		BookingID     int
+	}
+	var rv receiptView
+	err := db.QueryRow(`
+		SELECT br.id, br.receipt_number, CAST(br.amount AS CHAR), DATE_FORMAT(br.created_at,'%d %b %Y %H:%i'),
+		       b.buyer_name, COALESCE(b.buyer_phone,''), COALESCE(b.buyer_email,''),
+		       COALESCE(b.agent_name,''), e.name, p.plot_number,
+		       COALESCE(b.payment_plan,''), b.id
+		FROM prop_booking_receipts br
+		JOIN prop_bookings b ON b.id = br.booking_id
+		JOIN prop_plots p ON p.id = b.plot_id
+		JOIN prop_estates e ON e.id = b.estate_id
+		WHERE br.id = ?`, receiptID).
+		Scan(&rv.ReceiptID, &rv.ReceiptNumber, &rv.Amount, &rv.CreatedAt,
+			&rv.BuyerName, &rv.BuyerPhone, &rv.BuyerEmail,
+			&rv.AgentName, &rv.EstateName, &rv.PlotNumber,
+			&rv.PaymentPlan, &rv.BookingID)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	backURL := fmt.Sprintf("%s/booking/%d/attachments", prefix, rv.BookingID)
+	pageData := map[string]any{
+		"Title":   "Booking Receipt " + rv.ReceiptNumber,
+		"Active":  "booked-plots",
+		"Receipt": rv,
+		"BackURL": backURL,
+	}
+	if isAdmin {
+		renderAdmin(w, r, tmplName, pageData)
+	} else {
+		renderAgent(w, r, tmplName, pageData)
+	}
+}
+
+func adminBookingReceiptHandler(w http.ResponseWriter, r *http.Request) {
+	bookingReceiptGenerateHandler(w, r, true)
+}
+
+func adminBookingReceiptViewHandler(w http.ResponseWriter, r *http.Request) {
+	bookingReceiptViewHandler(w, r, "admin_booking_receipt.html", "/admin", true)
+}
+
+func agentBookingReceiptHandler(w http.ResponseWriter, r *http.Request) {
+	bookingReceiptGenerateHandler(w, r, false)
+}
+
+func agentBookingReceiptViewHandler(w http.ResponseWriter, r *http.Request) {
+	bookingReceiptViewHandler(w, r, "agent_booking_receipt.html", "/agent", false)
+}
+
+func agentCancelBookingHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/agent/bookings", http.StatusFound)
+		return
+	}
+	plotID := pathSegment("/agent/bookings/cancel/", r.URL.Path)
+	agentName := getAgentName(r)
+
+	// Verify ownership before cancelling
+	var cnt int
+	db.QueryRow(`SELECT COUNT(*) FROM prop_bookings WHERE plot_id=? AND agent_name=? AND status='active'`, plotID, agentName).Scan(&cnt)
+	if cnt > 0 {
+		db.Exec(`UPDATE prop_bookings SET status='cancelled' WHERE plot_id=? AND agent_name=? AND status='active'`, plotID, agentName)
+		db.Exec(`UPDATE prop_plots SET status='available' WHERE id=?`, plotID)
+		var cancelPlotNumber, cancelEstateName string
+		var cancelEstateID int
+		if db.QueryRow(`SELECT p.plot_number, p.estate_id, e.name FROM prop_plots p JOIN prop_estates e ON e.id = p.estate_id WHERE p.id=?`, plotID).
+			Scan(&cancelPlotNumber, &cancelEstateID, &cancelEstateName) == nil {
+			if cancelPlotIDInt, err2 := strconv.Atoi(plotID); err2 == nil {
+				logPlotStatus(cancelPlotIDInt, cancelPlotNumber, cancelEstateName, cancelEstateID, "booked", "available", agentName, "cancelled by agent")
+			}
+		}
+	}
+	http.Redirect(w, r, "/agent/bookings", http.StatusFound)
+}
+
+func agentSalesHandler(w http.ResponseWriter, r *http.Request) {
+	agentName := getAgentName(r)
+	estateFilter := r.URL.Query().Get("estate_id")
+	search := r.URL.Query().Get("search")
+
+	type saleRow struct {
+		PlotNumber string
+		EstateName string
+		BuyerName  string
+		BuyerPhone string
+		BuyerEmail string
+		Amount     float64
+		DateSold   string
+	}
+
+	query := `SELECT p.plot_number, e.name, s.buyer_name, COALESCE(s.buyer_phone,''), COALESCE(s.buyer_email,''), COALESCE(s.amount,0), DATE_FORMAT(s.date_sold,'%d %b %Y')
+		FROM prop_sales s
+		JOIN prop_plots p ON p.id=s.plot_id
+		JOIN prop_estates e ON e.id=p.estate_id
+		WHERE s.agent_name=?`
+	args := []any{agentName}
+
+	if estateFilter != "" && estateFilter != "0" {
+		query += " AND p.estate_id=?"
+		args = append(args, estateFilter)
+	}
+	if search != "" {
+		query += " AND (s.buyer_name LIKE ? OR p.plot_number LIKE ?)"
+		args = append(args, "%"+search+"%", "%"+search+"%")
+	}
+	query += " ORDER BY s.date_sold DESC"
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		log.Printf("agentSales: %v", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+	var sales []saleRow
+	for rows.Next() {
+		var s saleRow
+		if rows.Scan(&s.PlotNumber, &s.EstateName, &s.BuyerName, &s.BuyerPhone, &s.BuyerEmail, &s.Amount, &s.DateSold) == nil {
+			sales = append(sales, s)
+		}
+	}
+
+	eRows, _ := db.Query(`SELECT id, name FROM prop_estates ORDER BY name`)
+	type estOption struct {
+		ID   int
+		Name string
+	}
+	var estateOptions []estOption
+	if eRows != nil {
+		defer eRows.Close()
+		for eRows.Next() {
+			var e estOption
+			if eRows.Scan(&e.ID, &e.Name) == nil {
+				estateOptions = append(estateOptions, e)
+			}
+		}
+	}
+
+	renderAgent(w, r, "agent_sales.html", map[string]any{
+		"Title":        "My Sales",
+		"Active":       "sales",
+		"Sales":        sales,
+		"Estates":      estateOptions,
+		"EstateFilter": estateFilter,
+		"Search":       search,
+	})
+}
+
+// ── Estate Edit ────────────────────────────────────────────────────────────
+
+func adminEstateEditHandler(w http.ResponseWriter, r *http.Request) {
+	id := r.Context().Value(ctxID).(string)
+
+	var estateName, image, mutationImage, plotInfo string
+	var plotPrice float64
+	var isRestricted int
+	err := db.QueryRow(`SELECT name, COALESCE(image,''), COALESCE(mutation_image,''), COALESCE(prop_plotinfo,''), COALESCE(plot_price,0), COALESCE(is_restricted,0) FROM prop_estates WHERE id = ?`, id).
+		Scan(&estateName, &image, &mutationImage, &plotInfo, &plotPrice, &isRestricted)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	if r.Method == http.MethodPost {
+		if err := r.ParseMultipartForm(32 << 20); err != nil {
+			log.Printf("estate edit: parse multipart: %v", err)
+			http.Error(w, "Upload failed: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		name := r.FormValue("name")
+		newPlotInfo := r.FormValue("prop_plotinfo")
+		newPlotPrice := r.FormValue("plot_price")
+		newIsRestricted := 0
+		if r.FormValue("visibility") == "hide" {
+			newIsRestricted = 1
+		}
+
+		newMutationImage := mutationImage
+		saveErr := ""
+		imageUpdated := false
+		file, header, ferr := r.FormFile("mutation_image")
+		if ferr == nil {
+			defer file.Close()
+			log.Printf("estate edit: received file %q size=%d", header.Filename, header.Size)
+			ext := filepath.Ext(header.Filename)
+			base := strings.TrimSuffix(header.Filename, ext)
+			safe := strings.Map(func(r rune) rune {
+				if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+					return r
+				}
+				return '_'
+			}, base)
+			filename := fmt.Sprintf("mutation_%d_%s%s", time.Now().Unix(), safe, ext)
+			dst, oerr := os.Create(filepath.Join(uploadsDir, filename))
+			if oerr != nil {
+				log.Printf("estate edit: create file %s: %v", filepath.Join(uploadsDir, filename), oerr)
+				saveErr = fmt.Sprintf("Could not save image file: %v", oerr)
+			} else {
+				if _, cerr := io.Copy(dst, file); cerr != nil {
+					log.Printf("estate edit: copy file: %v", cerr)
+					saveErr = fmt.Sprintf("Image upload incomplete: %v", cerr)
+				} else {
+					newMutationImage = filename
+					imageUpdated = true
+					log.Printf("estate edit: saved mutation image %s", filename)
+				}
+				dst.Close()
+			}
+		} else if ferr != http.ErrMissingFile {
+			log.Printf("estate edit: FormFile error: %v", ferr)
+		}
+
+		// Always update the text fields; only update mutation_image if a new one was saved.
+		var dbErr string
+		if imageUpdated {
+			if _, uerr := db.Exec(`UPDATE prop_estates SET name=?, prop_plotinfo=?, mutation_image=?, plot_price=?, is_restricted=? WHERE id=?`,
+				name, newPlotInfo, newMutationImage, newPlotPrice, newIsRestricted, id); uerr != nil {
+				log.Printf("estate edit update (with image): %v", uerr)
+				dbErr = fmt.Sprintf("Database error: %v", uerr)
+			}
+		} else {
+			if _, uerr := db.Exec(`UPDATE prop_estates SET name=?, prop_plotinfo=?, plot_price=?, is_restricted=? WHERE id=?`,
+				name, newPlotInfo, newPlotPrice, newIsRestricted, id); uerr != nil {
+				log.Printf("estate edit update: %v", uerr)
+				dbErr = fmt.Sprintf("Database error: %v", uerr)
+			}
+		}
+		if dbErr != "" && saveErr == "" {
+			saveErr = dbErr
+		}
+
+		if saveErr != "" {
+			displayImage := mutationImage
+			if displayImage == "" {
+				displayImage = image
+			}
+			// Reload zones for re-render
+			zonesFallback := []zoneDisplay{}
+			zonesJSONFallback, _ := json.Marshal(zonesFallback)
+			renderAdmin(w, r, "admin_estate_edit.html", map[string]any{
+				"Title":        "Edit " + estateName,
+				"Active":       "estates",
+				"EstateName":   name,
+				"EstateID":     id,
+				"PlotInfo":     strings.ReplaceAll(newPlotInfo, "\r", ""),
+				"PlotPrice":    newPlotPrice,
+				"DisplayImage": displayImage,
+				"ZonesJSON":    template.JS(zonesJSONFallback),
+				"SaveError":    saveErr,
+			})
+			return
+		}
+
+		redirect := "/admin/estate/" + id + "/edit?saved=1"
+		http.Redirect(w, r, redirect, http.StatusFound)
+		return
+	}
+
+	// GET: load zones for editor
+	zones := []zoneDisplay{}
+	zRows, _ := db.Query(`
+		SELECT pz.plot_number, COALESCE(pz.points_json,'[]'), COALESCE(pp.status,'available')
+		FROM prop_plot_zones pz
+		LEFT JOIN prop_plots pp ON pp.estate_id = pz.estate_id AND pp.plot_number = pz.plot_number
+		WHERE pz.estate_id = ?
+		ORDER BY pz.id`, id)
+	if zRows != nil {
+		defer zRows.Close()
+		for zRows.Next() {
+			var pn, pj, st string
+			if err := zRows.Scan(&pn, &pj, &st); err == nil {
+				var pts []pointXY
+				json.Unmarshal([]byte(pj), &pts)
+				zones = append(zones, zoneDisplay{PlotNumber: pn, Status: st, Points: pts})
+			}
+		}
+	}
+	zonesJSON, _ := json.Marshal(zones)
+
+	plotInfo = strings.ReplaceAll(plotInfo, `\r\n`, "\n")
+	plotInfo = strings.ReplaceAll(plotInfo, `\n`, "\n")
+
+	displayImage := mutationImage
+	if displayImage == "" {
+		displayImage = image
+	}
+
+	renderAdmin(w, r, "admin_estate_edit.html", map[string]any{
+		"Title":        "Edit " + estateName,
+		"Active":       "estates",
+		"EstateName":   estateName,
+		"EstateID":     id,
+		"PlotInfo":     strings.ReplaceAll(plotInfo, "\r", ""),
+		"PlotPrice":    plotPrice,
+		"IsRestricted": isRestricted == 1,
+		"DisplayImage": displayImage,
+		"ZonesJSON":    template.JS(zonesJSON),
+		"SaveOK":       r.URL.Query().Get("saved") == "1",
+	})
+}
+
+// ── Estate Delete ───────────────────────────────────────────────────────────
+
+func adminEstateDeleteHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/admin/estates", http.StatusFound)
+		return
+	}
+	id := r.Context().Value(ctxID).(string)
+	db.Exec(`DELETE FROM prop_plot_zones WHERE estate_id=?`, id)
+	db.Exec(`DELETE FROM prop_bookings WHERE estate_id=?`, id)
+	db.Exec(`DELETE FROM prop_sales WHERE estate_id=?`, id)
+	db.Exec(`DELETE FROM prop_plots WHERE estate_id=?`, id)
+	db.Exec(`DELETE FROM prop_estates WHERE id=?`, id)
+	http.Redirect(w, r, "/admin/estates", http.StatusFound)
+}
+
+// ── Save Plot Zones (JSON API) ──────────────────────────────────────────────
+
+func adminSaveZonesHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	id := r.Context().Value(ctxID).(string)
+
+	var zones []struct {
+		PlotNumber string    `json:"plot_number"`
+		Points     []pointXY `json:"points"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&zones); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	db.Exec(`DELETE FROM prop_plot_zones WHERE estate_id=?`, id)
+	for _, z := range zones {
+		ptsJSON, _ := json.Marshal(z.Points)
+		db.Exec(`INSERT INTO prop_plot_zones (estate_id, plot_number, points_json) VALUES (?,?,?)`,
+			id, z.PlotNumber, string(ptsJSON))
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"status":"ok"}`))
+}
+
+// ── Private Estates ─────────────────────────────────────────────────────────
+
+func privateEstateAccess(userID, estateID string) bool {
+	var cnt int
+	db.QueryRow(`SELECT COUNT(*) FROM prop_restricted_access WHERE estate_id=? AND user_id=?`, estateID, userID).Scan(&cnt)
+	return cnt > 0
+}
+
+func adminPrivateEstatesHandler(w http.ResponseWriter, r *http.Request) {
+	isSA := getRole(r) == roleSystemAdmin
+	userID := getUserID(r)
+
+	var formErr string
+	if r.Method == http.MethodPost && isSA {
+		r.ParseForm()
+		name := strings.TrimSpace(r.FormValue("name"))
+		if name == "" {
+			formErr = "Estate name is required"
+		} else {
+			res, err := db.Exec(`INSERT INTO prop_estates (name, is_restricted) VALUES (?, 1)`, name)
+			if err != nil {
+				formErr = "Database error creating estate"
+			} else {
+				newID, _ := res.LastInsertId()
+				http.Redirect(w, r, fmt.Sprintf("/admin/estate/%d/edit", newID), http.StatusFound)
+				return
+			}
+		}
+	}
+
+	type estateRow struct {
+		ID        int
+		Name      string
+		Total     int
+		Available int
+		Booked    int
+		SaSigned  int
+		Sold      int
+	}
+	var qArgs []any
+	var q string
+	if isSA {
+		q = `SELECT e.id, e.name, COUNT(p.id),
+			COALESCE(SUM(p.status='available'),0), COALESCE(SUM(p.status='booked'),0),
+			COALESCE(SUM(p.status='sa_signed'),0), COALESCE(SUM(p.status='sold'),0)
+			FROM prop_estates e LEFT JOIN prop_plots p ON p.estate_id=e.id
+			WHERE COALESCE(e.is_restricted,0)=1
+			GROUP BY e.id, e.name ORDER BY e.name`
+	} else {
+		q = `SELECT e.id, e.name, COUNT(p.id),
+			COALESCE(SUM(p.status='available'),0), COALESCE(SUM(p.status='booked'),0),
+			COALESCE(SUM(p.status='sa_signed'),0), COALESCE(SUM(p.status='sold'),0)
+			FROM prop_estates e LEFT JOIN prop_plots p ON p.estate_id=e.id
+			WHERE COALESCE(e.is_restricted,0)=1
+			AND EXISTS (SELECT 1 FROM prop_restricted_access ra WHERE ra.estate_id=e.id AND ra.user_id=?)
+			GROUP BY e.id, e.name ORDER BY e.name`
+		qArgs = append(qArgs, userID)
+	}
+	type privateStats struct {
+		TotalEstates int
+		Available    int
+		Booked       int
+		SaSigned     int
+		Sold         int
+	}
+	// Stats cover ALL estates regardless of visibility
+	var stats privateStats
+	db.QueryRow(`SELECT COUNT(*) FROM prop_estates`).Scan(&stats.TotalEstates)
+	db.QueryRow(`SELECT COALESCE(SUM(status='available'),0), COALESCE(SUM(status='booked'),0), COALESCE(SUM(status='sa_signed'),0), COALESCE(SUM(status='sold'),0) FROM prop_plots`).
+		Scan(&stats.Available, &stats.Booked, &stats.SaSigned, &stats.Sold)
+
+	var estates []estateRow
+	if rows, _ := db.Query(q, qArgs...); rows != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var e estateRow
+			if rows.Scan(&e.ID, &e.Name, &e.Total, &e.Available, &e.Booked, &e.SaSigned, &e.Sold) == nil {
+				estates = append(estates, e)
+			}
+		}
+	}
+	renderAdmin(w, r, "admin_private_estates.html", map[string]any{
+		"Title":     "Private Estates",
+		"Active":    "private-estates",
+		"Estates":   estates,
+		"Stats":     stats,
+		"IsSA":      isSA,
+		"FormError": formErr,
+	})
+}
+
+func adminPrivateEstateRouter(w http.ResponseWriter, r *http.Request) {
+	estateID := pathSegment("/admin/private-estate/", r.URL.Path)
+	suffix := strings.TrimPrefix(r.URL.Path, "/admin/private-estate/"+estateID)
+	isSA := getRole(r) == roleSystemAdmin
+	userID := getUserID(r)
+
+	if !isSA && !privateEstateAccess(userID, estateID) {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+	r = withID(r, estateID)
+	switch suffix {
+	case "", "/", "/plots":
+		adminPrivateEstatePlotsHandler(w, r)
+	case "/access", "/access/grant", "/access/revoke":
+		if !isSA {
+			http.Error(w, "Access denied", http.StatusForbidden)
+			return
+		}
+		adminPrivateEstateAccessHandler(w, r, suffix)
+	case "/add-plots":
+		if !isSA {
+			http.Error(w, "Access denied", http.StatusForbidden)
+			return
+		}
+		adminPrivateEstateAddPlotsHandler(w, r)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func adminPrivateEstatePlotsHandler(w http.ResponseWriter, r *http.Request) {
+	id := r.Context().Value(ctxID).(string)
+	status := r.URL.Query().Get("status")
+	if status == "" {
+		status = "available"
+	}
+	var estateName string
+	if err := db.QueryRow(`SELECT name FROM prop_estates WHERE id=?`, id).Scan(&estateName); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	counts := map[string]int{"available": 0, "booked": 0, "sa_signed": 0, "sold": 0}
+	if cRows, _ := db.Query(`SELECT status, COUNT(*) FROM prop_plots WHERE estate_id=? GROUP BY status`, id); cRows != nil {
+		defer cRows.Close()
+		for cRows.Next() {
+			var s string
+			var c int
+			if cRows.Scan(&s, &c) == nil {
+				counts[s] = c
+			}
+		}
+	}
+	type plotRow struct {
+		ID         int
+		Number     string
+		Status     string
+		BuyerName  string
+		BuyerPhone string
+		AgentName  string
+		DateBooked string
+	}
+	var plots []plotRow
+	if status == "booked" || status == "sa_signed" {
+		if pRows, _ := db.Query(`
+			SELECT p.id, p.plot_number, p.status,
+				COALESCE(b.buyer_name,''), COALESCE(b.buyer_phone,''),
+				COALESCE(b.agent_name,''), COALESCE(DATE_FORMAT(b.date_booked,'%d %b %Y %H:%i'),'')
+			FROM prop_plots p
+			LEFT JOIN prop_bookings b ON b.id = (
+				SELECT id FROM prop_bookings WHERE plot_id=p.id AND status NOT IN ('cancelled','expired')
+				ORDER BY id DESC LIMIT 1
+			)
+			WHERE p.estate_id=? AND p.status=? ORDER BY p.id`, id, status); pRows != nil {
+			defer pRows.Close()
+			for pRows.Next() {
+				var p plotRow
+				if pRows.Scan(&p.ID, &p.Number, &p.Status, &p.BuyerName, &p.BuyerPhone, &p.AgentName, &p.DateBooked) == nil {
+					plots = append(plots, p)
+				}
+			}
+		}
+	} else {
+		if pRows, _ := db.Query(`SELECT id, plot_number, status FROM prop_plots WHERE estate_id=? AND status=? ORDER BY id`, id, status); pRows != nil {
+			defer pRows.Close()
+			for pRows.Next() {
+				var p plotRow
+				if pRows.Scan(&p.ID, &p.Number, &p.Status) == nil {
+					plots = append(plots, p)
+				}
+			}
+		}
+	}
+	isSA := getRole(r) == roleSystemAdmin
+	renderAdmin(w, r, "admin_private_estate_plots.html", map[string]any{
+		"Title":      estateName + " – Plots",
+		"Active":     "private-estates",
+		"EstateName": estateName,
+		"EstateID":   id,
+		"Status":     status,
+		"Plots":      plots,
+		"Counts":     counts,
+		"IsSA":       isSA,
+	})
+}
+
+func adminPrivateEstateAddPlotsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.NotFound(w, r)
+		return
+	}
+	id := r.Context().Value(ctxID).(string)
+	r.ParseForm()
+	plotNumbers := strings.Split(r.FormValue("plot_numbers"), "\n")
+	for _, raw := range plotNumbers {
+		pn := strings.TrimSpace(raw)
+		if pn == "" {
+			continue
+		}
+		db.Exec(`INSERT IGNORE INTO prop_plots (estate_id, plot_number, status) VALUES (?,?,'available')`, id, pn)
+	}
+	http.Redirect(w, r, "/admin/private-estate/"+id+"/plots", http.StatusFound)
+}
+
+func adminPrivateEstateAccessHandler(w http.ResponseWriter, r *http.Request, suffix string) {
+	id := r.Context().Value(ctxID).(string)
+
+	var estateName string
+	if err := db.QueryRow(`SELECT name FROM prop_estates WHERE id=?`, id).Scan(&estateName); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	if r.Method == http.MethodPost {
+		r.ParseForm()
+		targetUserID := r.FormValue("user_id")
+		if suffix == "/access/grant" && targetUserID != "" {
+			db.Exec(`INSERT IGNORE INTO prop_restricted_access (estate_id, user_id) VALUES (?,?)`, id, targetUserID)
+		} else if suffix == "/access/revoke" && targetUserID != "" {
+			db.Exec(`DELETE FROM prop_restricted_access WHERE estate_id=? AND user_id=?`, id, targetUserID)
+		}
+		http.Redirect(w, r, "/admin/private-estate/"+id+"/access", http.StatusFound)
+		return
+	}
+
+	type accessUser struct {
+		UserID string
+		Name   string
+		Email  string
+		Role   string
+	}
+	var grantedUsers []accessUser
+	if rows, _ := db.Query(`
+		SELECT a.id, a.name, a.email, a.role FROM prop_agents a
+		JOIN prop_restricted_access ra ON ra.user_id=CAST(a.id AS CHAR)
+		WHERE ra.estate_id=? ORDER BY a.name`, id); rows != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var u accessUser
+			if rows.Scan(&u.UserID, &u.Name, &u.Email, &u.Role) == nil {
+				grantedUsers = append(grantedUsers, u)
+			}
+		}
+	}
+	var availableUsers []accessUser
+	if rows, _ := db.Query(`
+		SELECT id, name, email, role FROM prop_agents
+		WHERE role != 'system_admin'
+		AND CAST(id AS CHAR) NOT IN (
+			SELECT user_id FROM prop_restricted_access WHERE estate_id=?
+		)
+		ORDER BY role, name`, id); rows != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var u accessUser
+			if rows.Scan(&u.UserID, &u.Name, &u.Email, &u.Role) == nil {
+				availableUsers = append(availableUsers, u)
+			}
+		}
+	}
+	renderAdmin(w, r, "admin_private_estate_access.html", map[string]any{
+		"Title":          "Access – " + estateName,
+		"Active":         "private-estates",
+		"EstateName":     estateName,
+		"EstateID":       id,
+		"GrantedUsers":   grantedUsers,
+		"AvailableUsers": availableUsers,
+	})
+}
+
+func agentPrivateEstatesHandler(w http.ResponseWriter, r *http.Request) {
+	userID := getUserID(r)
+	type estateRow struct {
+		ID        int
+		Name      string
+		Total     int
+		Available int
+	}
+	var estates []estateRow
+	if rows, _ := db.Query(`
+		SELECT e.id, e.name, COUNT(p.id), COALESCE(SUM(p.status='available'),0)
+		FROM prop_estates e LEFT JOIN prop_plots p ON p.estate_id=e.id
+		WHERE EXISTS (SELECT 1 FROM prop_restricted_access ra WHERE ra.estate_id=e.id AND ra.user_id=?)
+		GROUP BY e.id, e.name ORDER BY e.name`, userID); rows != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var e estateRow
+			if rows.Scan(&e.ID, &e.Name, &e.Total, &e.Available) == nil {
+				estates = append(estates, e)
+			}
+		}
+	}
+	renderAgent(w, r, "agent_private_estates.html", map[string]any{
+		"Title":   "Private Estates",
+		"Active":  "private-estates",
+		"Estates": estates,
+	})
+}
+
+func agentPrivateEstateRouter(w http.ResponseWriter, r *http.Request) {
+	estateID := pathSegment("/agent/private-estate/", r.URL.Path)
+	userID := getUserID(r)
+	if !privateEstateAccess(userID, estateID) {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+	r = withID(r, estateID)
+	agentPrivateEstatePlotsHandler(w, r)
+}
+
+func agentPrivateEstatePlotsHandler(w http.ResponseWriter, r *http.Request) {
+	id := r.Context().Value(ctxID).(string)
+	status := r.URL.Query().Get("status")
+	if status == "" {
+		status = "available"
+	}
+	var estateName string
+	if err := db.QueryRow(`SELECT name FROM prop_estates WHERE id=?`, id).Scan(&estateName); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	counts := map[string]int{"available": 0, "booked": 0, "sa_signed": 0, "sold": 0}
+	if cRows, _ := db.Query(`SELECT status, COUNT(*) FROM prop_plots WHERE estate_id=? GROUP BY status`, id); cRows != nil {
+		defer cRows.Close()
+		for cRows.Next() {
+			var s string
+			var c int
+			if cRows.Scan(&s, &c) == nil {
+				counts[s] = c
+			}
+		}
+	}
+	type plotRow struct {
+		ID     int
+		Number string
+		Status string
+	}
+	var plots []plotRow
+	if pRows, _ := db.Query(`SELECT id, plot_number, status FROM prop_plots WHERE estate_id=? AND status=? ORDER BY id`, id, status); pRows != nil {
+		defer pRows.Close()
+		for pRows.Next() {
+			var p plotRow
+			if pRows.Scan(&p.ID, &p.Number, &p.Status) == nil {
+				plots = append(plots, p)
+			}
+		}
+	}
+	renderAgent(w, r, "agent_private_estate_plots.html", map[string]any{
+		"Title":      estateName + " – Plots",
+		"Active":     "private-estates",
+		"EstateName": estateName,
+		"EstateID":   id,
+		"Status":     status,
+		"Plots":      plots,
+		"Counts":     counts,
+	})
+}
+
+// ── Render helper ───────────────────────────────────────────────────────────
+
+func render(w http.ResponseWriter, name string, data any) {
+	t, ok := pageTemplates[name]
+	if !ok {
+		log.Printf("render: no template registered for %q", name)
+		http.Error(w, "Page not found.", http.StatusInternalServerError)
+		return
+	}
+	var buf bytes.Buffer
+	if err := t.ExecuteTemplate(&buf, name, data); err != nil {
+		log.Printf("render %s: %v", name, err)
+		http.Error(w, "Something went wrong. Check server logs.", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(buf.Bytes())
+}

@@ -1,0 +1,209 @@
+{{ define "title" }}{{ .EstateName }} – Plots - Pro-Property{{ end }}
+{{ define "content" }}
+<div class="top-bar">
+    <h1>{{ .EstateName }}</h1>
+    <a href="/agent/estate/{{ .EstateID }}" class="edit-btn" style="background:#6b7280;">← Back to Estate</a>
+</div>
+
+{{ if .BookingSuccess }}
+<div id="success-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;display:flex;align-items:center;justify-content:center;">
+    <div style="background:#fff;border-radius:14px;padding:36px 40px;max-width:380px;width:90%;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.18);">
+        <div style="font-size:52px;margin-bottom:12px;">✅</div>
+        <h2 style="margin:0 0 8px;font-size:20px;color:#166534;">Booking Confirmed!</h2>
+        <p style="color:#6b7280;font-size:14px;margin:0 0 8px;">The plot has been booked successfully.</p>
+        <p style="color:#94a3b8;font-size:13px;margin:0 0 24px;">Redirecting to My Bookings in <span id="countdown">10</span>s...</p>
+        <button onclick="goNow()"
+                style="background:#2563eb;color:#fff;border:none;padding:10px 28px;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;">
+            Go Now
+        </button>
+    </div>
+</div>
+<script>
+var secs = 10;
+var timer = setInterval(function() {
+    secs--;
+    var el = document.getElementById('countdown');
+    if (el) el.textContent = secs;
+    if (secs <= 0) { clearInterval(timer); goNow(); }
+}, 1000);
+function goNow() { clearInterval(timer); window.location.href = '/agent/bookings'; }
+</script>
+{{ end }}
+
+<!-- Status tabs -->
+<div class="estate-status-btns" style="margin-bottom:16px;">
+    <a href="/agent/estate/{{ .EstateID }}/plots?status=available"
+       class="estate-btn-available" style="text-decoration:none;{{ if eq .Status "available" }}box-shadow:0 0 0 3px #2563eb;{{ end }}">
+        Available <strong>{{ index .Counts "available" }}</strong>
+    </a>
+    <a href="/agent/estate/{{ .EstateID }}/plots?status=booked"
+       class="estate-btn-booked" style="text-decoration:none;{{ if eq .Status "booked" }}box-shadow:0 0 0 3px #ca8a04;{{ end }}">
+        Booked <strong>{{ index .Counts "booked" }}</strong>
+    </a>
+    <a href="/agent/estate/{{ .EstateID }}/plots?status=sa_signed"
+       class="estate-btn-signed" style="text-decoration:none;{{ if eq .Status "sa_signed" }}box-shadow:0 0 0 3px #1d4ed8;{{ end }}">
+        SA Signed <strong>{{ index .Counts "sa_signed" }}</strong>
+    </a>
+    <a href="/agent/estate/{{ .EstateID }}/plots?status=sold"
+       class="estate-btn-sold" style="text-decoration:none;{{ if eq .Status "sold" }}box-shadow:0 0 0 3px #16a34a;{{ end }}">
+        Sold <strong>{{ index .Counts "sold" }}</strong>
+    </a>
+</div>
+
+<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
+        <h3 style="margin:0;font-size:16px;color:var(--text);text-transform:capitalize;">
+            {{ .Status }} Plots
+            <span style="font-size:13px;color:var(--muted);font-weight:400;">({{ len .Plots }} total)</span>
+        </h3>
+        {{ if eq .Status "available" }}
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <button type="button" onclick="selectAll()" style="background:#475569;font-size:13px;padding:7px 12px;">☑ All</button>
+            <button type="button" onclick="clearSel()" style="background:#94a3b8;font-size:13px;padding:7px 12px;">☐ Clear</button>
+            <button type="button" onclick="addSelectedToCart()" style="background:#2563eb;font-size:13px;padding:7px 14px;">
+                🛒 Add to Cart (<span id="sel-count">0</span>)
+            </button>
+            <a href="/agent/cart" style="background:#16a34a;color:#fff;font-size:13px;padding:7px 14px;border-radius:6px;text-decoration:none;display:inline-flex;align-items:center;gap:5px;">
+                View Cart <span id="hdr-badge" style="background:#fff;color:#16a34a;border-radius:999px;font-size:11px;font-weight:700;padding:1px 6px;"></span>
+            </a>
+        </div>
+        {{ end }}
+    </div>
+
+    {{ if .Plots }}
+    <div class="table-responsive">
+        <table>
+            <thead>
+                <tr>
+                    {{ if eq .Status "available" }}
+                    <th style="width:36px;"><input type="checkbox" id="master-cb" onchange="toggleAll(this)"></th>
+                    {{ end }}
+                    <th>Plot Number</th>
+                    <th>Status</th>
+                    {{ if eq .Status "available" }}<th>Action</th>{{ end }}
+                </tr>
+            </thead>
+            <tbody>
+                {{ range .Plots }}
+                <tr>
+                    {{ if eq $.Status "available" }}
+                    <td><input type="checkbox" class="plot-cb" value="{{ .ID }}" onchange="updateCount()"></td>
+                    {{ end }}
+                    <td><strong>{{ .Number }}</strong></td>
+                    <td>
+                        <span class="badge
+                            {{ if eq .Status "available" }}badge-available
+                            {{ else if eq .Status "booked" }}badge-booked
+                            {{ else if eq .Status "sa_signed" }}badge-signed
+                            {{ else if eq .Status "sold" }}badge-sold
+                            {{ end }}">{{ .Status }}</span>
+                    </td>
+                    {{ if eq $.Status "available" }}
+                    <td>
+                        <button type="button"
+                                onclick="addOneToCart('{{ .ID }}','{{ .Number }}','{{ $.EstateName }}','{{ $.EstateID }}')"
+                                class="add-btn" style="font-size:12px;padding:5px 12px;border:none;cursor:pointer;"
+                                id="cart-btn-{{ .ID }}">
+                            🛒 Add to Cart
+                        </button>
+                    </td>
+                    {{ end }}
+                </tr>
+                {{ end }}
+            </tbody>
+        </table>
+    </div>
+    {{ else }}
+    <p style="color:#6b7280;text-align:center;padding:2rem 0;">No {{ .Status }} plots for this estate.</p>
+    {{ end }}
+</div>
+
+{{ if eq .Status "available" }}
+<script>
+var estateID   = '{{ .EstateID }}';
+var estateName = '{{ .EstateName }}';
+
+function getChecked() { return Array.from(document.querySelectorAll('.plot-cb:checked')); }
+function updateCount() {
+    var n = getChecked().length;
+    document.getElementById('sel-count').textContent = n;
+    var all = document.querySelectorAll('.plot-cb');
+    var m = document.getElementById('master-cb');
+    if (m) { m.indeterminate = n > 0 && n < all.length; m.checked = n === all.length && all.length > 0; }
+}
+function toggleAll(cb) { document.querySelectorAll('.plot-cb').forEach(function(c){ c.checked = cb.checked; }); updateCount(); }
+function selectAll() { document.querySelectorAll('.plot-cb').forEach(function(c){ c.checked = true; }); updateCount(); }
+function clearSel()  { document.querySelectorAll('.plot-cb').forEach(function(c){ c.checked = false; }); updateCount(); }
+
+function addOneToCart(plotId, plotNumber, estate, estId) {
+    var cart = ppmGetCart();
+    if (cart.find(function(i){ return i.plotId === plotId; })) {
+        showCartToast(plotNumber + ' already in cart');
+        return;
+    }
+    cart.push({ plotId: plotId, plotNumber: plotNumber, estateName: estate, estateId: estId });
+    ppmSaveCart(cart);
+    updateCartBadge();
+    refreshBadge();
+    var btn = document.getElementById('cart-btn-' + plotId);
+    if (btn) { btn.textContent = '✅ Added'; btn.style.background = '#16a34a'; btn.disabled = true; }
+    showCartToast('Plot ' + plotNumber + ' added to cart');
+}
+
+function addSelectedToCart() {
+    var checked = getChecked();
+    if (checked.length === 0) { alert('Select at least one plot.'); return; }
+    var added = 0;
+    checked.forEach(function(cb) {
+        var row = cb.closest('tr');
+        var plotNumber = row ? row.querySelector('td:nth-child(2) strong') : null;
+        var num = plotNumber ? plotNumber.textContent : cb.value;
+        var cart = ppmGetCart();
+        if (!cart.find(function(i){ return i.plotId === cb.value; })) {
+            cart.push({ plotId: cb.value, plotNumber: num, estateName: estateName, estateId: estateID });
+            ppmSaveCart(cart);
+            added++;
+            var btn = document.getElementById('cart-btn-' + cb.value);
+            if (btn) { btn.textContent = '✅ Added'; btn.style.background = '#16a34a'; btn.disabled = true; }
+        }
+    });
+    updateCartBadge();
+    refreshBadge();
+    clearSel();
+    showCartToast(added + ' plot(s) added to cart');
+}
+
+function refreshBadge() {
+    var n = ppmGetCart().length;
+    var b = document.getElementById('hdr-badge');
+    if (b) b.textContent = n > 0 ? n : '';
+}
+
+function showCartToast(msg) {
+    var t = document.getElementById('cart-toast');
+    if (!t) {
+        t = document.createElement('div');
+        t.id = 'cart-toast';
+        t.style.cssText = 'position:fixed;bottom:24px;right:24px;background:#1e293b;color:#fff;padding:10px 18px;border-radius:8px;font-size:13px;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,0.2);transition:opacity 0.3s;';
+        document.body.appendChild(t);
+    }
+    t.textContent = msg;
+    t.style.opacity = '1';
+    clearTimeout(t._timer);
+    t._timer = setTimeout(function(){ t.style.opacity = '0'; }, 2500);
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    updateCount();
+    refreshBadge();
+    // Mark already-in-cart plots
+    var cart = ppmGetCart();
+    cart.forEach(function(item) {
+        var btn = document.getElementById('cart-btn-' + item.plotId);
+        if (btn) { btn.textContent = '✅ Added'; btn.style.background = '#16a34a'; btn.disabled = true; }
+    });
+});
+</script>
+{{ end }}
+{{ end }}
+{{ template "agent_base" . }}

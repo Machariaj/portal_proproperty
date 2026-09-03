@@ -1,0 +1,78 @@
+{{ define "title" }}Create User - Pro-Property{{ end }}
+{{ define "content" }}
+<div class="top-bar">
+    <h1>Create User</h1>
+</div>
+
+<div class="card" style="max-width:640px;">
+    <h3 style="margin:0 0 16px;font-size:16px;">New User</h3>
+
+    {{ if .FormSuccess }}
+    <div style="background:#dcfce7;color:#166534;padding:10px 14px;border-radius:8px;margin-bottom:14px;font-weight:600;">
+        ✅ {{ .FormSuccess }}
+    </div>
+    {{ end }}
+    {{ if .FormError }}
+    <div style="background:#fee2e2;color:#991b1b;padding:10px 14px;border-radius:8px;margin-bottom:14px;font-weight:600;">
+        ⚠️ {{ .FormError }}
+    </div>
+    {{ end }}
+
+    <form method="POST" autocomplete="off">
+        <label for="name">Full Name</label>
+        <input type="text" id="name" name="name" required placeholder="e.g. Jane Wanjiku">
+
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" required placeholder="agent@example.com">
+
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" required placeholder="At least 6 characters">
+
+        <label for="phone">Phone (optional)</label>
+        <input type="tel" id="phone" name="phone" placeholder="+254 700 000 000">
+
+        <label for="role">Role</label>
+        <select id="role" name="role" required>
+            <option value="agent">Agent</option>
+            <option value="admin">Admin</option>
+        </select>
+
+        <button type="submit" style="margin-top:14px;">👤 Create User</button>
+    </form>
+</div>
+
+<div class="card" style="margin-top:20px;">
+    <h3 style="margin:0 0 14px;font-size:16px;">Existing Users</h3>
+    <div class="table-responsive">
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Phone</th>
+                    <th>Role</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{ range .Users }}
+                <tr>
+                    <td>{{ .Name }}</td>
+                    <td>{{ .Email }}</td>
+                    <td>{{ if .Phone }}{{ .Phone }}{{ else }}—{{ end }}</td>
+                    <td><span class="badge {{ if eq .Role "admin" }}badge-signed{{ else }}badge-booked{{ end }}">{{ .Role }}</span></td>
+                    <td style="white-space:nowrap;">
+                        <a href="/admin/edit-user/{{ .ID }}"
+                           class="edit-btn" style="font-size:12px;padding:5px 10px;margin-right:4px;">✏ Edit</a>
+                        <a href="/admin/create-user?delete={{ .ID }}"
+                           class="delete-btn" style="font-size:12px;padding:5px 10px;"
+                           onclick="return confirm('Delete user {{ .Name }}?')">🗑 Delete</a>
+                    </td>
+                </tr>
+                {{ end }}
+            </tbody>
+        </table>
+    </div>
+</div>
+{{ end }}
+{{ template "admin_base" . }}

@@ -1,0 +1,60 @@
+{{ define "title" }}Welfare Permissions{{ end }}
+
+{{ define "content" }}
+<div style="padding:28px 32px 40px; max-width:900px;">
+
+    <div class="page-header">
+        <div>
+            <h1>Permissions</h1>
+            <p>Control who can access each section of the Staff Welfare module</p>
+        </div>
+    </div>
+
+    <div style="background:#fff;border-radius:14px;box-shadow:0 2px 12px rgba(0,0,0,0.06);overflow:hidden;">
+        <div style="padding:18px 20px 14px;border-bottom:1px solid #f1f5f9;">
+            <span style="font-size:15px;font-weight:700;color:#0f172a;">Users</span>
+            <p style="margin:4px 0 0;font-size:13px;color:#64748b;">
+                Select a user to grant or revoke read/write access to welfare features.
+                System Admin always has full access and is not listed here.
+            </p>
+        </div>
+
+        {{ if .Users }}
+        <div style="overflow-x:auto;">
+            <table class="wf-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th>Role</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{ range .Users }}
+                    <tr>
+                        <td style="font-weight:600;">{{ .Name }}</td>
+                        <td style="color:#64748b;">{{ .Email }}</td>
+                        <td>
+                            <span class="welfare-badge {{ if eq .Role "admin" }}badge-approved{{ else }}badge-pending{{ end }}"
+                                  style="text-transform:capitalize;">{{ .Role }}</span>
+                        </td>
+                        <td>
+                            <a href="/welfare/permissions/{{ .ID }}" class="btn-primary btn-sm">
+                                Set Permissions
+                            </a>
+                        </td>
+                    </tr>
+                    {{ end }}
+                </tbody>
+            </table>
+        </div>
+        {{ else }}
+        <div style="text-align:center;padding:60px 20px;color:#94a3b8;">
+            <p style="font-size:14px;font-weight:600;">No users found.</p>
+        </div>
+        {{ end }}
+    </div>
+</div>
+{{ end }}
+{{ template "welfare_base" . }}

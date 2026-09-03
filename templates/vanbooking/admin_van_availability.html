@@ -1,0 +1,107 @@
+{{ define "title" }}Van Availability - Pro-Property{{ end }}
+{{ define "content" }}
+<div class="top-bar">
+    <h1>Van Availability</h1>
+    <a href="/admin/van-maintenance" class="edit-btn" style="background:#dc2626;">+ Schedule Maintenance</a>
+</div>
+
+<!-- Date picker -->
+<div class="card" style="max-width:400px;margin-bottom:20px;">
+    <h3 style="margin:0 0 12px;font-size:14px;color:#0f172a;">Select Date to Inspect</h3>
+    <form method="GET" action="/admin/van-availability" style="display:flex;gap:10px;align-items:flex-end;">
+        <div style="flex:1;">
+            <input type="date" name="date" value="{{ .SelectedDate }}" required style="width:100%;">
+        </div>
+        <button type="submit" style="padding:9px 20px;font-size:13px;white-space:nowrap;">View</button>
+    </form>
+</div>
+
+{{ if .Availability }}
+{{ range .Availability }}
+<div class="card" style="margin-bottom:14px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+        <h3 style="margin:0;font-size:15px;color:#0f172a;">
+            🚐 {{ .PlateNumber }} — {{ .VanName }}
+        </h3>
+        {{ if eq .GlobalStatus "maintenance" }}
+        <span style="background:#dc2626;color:#fff;font-size:12px;font-weight:600;padding:3px 10px;border-radius:20px;">Global Maintenance</span>
+        {{ else }}
+        <span style="background:#dcfce7;color:#15803d;font-size:12px;font-weight:600;padding:3px 10px;border-radius:20px;">Active</span>
+        {{ end }}
+    </div>
+
+    {{ if or .Sessions .Maintenance }}
+    <div style="display:flex;flex-direction:column;gap:8px;">
+
+        {{ range .Maintenance }}
+        <div style="display:flex;align-items:center;gap:12px;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:10px 14px;">
+            <span style="font-size:18px;">{{ if eq .Type "reserved" }}📌{{ else if eq .Type "unavailable" }}🚫{{ else }}🔧{{ end }}</span>
+            <div style="flex:1;">
+                <div style="font-weight:600;font-size:13px;color:#b91c1c;">
+                    {{ .TypeLabel }}
+                    {{ if .StartTime }}
+                    — {{ .StartTime }}{{ if .EndTime }} to {{ .EndTime }}{{ end }}
+                    {{ else }}
+                    — Full Day
+                    {{ end }}
+                </div>
+                {{ if .Reason }}<div style="font-size:12px;color:#6b7280;margin-top:2px;">{{ .Reason }}</div>{{ end }}
+            </div>
+            <form method="POST" action="/admin/van-maintenance" style="margin:0;"
+                  onsubmit="return confirm('Remove this maintenance window?');">
+                <input type="hidden" name="action" value="delete">
+                <input type="hidden" name="maint_id" value="{{ .ID }}">
+                <button type="submit" style="font-size:11px;padding:4px 10px;background:#dc2626;">Remove</button>
+            </form>
+        </div>
+        {{ end }}
+
+        {{ range .Sessions }}
+        <div style="display:flex;align-items:center;gap:12px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:10px 14px;">
+            <span style="font-size:18px;">📋</span>
+            <div style="flex:1;">
+                <div style="font-weight:600;font-size:13px;color:#0369a1;">
+                    {{ .Destination }}
+                    {{ if .StartTime }}
+                    — {{ .StartTime }}{{ if .EndTime }} to {{ .EndTime }}{{ end }}
+                    {{ end }}
+                </div>
+                <div style="font-size:12px;color:#6b7280;margin-top:2px;">
+                    {{ .SeatsTaken }} seat(s) taken ·
+                    {{ if eq .TripStatus "done" }}
+                    <span style="color:#15803d;">Completed</span>
+                    {{ else if eq .TripStatus "approved" }}
+                    <span style="color:#0369a1;">Approved</span>
+                    {{ else }}
+                    <span style="color:#d97706;">Pending</span>
+                    {{ end }}
+                </div>
+            </div>
+        </div>
+        {{ end }}
+
+    </div>
+    {{ else }}
+    <p style="color:#94a3b8;font-size:13px;margin:0;">No sessions or maintenance scheduled — van is fully available.</p>
+    {{ end }}
+
+    <!-- Quick-add maintenance link for this van -->
+    <div style="margin-top:12px;border-top:1px solid #f1f5f9;padding-top:10px;">
+        <a href="/admin/van-maintenance"
+           style="font-size:12px;color:#dc2626;font-weight:600;text-decoration:none;">
+            + Schedule maintenance for this van
+        </a>
+    </div>
+</div>
+{{ end }}
+{{ else if .SelectedDate }}
+<div class="card" style="text-align:center;padding:2rem;color:#94a3b8;">No vans found.</div>
+{{ end }}
+
+<script>
+document.querySelector('input[type=date]').addEventListener('change', function() {
+    this.form.submit();
+});
+</script>
+{{ end }}
+{{ template "van_admin_base" . }}

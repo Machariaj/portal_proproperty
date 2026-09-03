@@ -1,0 +1,21 @@
+{{ define "title" }}Reports - ProProperty{{ end }}
+{{ define "content" }}
+<div class="card">
+    <div class="card-header">
+        <h2>Reports</h2>
+    </div>
+    <div class="card-body">
+        <ul class="report-list">
+            {{ range .Reports }}
+            <li class="report-item">
+                <div class="report-info">
+                    <span class="report-name">{{ . }}</span>
+                    <span class="report-meta">Generated in real portal; placeholder here.</span>
+                </div>
+                <button class="btn-ghost btn-sm" disabled>Download</button>
+            </li>
+            {{ end }}
+        </ul>
+    </div>
+    {{ end }}
+    {{ template "base" . }}

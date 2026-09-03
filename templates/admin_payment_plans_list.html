@@ -1,0 +1,146 @@
+{{ define "title" }}{{ .Title }} - Pro-Property{{ end }}
+{{ define "content" }}
+<style>
+    .pp-stage { display:inline-block; padding:2px 9px; border-radius:999px; font-size:11px; font-weight:700; white-space:nowrap; }
+    .pp-stage--1 { background:#f1f5f9; color:#475569; }
+    .pp-stage--2 { background:#dbeafe; color:#1e40af; }
+    .pp-stage--3 { background:#fef3c7; color:#92400e; }
+    .pp-stage--4 { background:#ede9fe; color:#5b21b6; }
+    .pp-stage--5 { background:#dcfce7; color:#166534; }
+    .pp-doc { margin-bottom:8px; }
+    .pp-doc-lbl { font-size:11px; font-weight:700; color:#1e3a5f; }
+    .pp-chip { font-size:11px; color:#2563eb; text-decoration:none; background:#eff6ff; border:1px solid #bfdbfe; padding:1px 6px; border-radius:4px; max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:inline-block; vertical-align:bottom; }
+    .pp-chips { display:flex; flex-wrap:wrap; gap:4px; margin:3px 0; }
+    .pp-meta { font-size:10px; color:#94a3b8; }
+    .pp-lock { font-size:10px; color:#9ca3af; }
+    .pp-up { display:flex; gap:4px; align-items:center; margin-top:2px; }
+    .pp-up input[type=file] { font-size:11px; max-width:150px; }
+    .pp-up button { font-size:11px; padding:3px 8px; border:none; border-radius:4px; background:#1e3a5f; color:#fff; cursor:pointer; }
+    .pp-up button:disabled { background:#94a3b8; cursor:progress; }
+</style>
+
+<div class="top-bar">
+    <h1>{{ .Title }}</h1>
+</div>
+
+<p style="margin-top:0;">
+    <a href="/admin/payment-plans" style="color:#2563eb;text-decoration:none;font-size:13px;">&larr; Back to Conveyancing</a>
+</p>
+
+{{ if .Ok }}
+<div style="background:#d1fae5;border:1px solid #6ee7b7;color:#065f46;padding:10px 16px;border-radius:8px;margin-bottom:16px;font-size:13px;">Saved.</div>
+{{ end }}
+{{ if .ErrLocked }}
+<div style="background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;padding:10px 16px;border-radius:8px;margin-bottom:16px;font-size:13px;">That document can't be uploaded yet — the deal must be 100% paid and the previous document uploaded first.</div>
+{{ end }}
+
+<p style="font-size:12px;color:#94a3b8;margin-top:0;">
+    Stage flow: <strong>Pending Consent</strong> &rarr; <strong>Pending Transfer Forms</strong> &rarr;
+    <strong>Pending Title Deed</strong> &rarr; <strong>Sold</strong>. A record advances as soon as the
+    previous document is uploaded; Transfer Forms &amp; Title Deed can only be <em>uploaded</em> once the
+    deal is 100% paid.
+</p>
+
+{{ if .HasTabs }}
+<div style="display:flex;gap:8px;margin-bottom:14px;">
+    <a href="{{ .Path }}?tab=lt100{{ if .FEstate }}&estate={{ .FEstate }}{{ end }}{{ if .FPlan }}&plan={{ .FPlan }}{{ end }}{{ if .FSearch }}&q={{ .FSearch }}{{ end }}"
+       style="padding:8px 16px;border-radius:8px;font-size:13px;font-weight:600;text-decoration:none;{{ if eq .Tab "lt100" }}background:#1e3a5f;color:#fff;{{ else }}background:#f1f5f9;color:#475569;{{ end }}">
+        Pending &mdash; under 100% paid <span style="opacity:.8;">({{ .TabLt }})</span>
+    </a>
+    <a href="{{ .Path }}?tab=eq100{{ if .FEstate }}&estate={{ .FEstate }}{{ end }}{{ if .FPlan }}&plan={{ .FPlan }}{{ end }}{{ if .FSearch }}&q={{ .FSearch }}{{ end }}"
+       style="padding:8px 16px;border-radius:8px;font-size:13px;font-weight:600;text-decoration:none;{{ if eq .Tab "eq100" }}background:#1e3a5f;color:#fff;{{ else }}background:#f1f5f9;color:#475569;{{ end }}">
+        Pending &mdash; 100% paid <span style="opacity:.8;">({{ .TabEq }})</span>
+    </a>
+</div>
+{{ end }}
+
+<div class="card" style="margin-bottom:16px;">
+    <form method="GET" action="{{ .Path }}" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">
+        {{ if .HasTabs }}<input type="hidden" name="tab" value="{{ .Tab }}">{{ end }}
+        <div style="display:flex;flex-direction:column;gap:4px;min-width:200px;">
+            <label style="font-size:12px;color:#6b7280;font-weight:600;">Estate</label>
+            <select name="estate" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                <option value="">All Estates</option>
+                {{ range .EstateOptions }}<option value="{{ . }}" {{ if eq . $.FEstate }}selected{{ end }}>{{ . }}</option>{{ end }}
+            </select>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;min-width:150px;">
+            <label style="font-size:12px;color:#6b7280;font-weight:600;">Plan</label>
+            <select name="plan" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                <option value="">All Plans</option>
+                {{ range .PlanOptions }}<option value="{{ . }}" {{ if eq . $.FPlan }}selected{{ end }}>{{ . }}</option>{{ end }}
+            </select>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;min-width:220px;flex:1;">
+            <label style="font-size:12px;color:#6b7280;font-weight:600;">Search (name, phone, plot, estate)</label>
+            <input type="text" name="q" value="{{ .FSearch }}" placeholder="e.g. Wanjiku or 0722… or plot 14"
+                   style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+        </div>
+        <button type="submit" style="padding:8px 18px;font-size:13px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;">Filter</button>
+        {{ if .HasFilter }}
+        <a href="{{ .Path }}{{ if .HasTabs }}?tab={{ .Tab }}{{ end }}" style="padding:8px 14px;font-size:13px;background:#6b7280;color:#fff;border-radius:6px;text-decoration:none;">Clear</a>
+        {{ end }}
+    </form>
+</div>
+
+<div class="card">
+    <div class="table-responsive">
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Client</th>
+                    <th>Phone</th>
+                    <th>Estate</th>
+                    <th>Plot</th>
+                    <th>Plan</th>
+                    <th>% Paid</th>
+                    <th>Stage</th>
+                    <th style="min-width:230px;">Documents</th>
+                    <th>Last Synced</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{ range $i, $r := .Rows }}
+                <tr>
+                    <td>{{ add $i 1 }}</td>
+                    <td>{{ $r.DealName }}</td>
+                    <td>{{ $r.Phone }}</td>
+                    <td>{{ $r.Estate }}</td>
+                    <td>{{ $r.Plot }}</td>
+                    <td>{{ if $r.IsThreeMonth }}3-Month{{ else if $r.PaymentPlan }}{{ $r.PaymentPlan }}{{ else }}&mdash;{{ end }}</td>
+                    <td><strong>{{ $r.PercentagePaid }}%</strong></td>
+                    <td>
+                        <span class="pp-stage pp-stage--{{ $r.StageRank }}">{{ $r.Stage }}</span>
+                        {{ if $r.SoldAt }}<div class="pp-meta" style="color:#166534;">Sold {{ $r.SoldAt }}</div>{{ end }}
+                        {{ if $r.SoldNote }}<div class="pp-meta" style="color:#b45309;">{{ $r.SoldNote }}</div>{{ end }}
+                    </td>
+                    <td>
+                        <div class="pp-doc">
+                            <span class="pp-doc-lbl">{{ if $r.ConsentFiles }}&#10003;{{ else }}&#9675;{{ end }} Consent</span>
+                            {{ if $r.ConsentFiles }}<span class="pp-chips">{{ range $r.ConsentFiles }}<a href="/uploads/{{ . }}" target="_blank" class="pp-chip" title="{{ . }}">&#128196;</a>{{ end }}</span>{{ end }}
+                        </div>
+                        <div class="pp-doc">
+                            <span class="pp-doc-lbl">{{ if $r.TransferFiles }}&#10003;{{ else }}&#9675;{{ end }} Transfer Forms</span>
+                            {{ if $r.TransferFiles }}<span class="pp-chips">{{ range $r.TransferFiles }}<a href="/uploads/{{ . }}" target="_blank" class="pp-chip" title="{{ . }}">&#128196;</a>{{ end }}</span>{{ end }}
+                        </div>
+                        <div class="pp-doc">
+                            <span class="pp-doc-lbl">{{ if $r.TitleFiles }}&#10003;{{ else }}&#9675;{{ end }} Title Deed</span>
+                            {{ if $r.TitleFiles }}<span class="pp-chips">{{ range $r.TitleFiles }}<a href="/uploads/{{ . }}" target="_blank" class="pp-chip" title="{{ . }}">&#128196;</a>{{ end }}</span>{{ end }}
+                        </div>
+                        <a href="/admin/payment-plans/deal/{{ $r.DealID }}?from={{ $.View }}"
+                           style="display:inline-block;margin-top:4px;font-size:12px;font-weight:600;background:#1e3a5f;color:#fff;padding:5px 12px;border-radius:5px;text-decoration:none;">
+                           {{ if $.CanConvey }}Open &amp; upload docs &rarr;{{ else }}View docs &rarr;{{ end }}</a>
+                    </td>
+                    <td style="font-size:12px;color:#6b7280;white-space:nowrap;">{{ if $r.LastSynced }}{{ $r.LastSynced }}{{ else }}&mdash;{{ end }}</td>
+                </tr>
+                {{ end }}
+                {{ if not .Rows }}
+                <tr><td colspan="10" style="text-align:center;color:#6b7280;padding:22px;">No records.</td></tr>
+                {{ end }}
+            </tbody>
+        </table>
+    </div>
+</div>
+{{ end }}
+{{ template "admin_base" . }}

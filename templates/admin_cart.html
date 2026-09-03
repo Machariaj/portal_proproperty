@@ -1,0 +1,301 @@
+{{ define "title" }}Booking Cart - Pro-Property{{ end }}
+{{ define "content" }}
+<div class="top-bar">
+    <h1>🛒 My Cart</h1>
+    <a href="/agent/estates" class="edit-btn" style="background:#6b7280;">← Estates</a>
+</div>
+
+<div id="err-banner" style="display:none;background:#fee2e2;color:#991b1b;padding:10px 14px;border-radius:8px;margin-bottom:14px;font-weight:600;"></div>
+
+<!-- Cart items -->
+<div class="card">
+    <div id="empty-cart" style="display:none;text-align:center;padding:48px 0;">
+        <div style="font-size:52px;margin-bottom:12px;">🛒</div>
+        <h3 style="margin:0 0 8px;color:var(--text);">Your cart is empty</h3>
+        <p style="color:var(--muted);margin:0 0 20px;">Browse estates and add plots to your cart.</p>
+        <a href="/agent/estates" class="add-btn">Browse Estates</a>
+    </div>
+
+    <div id="cart-content" style="display:none;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+            <h3 style="margin:0;font-size:16px;color:var(--text);">
+                Selected Plots (<span id="cart-count">0</span>)
+            </h3>
+            <button type="button" onclick="clearCart()"
+                    style="background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer;">
+                🗑 Clear Cart
+            </button>
+        </div>
+        <div class="table-responsive">
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Plot Number</th>
+                        <th>Estate</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="cart-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Booking form -->
+<div class="card" id="booking-form-card" style="display:none;max-width:720px;">
+    <h3 style="margin:0 0 18px;font-size:16px;color:var(--text);">Buyer Details</h3>
+    <form id="booking-form" method="POST" action="/admin/cart/checkout" enctype="multipart/form-data" autocomplete="off">
+        <!-- plot_ids populated by JS -->
+        <input type="hidden" name="rebook_confirmed" id="rebook-confirmed-field" value="0">
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <div>
+                <label for="buyer_name">Buyer Name <span style="color:#dc2626;">*</span></label>
+                <input type="text" id="buyer_name" name="buyer_name" required placeholder="Full name">
+            </div>
+            <div>
+                <label for="buyer_phone">Buyer Phone <span style="color:#dc2626;">*</span></label>
+                <input type="tel" id="buyer_phone" name="buyer_phone" required placeholder="+254 700 000 000">
+            </div>
+            <div>
+                <label for="buyer_email">Buyer Email</label>
+                <input type="email" id="buyer_email" name="buyer_email" placeholder="Optional">
+            </div>
+            <div>
+                <label for="deposit">Deposit (Ksh) <span style="color:#dc2626;">*</span></label>
+                <input type="number" id="deposit" name="deposit" min="1" step="0.01" placeholder="0.00" required>
+            </div>
+            <div>
+                <label for="payment_plan">Payment Plan <span style="color:#dc2626;">*</span></label>
+                <select id="payment_plan" name="payment_plan" required>
+                    <option value="">Select Payment Plan</option>
+                    <option value="3_months">3 Months Plan</option>
+                    <option value="6_months">6 Months Plan</option>
+                    <option value="12_months">12 Months Plan</option>
+                </select>
+            </div>
+            <div>
+                <label for="lead_source">Lead Source <span style="color:#dc2626;">*</span></label>
+                <select id="lead_source" name="lead_source" required>
+                    <option value="">Select Lead Source</option>
+                    <option value="Wapiverse">Wapiverse</option>
+                    <option value="Website">Website</option>
+                    <option value="Tiktok">Tiktok</option>
+                    <option value="Facebook">Facebook</option>
+                    <option value="Call Center">Call Center</option>
+                    <option value="Client referral">Client referral</option>
+                    <option value="Other">Other</option>
+                </select>
+            </div>
+            <div style="grid-column:1/-1;">
+                <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;font-size:12px;color:#92400e;">
+                    <strong>Payment reference is required to confirm booking.</strong>
+                    Other documents (ID, KRA, Passport) can be uploaded later.
+                </div>
+            </div>
+            <div>
+                <label>Deposit Reference <span style="color:#dc2626;">*</span></label>
+                <input type="file" id="fi-deposit_ref" name="deposit_ref" multiple accept="image/*,.pdf" required style="display:none;">
+                <div id="fl-deposit_ref" style="min-height:4px;margin-bottom:4px;"></div>
+                <button type="button" onclick="ppAdd('deposit_ref')" style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;width:100%;">+ Add File(s)</button>
+            </div>
+            <div>
+                <label>ID Photo</label>
+                <input type="file" id="fi-id_photo" name="id_photo" multiple accept="image/*,.pdf" style="display:none;">
+                <div id="fl-id_photo" style="min-height:4px;margin-bottom:4px;"></div>
+                <button type="button" onclick="ppAdd('id_photo')" style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;width:100%;">+ Add File(s)</button>
+            </div>
+            <div>
+                <label>KRA</label>
+                <input type="file" id="fi-kra" name="kra" multiple accept="image/*,.pdf" style="display:none;">
+                <div id="fl-kra" style="min-height:4px;margin-bottom:4px;"></div>
+                <button type="button" onclick="ppAdd('kra')" style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;width:100%;">+ Add File(s)</button>
+            </div>
+            <div>
+                <label>Passport Photo</label>
+                <input type="file" id="fi-passport_photo" name="passport_photo" multiple accept="image/*,.pdf" style="display:none;">
+                <div id="fl-passport_photo" style="min-height:4px;margin-bottom:4px;"></div>
+                <button type="button" onclick="ppAdd('passport_photo')" style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;width:100%;">+ Add File(s)</button>
+            </div>
+        </div>
+
+        <div style="margin-top:16px;">
+            <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">Notes</label>
+            <textarea name="notes" rows="3" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea>
+        </div>
+
+        <div style="margin-top:20px;display:flex;gap:10px;">
+            <button type="submit" id="submit-btn" style="background:#2563eb;">✅ Confirm Booking</button>
+        </div>
+    </form>
+</div>
+
+<script>
+(function() {
+    var ppStores = {};
+    function ppStore(n) { return ppStores[n] || (ppStores[n] = []); }
+    function ppEsc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+    function ppSync(n) {
+        var dt = new DataTransfer();
+        ppStore(n).forEach(function(f) { dt.items.add(f); });
+        document.getElementById('fi-' + n).files = dt.files;
+        var list = document.getElementById('fl-' + n);
+        list.innerHTML = '';
+        ppStore(n).forEach(function(f, i) {
+            var d = document.createElement('div');
+            d.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:12px;color:#374151;padding:2px 0;';
+            d.innerHTML = '📄 <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + ppEsc(f.name) + '</span>'
+                + '<span style="color:#6b7280;flex-shrink:0;">(' + (f.size/1024).toFixed(0) + 'KB)</span>'
+                + '<button type="button" onclick="ppRm(\'' + n + '\',' + i + ')" style="background:#fee2e2;color:#b91c1c;border:none;border-radius:3px;padding:1px 5px;cursor:pointer;font-size:10px;font-weight:700;">✕</button>';
+            list.appendChild(d);
+        });
+    }
+    window.ppAdd = function(n) {
+        var p = document.createElement('input');
+        p.type = 'file'; p.multiple = true; p.accept = 'image/*,.pdf';
+        p.onchange = function() {
+            var a = ppStore(n);
+            for (var i = 0; i < this.files.length; i++) a.push(this.files[i]);
+            ppStores[n] = a; ppSync(n);
+        };
+        p.click();
+    };
+    window.ppRm = function(n, i) { ppStore(n).splice(i, 1); ppSync(n); };
+
+    var ERRORS = {
+        name: 'Buyer name is required.',
+        phone: 'Buyer phone number is required.',
+        deposit_amt: 'Deposit amount is required.',
+        source: 'Lead source is required.',
+        deposit_ref: 'Payment reference attachment is required.',
+        unavailable: 'One or more selected plots are no longer available. Please review your cart.',
+    };
+    var params = new URLSearchParams(window.location.search);
+    var errKey = params.get('err');
+    if (errKey && ERRORS[errKey]) {
+        var banner = document.getElementById('err-banner');
+        banner.textContent = '⚠️ ' + ERRORS[errKey];
+        banner.style.display = 'block';
+    }
+
+    function renderCart() {
+        var cart = ppmGetCart();
+        var emptyEl  = document.getElementById('empty-cart');
+        var contentEl = document.getElementById('cart-content');
+        var formCard  = document.getElementById('booking-form-card');
+
+        if (cart.length === 0) {
+            emptyEl.style.display  = 'block';
+            contentEl.style.display = 'none';
+            formCard.style.display  = 'none';
+            return;
+        }
+        emptyEl.style.display   = 'none';
+        contentEl.style.display = 'block';
+        formCard.style.display  = 'block';
+
+        document.getElementById('cart-count').textContent = cart.length;
+
+        var tbody = document.getElementById('cart-tbody');
+        tbody.innerHTML = '';
+        cart.forEach(function(item, idx) {
+            var tr = document.createElement('tr');
+            tr.innerHTML =
+                '<td>' + (idx + 1) + '</td>' +
+                '<td><strong>' + escHtml(item.plotNumber) + '</strong></td>' +
+                '<td>' + escHtml(item.estateName) + '</td>' +
+                '<td><button type="button" onclick="removeItem(\'' + escHtml(item.plotId) + '\')" ' +
+                'style="background:#fee2e2;color:#991b1b;border:none;padding:4px 10px;border-radius:5px;font-size:12px;cursor:pointer;">Remove</button></td>';
+            tbody.appendChild(tr);
+        });
+
+        // Populate hidden plot_id inputs
+        var form = document.getElementById('booking-form');
+        form.querySelectorAll('input[name="plot_ids"]').forEach(function(el){ el.remove(); });
+        cart.forEach(function(item) {
+            var inp = document.createElement('input');
+            inp.type = 'hidden';
+            inp.name = 'plot_ids';
+            inp.value = item.plotId;
+            form.appendChild(inp);
+        });
+    }
+
+    window.removeItem = function(plotId) {
+        var cart = ppmGetCart().filter(function(i){ return i.plotId !== plotId; });
+        ppmSaveCart(cart);
+        updateCartBadge();
+        renderCart();
+    };
+
+    window.clearCart = function() {
+        if (!confirm('Clear all plots from cart?')) return;
+        ppmSaveCart([]);
+        updateCartBadge();
+        renderCart();
+    };
+
+    function escHtml(s) {
+        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function ppRebookConfirm(lines) {
+        return new Promise(function(resolve) {
+            var overlay = document.createElement('div');
+            overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+            overlay.innerHTML =
+                '<div style="background:#fff;border-radius:10px;max-width:420px;width:100%;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,.25);">' +
+                    '<div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:10px;">This plot was booked before</div>' +
+                    '<div style="font-size:13px;color:#374151;white-space:pre-line;margin-bottom:8px;line-height:1.5;">' + lines + '</div>' +
+                    '<div style="font-size:13px;color:#111827;font-weight:600;margin-bottom:18px;">Is the buyer booking now the SAME person as before?</div>' +
+                    '<div style="display:flex;gap:10px;justify-content:flex-end;">' +
+                        '<button type="button" id="pp-rebook-no" style="background:#f3f4f6;color:#374151;border:1px solid #d1d5db;padding:8px 16px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">No</button>' +
+                        '<button type="button" id="pp-rebook-yes" style="background:#2563eb;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">Yes</button>' +
+                    '</div>' +
+                '</div>';
+            document.body.appendChild(overlay);
+            overlay.querySelector('#pp-rebook-no').onclick = function() { document.body.removeChild(overlay); resolve(false); };
+            overlay.querySelector('#pp-rebook-yes').onclick = function() { document.body.removeChild(overlay); resolve(true); };
+        });
+    }
+
+    document.getElementById('booking-form').addEventListener('submit', function(e) {
+        e.preventDefault();
+        if (!ppStore('deposit_ref').length) {
+            alert('Please add at least one Deposit Reference file.');
+            return;
+        }
+        var form = e.target;
+        var btn = document.getElementById('submit-btn');
+        var plotIds = Array.from(form.querySelectorAll('input[name="plot_ids"]')).map(function(i){ return i.value; }).join(',');
+        var buyerName = document.getElementById('buyer_name').value;
+        var buyerPhone = document.getElementById('buyer_phone').value;
+        function finishSubmit() {
+            btn.disabled = true;
+            btn.textContent = 'Processing...';
+            btn.style.background = '#94a3b8';
+            form.submit();
+        }
+        fetch('/check-rebook-match?plot_ids=' + encodeURIComponent(plotIds) + '&buyer_name=' + encodeURIComponent(buyerName) + '&buyer_phone=' + encodeURIComponent(buyerPhone))
+            .then(function(r) { return r.json(); })
+            .then(function(matches) {
+                if (matches && matches.length) {
+                    var lines = matches.map(function(m) {
+                        return 'Plot ' + escHtml(m.plot_number) + ' (' + escHtml(m.estate_name) + ') — previously booked by ' + escHtml(m.previous_buyer_name);
+                    }).join('\n');
+                    return ppRebookConfirm(lines).then(function(isRebook) {
+                        document.getElementById('rebook-confirmed-field').value = isRebook ? '1' : '0';
+                        finishSubmit();
+                    });
+                }
+                finishSubmit();
+            })
+            .catch(finishSubmit);
+    });
+
+    document.addEventListener('DOMContentLoaded', renderCart);
+})();
+</script>
+{{ end }}
+{{ template "admin_base" . }}

@@ -1,0 +1,48 @@
+{{ define "title" }}Manage Permissions - Pro-Property{{ end }}
+{{ define "content" }}
+<div class="top-bar">
+    <h1>Manage Permissions</h1>
+</div>
+
+<div class="card">
+    <p style="margin:0 0 16px;font-size:13px;color:#6b7280;">
+        Select a user below to grant or revoke read/write access to portal features.
+        <strong>System Admin</strong> always has full access and is not listed here.
+    </p>
+    {{ if .Users }}
+    <div class="table-responsive">
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Role</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{ range .Users }}
+                <tr>
+                    <td>{{ .Name }}</td>
+                    <td>{{ .Email }}</td>
+                    <td>
+                        <span class="badge {{ if eq .Role "admin" }}badge-booked{{ else }}badge-signed{{ end }}"
+                              style="text-transform:capitalize;">{{ .Role }}</span>
+                    </td>
+                    <td>
+                        <a href="/admin/permissions/{{ .ID }}"
+                           style="display:inline-block;padding:5px 14px;background:#2563eb;color:#fff;border-radius:6px;font-size:12px;text-decoration:none;">
+                            Set Permissions
+                        </a>
+                    </td>
+                </tr>
+                {{ end }}
+            </tbody>
+        </table>
+    </div>
+    {{ else }}
+    <p style="color:#6b7280;font-size:14px;">No users found.</p>
+    {{ end }}
+</div>
+{{ end }}
+{{ template "admin_base" . }}

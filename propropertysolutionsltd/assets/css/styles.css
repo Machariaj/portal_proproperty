@@ -1,0 +1,271 @@
+/* Universal responsive styles for ProProperty */
+
+:root {
+  --font-family: "Segoe UI", Arial, sans-serif;
+  --bg: #f4f4f4;
+  --text: #0f172a;
+  --muted: #475569;
+  --border: #e5e7eb;
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --success: #28a745;
+  --success-hover: #218838;
+  --warning: #ffc107;
+  --warning-hover: #e0a800;
+  --danger: #dc3545;
+  --danger-hover: #c82333;
+  --sidebar-bg: #1e293b;
+  --sidebar-hover: #334155;
+  --sidebar-width: 240px;
+  --radius: 10px;
+  --shadow: 0 2px 5px rgba(0,0,0,0.08);
+}
+
+/* Base */
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  font-family: var(--font-family);
+  color: var(--text);
+  background: var(--bg);
+}
+img { max-width: 100%; height: auto; display: block; }
+a { color: inherit; }
+
+/* Sidebar */
+.sidebar {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: var(--sidebar-width);
+  height: 100vh;
+  background: var(--sidebar-bg);
+  color: #fff;
+  padding: 20px 16px;
+  overflow-y: auto;
+  box-shadow: 2px 0 8px rgba(0,0,0,0.06);
+  transform: translateX(0);
+  transition: transform 0.3s ease;
+  z-index: 1000;
+}
+.sidebar .logo-container { text-align: center; margin-bottom: 16px; }
+.sidebar img.logo { max-width: 100%; max-height: 80px; width: auto; height: auto; object-fit: contain; border-radius: 0; margin: 0 auto; }
+.sidebar h2 { font-size: 18px; margin: 8px 0 0; font-weight: 700; }
+.sidebar ul { list-style: none; padding: 0; margin: 16px 0 0; }
+.sidebar ul li { margin: 8px 0; }
+.sidebar a {
+  display: block;
+  color: #fff;
+  text-decoration: none;
+  padding: 10px 12px;
+  border-radius: 8px;
+  transition: background 0.2s ease;
+}
+.sidebar a:hover, .sidebar a.active { background: var(--sidebar-hover); }
+
+/* Top menu toggle (mobile) */
+.menu-toggle {
+  display: none;
+  background: var(--sidebar-bg);
+  color: #fff;
+  border: none;
+  padding: 12px 16px;
+  font-size: 18px;
+  width: 100%;
+}
+
+/* Main content area (support both .main and .main-content) */
+.main, .main-content {
+  margin-left: var(--sidebar-width);
+  padding: 24px;
+  min-height: 100vh;
+}
+
+/* Cards */
+.card {
+  background: #fff;
+  padding: 22px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  margin-bottom: 24px;
+}
+
+/* Tables */
+.table-responsive { overflow-x: auto; }
+.table-responsive table { min-width: 600px; }
+
+table { width: 100%; border-collapse: collapse; background: #fff; }
+th, td { padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: left; }
+th { background: #f8fafc; font-weight: 600; }
+
+/* Forms */
+label { display: block; margin: 8px 0 6px; font-weight: 600; color: var(--muted); }
+input, select, textarea, button {
+  font-family: inherit;
+  font-size: 16px;
+}
+input, select, textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: var(--text);
+  outline: none;
+}
+input:focus, select:focus, textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,0.12); }
+
+.password-wrapper {
+  position: relative;
+}
+.toggle-password-btn {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--muted);
+  padding: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.toggle-password-btn:hover {
+  color: var(--text);
+}
+
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: none;
+  background: var(--primary);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+button:hover { background: var(--primary-hover); }
+
+/* Link buttons used on estate cards */
+/* CTA-styled status buttons */
+.btn-available, .btn-booked, .btn-sold, .btn-sa-signed {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-radius: 9999px;
+  text-decoration: none;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  color: #000 !important;
+  box-shadow: 0 8px 18px rgba(0,0,0,0.12);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+}
+.btn-available { background: #ffffff; border: 2px solid #e5e7eb; }
+.btn-available:hover { background: #f8fafc; box-shadow: 0 10px 24px rgba(0,0,0,0.15); transform: translateY(-1px); filter: brightness(1.02); }
+.btn-booked { background: #ffff99; color: #000 !important; }
+.btn-booked:hover { background: #ffff88; box-shadow: 0 10px 24px rgba(255,255,153,0.35); transform: translateY(-1px); filter: brightness(1.02); color: #000 !important; }
+.btn-sold { background: linear-gradient(135deg, #22c55e, #16a34a); }
+.btn-sold:hover { background: linear-gradient(135deg, #16a34a, #15803d); box-shadow: 0 10px 24px rgba(22,163,74,0.35); transform: translateY(-1px); filter: brightness(1.02); }
+.btn-sa-signed { background: #dc3545; color: #fff !important; }
+.btn-sa-signed:hover { background: #c82333; box-shadow: 0 10px 24px rgba(220,53,69,0.35); transform: translateY(-1px); filter: brightness(1.02); }
+
+/* Prominent call-to-action button used for Sell Plot */
+.btn-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-radius: 9999px;
+  text-decoration: none;
+  background: #ffff99;
+  color: #000 !important;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  box-shadow: 0 8px 18px rgba(255,255,153,0.25);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+}
+.btn-cta:hover {
+  background: #ffff88;
+  box-shadow: 0 10px 24px rgba(255,255,136,0.35);
+  transform: translateY(-1px);
+  filter: brightness(1.02);
+}
+
+/* Zoomable image + lightbox */
+.estate-card img { cursor: zoom-in; transition: transform 0.2s ease, box-shadow 0.2s ease; }
+.estate-card img:hover { transform: scale(1.02); box-shadow: 0 6px 16px rgba(0,0,0,0.18); }
+.lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: none; align-items: center; justify-content: center; z-index: 2000; padding: 20px; }
+.lightbox.open { display: flex; }
+.lightbox img { max-width: 90vw; max-height: 90vh; border-radius: 8px; box-shadow: 0 12px 32px rgba(0,0,0,0.45); }
+
+/* Utilities */
+.top-bar { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+.search-container { display: flex; gap: 10px; align-items: center; }
+.search-container form { display: flex; gap: 10px; align-items: center; width: 100%; }
+.search-container form input[type="text"],
+.search-container form input[type="search"] { flex: 1; width: auto; min-width: 0; }
+.search-container form button { flex: 0 0 auto; white-space: nowrap; }
+.add-btn { text-decoration: none; display: inline-flex; align-items: center; justify-content: center; padding: 10px 16px; border-radius: 8px; background: #27ae60; color: #fff; font-weight: 700; }
+.add-btn:hover { background: #1f8f4e; }
+
+.estate-card {
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 18px;
+  margin-bottom: 18px;
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  box-shadow: var(--shadow);
+}
+.estate-card img { width: 280px; height: 220px; border-radius: 10px; object-fit: cover; flex-shrink: 0; box-shadow: 0 2px 6px rgba(0,0,0,0.08); }
+.estate-info h3 { margin: 0 0 8px; color: #1f2937; font-size: 20px; }
+.estate-info p { margin: 6px 0; color: #374151; line-height: 1.5; }
+.estate-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.admin-actions { margin-top: 12px; display: flex; gap: 10px; }
+.edit-btn, .delete-btn { display: inline-flex; align-items: center; justify-content: center; padding: 8px 12px; border-radius: 6px; color: #fff; text-decoration: none; }
+.edit-btn { background: #3498db; }
+.edit-btn:hover { background: #2980b9; }
+.delete-btn { background: #e74c3c; }
+.delete-btn:hover { background: #c0392b; }
+
+.message { color: #16a34a; font-weight: 700; text-align: center; }
+
+/* Pagination */
+.pagination { display: flex; justify-content: center; gap: 8px; margin-top: 20px; flex-wrap: wrap; }
+.pagination a { padding: 8px 12px; border-radius: 6px; text-decoration: none; border: 1px solid #cbd5e1; color: #1f2937; }
+.pagination a.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+.pagination a:hover { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+
+/* Responsive */
+@media (max-width: 1100px) {
+  .estate-card { flex-direction: column; }
+  .estate-card img { width: 100%; height: 240px; }
+}
+
+@media (max-width: 900px) {
+  .menu-toggle { display: block; position: sticky; top: 0; z-index: 1100; }
+  .sidebar { transform: translateX(-100%); }
+  .sidebar.sidebar--open { transform: translateX(0); }
+  .main, .main-content { margin-left: 0; padding: 16px; }
+  .card { padding: 18px; }
+  input, select, textarea, button { font-size: 16px; } /* better mobile tap targets */
+}
+
+@media (max-width: 520px) {
+  .top-bar { flex-direction: column; align-items: stretch; }
+  .search-container { width: 100%; }
+  .search-container form input { width: auto; flex: 1; }
+}

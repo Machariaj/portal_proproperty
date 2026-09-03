@@ -1,0 +1,45 @@
+{{ define "title" }}Tenants - ProProperty{{ end }}
+{{ define "content" }}
+<div class="card">
+    <div class="card-header">
+        <h2>Tenants</h2>
+    </div>
+    <div class="card-body table-wrapper">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Property</th>
+                    <th>Unit</th>
+                    <th>Status</th>
+                    <th>Balance</th>
+                    <th>Next Due</th>
+                    <th>Last Paid</th>
+                    <th>Lease End</th>
+                    <th>Contact</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{ range .Tenants }}
+                <tr>
+                    <td>{{ .Name }}</td>
+                    <td>{{ .Property }}</td>
+                    <td>{{ .Unit }}</td>
+                    <td>
+                        <span class="badge {{ if eq .Status "In Arrears" }}badge-danger{{ else }}badge-success{{ end }}">
+                            {{ .Status }}
+                        </span>
+                    </td>
+                    <td>KSh {{ printf "%.0f" .Balance }}</td>
+                    <td>{{ .NextDueDate }}</td>
+                    <td>{{ .LastPaidOn }}</td>
+                    <td>{{ .LeaseEnd }}</td>
+                    <td>{{ .Contact }}</td>
+                </tr>
+                {{ end }}
+            </tbody>
+        </table>
+    </div>
+</div>
+{{ end }}
+{{ template "base" . }}

@@ -1,0 +1,128 @@
+{{ define "title" }}Conveyancing - Pro-Property{{ end }}
+{{ define "content" }}
+<div class="top-bar">
+    <h1>Conveyancing</h1>
+</div>
+
+{{ if .LastSync }}
+<p style="color:#6b7280;font-size:13px;margin-top:0;">Last synced from Zoho CRM: <strong>{{ .LastSync }}</strong> &middot; auto-syncs at 08:00, 10:00, 13:00 &amp; 15:00.</p>
+{{ else }}
+<p style="color:#b45309;font-size:13px;margin-top:0;">Not yet synced from Zoho CRM — the first scheduled sync runs at 08:00 / 10:00 / 13:00 / 15:00.</p>
+{{ end }}
+
+<p style="margin-top:0;margin-bottom:20px;">
+    <a href="/admin/payment-plans/all" style="display:inline-flex;align-items:center;gap:8px;background:#0f172a;color:#fff;padding:11px 20px;border-radius:8px;font-size:13px;font-weight:700;text-decoration:none;">View all tracked deals &amp; their stage <span style="background:rgba(255,255,255,0.2);border-radius:999px;padding:1px 9px;">{{ .StatTotal }}</span></a>
+</p>
+
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px;">
+    <a href="/admin/payment-plans/3m-pending-consent" class="card" style="text-decoration:none;color:inherit;display:block;border-left:4px solid #0f172a;">
+        <div style="font-size:11px;color:#6b7280;font-weight:700;letter-spacing:.4px;">3-MONTH PLAN &middot; PENDING CONSENT</div>
+        <div style="font-size:30px;font-weight:800;color:#0f172a;line-height:1.1;">{{ .Stat3mPendingConsent }}</div>
+    </a>
+    <a href="/admin/payment-plans/70-pending-consent" class="card" style="text-decoration:none;color:inherit;display:block;border-left:4px solid #1d4ed8;">
+        <div style="font-size:11px;color:#6b7280;font-weight:700;letter-spacing:.4px;">70%+ &middot; PENDING CONSENT</div>
+        <div style="font-size:30px;font-weight:800;color:#1d4ed8;line-height:1.1;">{{ .Stat70PendingConsent }}</div>
+    </a>
+    <a href="/admin/payment-plans/pending-transfer" class="card" style="text-decoration:none;color:inherit;display:block;border-left:4px solid #b45309;">
+        <div style="font-size:11px;color:#6b7280;font-weight:700;letter-spacing:.4px;">PENDING TRANSFER FORMS</div>
+        <div style="font-size:30px;font-weight:800;color:#b45309;line-height:1.1;">{{ .StatPendingTransfer }}</div>
+    </a>
+    <a href="/admin/payment-plans/pending-title" class="card" style="text-decoration:none;color:inherit;display:block;border-left:4px solid #7c3aed;">
+        <div style="font-size:11px;color:#6b7280;font-weight:700;letter-spacing:.4px;">PENDING TITLE DEED</div>
+        <div style="font-size:30px;font-weight:800;color:#7c3aed;line-height:1.1;">{{ .StatPendingTitle }}</div>
+    </a>
+    <a href="/admin/payment-plans/fully-paid" class="card" style="text-decoration:none;color:inherit;display:block;border-left:4px solid #166534;">
+        <div style="font-size:11px;color:#6b7280;font-weight:700;letter-spacing:.4px;">FULLY PAID (SOLD)</div>
+        <div style="font-size:30px;font-weight:800;color:#166534;line-height:1.1;">{{ .StatFullyPaid }}</div>
+    </a>
+</div>
+
+<h2 style="font-size:16px;color:#0f172a;margin:26px 0 4px;">Zoho CRM Deals &mdash; overview</h2>
+<p style="font-size:12px;color:#94a3b8;margin:0 0 14px;">Across {{ .CrmTotal }} CRM deals. Refreshed on every sync (08:00 / 10:00 / 13:00 / 15:00).</p>
+
+<div class="chart-grid">
+    <div class="card">
+        <h3>Signed vs Fully Paid <span style="font-weight:400;color:#94a3b8;font-size:12px;">(all CRM deals)</span></h3>
+        <div class="chart-wrap"><canvas id="paidChart"></canvas></div>
+    </div>
+    <div class="card">
+        <h3>Payment-plan mix</h3>
+        <div class="chart-wrap"><canvas id="planMixChart"></canvas></div>
+    </div>
+    <div class="card">
+        <h3>Payment progress spread</h3>
+        <div class="chart-wrap"><canvas id="pctDistChart"></canvas></div>
+    </div>
+    <div class="card chart-full">
+        <h3>Top estates by deal count</h3>
+        <div class="chart-wrap" style="height:320px;"><canvas id="estatesChart"></canvas></div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+(function () {
+    var d = {{ .ChartData }};
+    if (!d || typeof Chart === 'undefined') return;
+
+    // Categorical palette (validated colourblind-safe order): blue, orange, aqua, yellow
+    var C = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100'];
+    var INK = '#334155', GRID = 'rgba(148,163,184,0.18)';
+    Chart.defaults.font.family = "'Segoe UI', Arial, sans-serif";
+    Chart.defaults.color = INK;
+
+    var barBase = {
+        responsive: true, maintainAspectRatio: false,
+        scales: {
+            x: { grid: { display: false }, ticks: { color: INK } },
+            y: { beginAtZero: true, grid: { color: GRID }, ticks: { color: INK, precision: 0 } }
+        },
+        plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, boxHeight: 12 } } }
+    };
+
+    // 1 — doughnut: signed vs fully paid (totals, all deals)
+    var c2 = document.getElementById('paidChart');
+    if (c2) new Chart(c2, {
+        type: 'doughnut',
+        data: {
+            labels: ['Signed (<100%)', 'Fully Paid (100%)'],
+            datasets: [{ data: [d.signedTotal, d.fullyPaidTotal], backgroundColor: [C[0], C[2]], borderColor: '#fff', borderWidth: 2 }]
+        },
+        options: { responsive: true, maintainAspectRatio: false, cutout: '58%', plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, boxHeight: 12 } } } }
+    });
+
+    // 2 — payment progress distribution (single series)
+    var c3 = document.getElementById('pctDistChart');
+    if (c3) new Chart(c3, {
+        type: 'bar',
+        data: { labels: d.pctLabels, datasets: [{ label: 'Deals', data: d.pctCounts, backgroundColor: '#256abf', borderRadius: 3, borderSkipped: false }] },
+        options: Object.assign({}, barBase, { plugins: { legend: { display: false } } })
+    });
+
+    // 3 — payment-plan mix (doughnut, part-to-whole)
+    var c4 = document.getElementById('planMixChart');
+    if (c4) new Chart(c4, {
+        type: 'doughnut',
+        data: { labels: d.planOrder, datasets: [{ data: d.planTotals, backgroundColor: C, borderColor: '#fff', borderWidth: 2 }] },
+        options: { responsive: true, maintainAspectRatio: false, cutout: '58%', plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, boxHeight: 12 } } } }
+    });
+
+    // 4 — top estates (horizontal bar, single series)
+    var c5 = document.getElementById('estatesChart');
+    if (c5) new Chart(c5, {
+        type: 'bar',
+        data: { labels: d.estates, datasets: [{ label: 'Deals', data: d.estateCounts, backgroundColor: '#2a78d6', borderRadius: 3, borderSkipped: false }] },
+        options: {
+            indexAxis: 'y',
+            responsive: true, maintainAspectRatio: false,
+            scales: {
+                x: { beginAtZero: true, grid: { color: GRID }, ticks: { color: INK, precision: 0 } },
+                y: { grid: { display: false }, ticks: { color: INK } }
+            },
+            plugins: { legend: { display: false } }
+        }
+    });
+})();
+</script>
+{{ end }}
+{{ template "admin_base" . }}

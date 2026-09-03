@@ -1,0 +1,341 @@
+{{ define "title" }}Book a Van - Pro-Property{{ end }}
+{{ define "content" }}
+<div class="top-bar">
+    <h1>Book a Van</h1>
+    <a href="/agent/van-bookings" class="edit-btn" style="background:#6b7280;">My Bookings</a>
+    {{ if .UnreadCount }}
+    <a href="/agent/van-notifications"
+        style="background:#dc2626;color:#fff;padding:8px 14px;border-radius:6px;font-size:13px;font-weight:600;text-decoration:none;">
+        Notifications ({{ .UnreadCount }})
+    </a>
+    {{ end }}
+</div>
+
+{{ if .FormError }}
+<div style="background:#fee2e2;border:1px solid #fca5a5;color:#b91c1c;padding:12px 16px;border-radius:6px;margin-bottom:16px;font-size:14px;">
+    {{ .FormError }}
+</div>
+{{ end }}
+
+<!-- Step 1: Date Picker -->
+<div class="card" style="max-width:420px;margin-bottom:20px;">
+    <h3 style="margin:0 0 14px;font-size:14px;color:#0f172a;">Select Trip Date</h3>
+    <form method="GET" action="/agent/van-booking" style="display:flex;gap:10px;align-items:flex-end;">
+        <div style="flex:1;">
+            <input type="date" name="date" value="{{ .SelectedDate }}" required
+                   style="width:100%;" min="{{ .Today }}">
+        </div>
+        <button type="submit" style="padding:9px 20px;font-size:13px;white-space:nowrap;">View Availability</button>
+    </form>
+</div>
+
+{{ if .SelectedDate }}
+<!-- Step 2: Sessions per van -->
+{{ range .VanGroups }}
+<div class="card" style="margin-bottom:16px;">
+    <h3 style="margin:0 0 14px;font-size:15px;color:#0f172a;border-bottom:1px solid #e5e7eb;padding-bottom:10px;">
+        🚐 {{ .PlateNumber }} — {{ .VanName }}
+    </h3>
+
+    {{ if .Maintenance }}
+    <div style="margin-bottom:12px;">
+        {{ range .Maintenance }}
+        <div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:10px 14px;margin-bottom:6px;display:flex;align-items:center;gap:10px;">
+            <span style="font-size:16px;">{{ if eq .Type "reserved" }}📌{{ else if eq .Type "unavailable" }}🚫{{ else }}🔧{{ end }}</span>
+            <div>
+                <span style="font-weight:600;font-size:13px;color:#b91c1c;">{{ .TypeLabel }}</span>
+                {{ if .StartTime }}<span style="font-size:13px;color:#b91c1c;"> · {{ .StartTime }}{{ if .EndTime }} – {{ .EndTime }}{{ end }}</span>
+                {{ else }}<span style="font-size:13px;color:#b91c1c;"> · Full day</span>{{ end }}
+                {{ if .Reason }}<div style="font-size:12px;color:#6b7280;margin-top:1px;">{{ .Reason }}</div>{{ end }}
+            </div>
+        </div>
+        {{ end }}
+    </div>
+    {{ end }}
+
+    {{ if .Sessions }}
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px;">
+        {{ range .Sessions }}
+        {{ $isOps := eq .Destination "Operations" }}
+        <div style="border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;background:#f9fafb;">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;">
+                <div>
+                    <div style="font-weight:600;font-size:14px;color:#0f172a;">{{ .Destination }}{{ if .TripTime }} &nbsp;·&nbsp; <span style="color:#0369a1;">🕐 {{ .TripTime }}</span>{{ end }}</div>
+                    {{ if .Estates }}<div style="font-size:12px;color:#0369a1;margin-top:2px;">🏘 {{ .Estates }}</div>{{ end }}
+                    {{ if .Purpose }}<div style="font-size:12px;color:#6b7280;margin-top:2px;">{{ .Purpose }}</div>{{ end }}
+                    <div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">
+                        {{ range .Agents }}
+                        <span style="background:#e0f2fe;color:#0369a1;font-size:11px;padding:2px 8px;border-radius:20px;">{{ . }}</span>
+                        {{ end }}
+                    </div>
+                </div>
+                <div style="text-align:right;flex-shrink:0;">
+                    {{ if lt .SeatsTaken .MaxSeats }}
+                    <span style="font-size:13px;color:#16a34a;font-weight:600;">{{ .SeatsTaken }}/{{ .MaxSeats }} seats taken</span><br>
+                    <span style="font-size:12px;color:#0369a1;">{{ .Remaining }} seat(s) available</span>
+                    {{ else }}
+                    <span style="font-size:13px;color:#dc2626;font-weight:600;">Full ({{ .MaxSeats }}/{{ .MaxSeats }})</span>
+                    {{ end }}
+                </div>
+            </div>
+            {{ if lt .SeatsTaken .MaxSeats }}
+            <form method="POST" action="/agent/van-booking" style="margin-top:12px;">
+                <input type="hidden" name="action" value="join">
+                <input type="hidden" name="session_id" value="{{ .ID }}">
+                <input type="hidden" name="trip_date" value="{{ $.SelectedDate }}">
+                <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
+                    <div style="flex:0 0 80px;">
+                        <label style="display:block;font-size:11px;color:#6b7280;font-weight:600;margin-bottom:4px;">Seats * <span style="font-weight:400;">(max {{ .Remaining }})</span></label>
+                        <input type="number" name="seats" value="1" min="1" max="{{ .Remaining }}" required style="width:80px;font-size:13px;padding:6px 8px;">
+                    </div>
+                    {{ if not $isOps }}
+                    <div style="flex:0 0 80px;">
+                        <label style="display:block;font-size:11px;color:#6b7280;font-weight:600;margin-bottom:4px;">Clients</label>
+                        <input type="number" name="num_clients" value="0" min="0" style="width:80px;font-size:13px;padding:6px 8px;">
+                    </div>
+                    <div style="flex:1;min-width:140px;">
+                        <label style="display:block;font-size:11px;color:#6b7280;font-weight:600;margin-bottom:4px;">Lead Source</label>
+                        <select name="lead_source" style="font-size:13px;padding:6px 8px;width:100%;">
+                            <option value="">-- Select --</option>
+                            <option>Wapiverse</option>
+                            <option>Website</option>
+                            <option>Tiktok</option>
+                            <option>Facebook</option>
+                            <option>Call Center</option>
+                            <option>Client Referral</option>
+                            <option>Other</option>
+                        </select>
+                    </div>
+                    {{ end }}
+                    <div style="flex:0 0 auto;">
+                        <button type="submit" style="background:#0369a1;padding:7px 18px;font-size:13px;white-space:nowrap;width:100%;">+ Join</button>
+                    </div>
+                </div>
+            </form>
+            {{ end }}
+        </div>
+        {{ end }}
+    </div>
+    {{ else }}
+    <p style="font-size:13px;color:#94a3b8;margin-bottom:14px;">No sessions booked for this date yet.</p>
+    {{ end }}
+
+    <!-- New Session Form (collapsed by default) -->
+    <button type="button"
+            onclick="toggleNewSession('ns_{{ .VanID }}')"
+            style="background:#f1f5f9;color:#374151;border:1px solid #d1d5db;padding:8px 18px;font-size:13px;border-radius:8px;cursor:pointer;">
+        + New Session
+    </button>
+    <div id="ns_{{ .VanID }}" style="display:none;margin-top:12px;border:1px dashed #cbd5e1;border-radius:10px;padding:14px;">
+        <form method="POST" action="/agent/van-booking">
+            <input type="hidden" name="action" value="new">
+            <input type="hidden" name="van_id" value="{{ .VanID }}">
+            <input type="hidden" name="trip_date" value="{{ $.SelectedDate }}">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                <div>
+                    <label style="font-size:12px;color:#6b7280;font-weight:600;">Destination *</label>
+                    <select name="destination_id" required style="width:100%;" onchange="handleDestChange(this)">
+                        <option value="">-- Choose --</option>
+                        {{ range $.Destinations }}
+                        <option value="{{ .ID }}">{{ .Name }}</option>
+                        {{ end }}
+                    </select>
+                </div>
+                <div>
+                    <label style="font-size:12px;color:#6b7280;font-weight:600;">Trip Time *</label>
+                    <select name="trip_time" required style="width:100%;" onchange="handleTimeChange(this)">
+                        <option value="">-- Select slot --</option>
+                        <option value="08:00" data-end="10:00">8:00 AM – 10:00 AM</option>
+                        <option value="09:00" data-end="11:00">9:00 AM – 11:00 AM</option>
+                        <option value="10:00" data-end="12:00">10:00 AM – 12:00 PM</option>
+                        <option value="11:00" data-end="13:00">11:00 AM – 1:00 PM</option>
+                        <option value="12:00" data-end="14:00">12:00 PM – 2:00 PM</option>
+                        <option value="13:00" data-end="15:00">1:00 PM – 3:00 PM</option>
+                        <option value="14:00" data-end="16:00">2:00 PM – 4:00 PM</option>
+                        <option value="15:00" data-end="17:00">3:00 PM – 5:00 PM</option>
+                        <option value="16:00" data-end="18:00">4:00 PM – 6:00 PM</option>
+                        <option value="custom">Custom time...</option>
+                    </select>
+                    <input type="hidden" name="trip_time_end">
+                    <div class="custom-time-row" style="display:none;margin-top:8px;">
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <div style="flex:1;">
+                                <label style="font-size:11px;color:#6b7280;font-weight:600;display:block;margin-bottom:3px;">From</label>
+                                <input type="time" name="trip_time_custom" style="width:100%;font-size:13px;padding:6px 8px;">
+                            </div>
+                            <div style="flex:1;">
+                                <label style="font-size:11px;color:#6b7280;font-weight:600;display:block;margin-bottom:3px;">To</label>
+                                <input type="time" name="trip_time_end_custom" style="width:100%;font-size:13px;padding:6px 8px;">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div>
+                    <label style="font-size:12px;color:#6b7280;font-weight:600;">Seats to Book *</label>
+                    <input type="number" name="seats" value="1" min="1" max="11" required style="width:100%;">
+                    <div style="font-size:11px;color:#6b7280;margin-top:2px;">Max: 11</div>
+                </div>
+                <!-- Hidden for Operations -->
+                <div class="ops-hide">
+                    <label style="font-size:12px;color:#6b7280;font-weight:600;">No. of Clients</label>
+                    <input type="number" name="num_clients" value="0" min="0" style="width:100%;">
+                </div>
+                <div class="ops-hide">
+                    <label style="font-size:12px;color:#6b7280;font-weight:600;">Lead Source</label>
+                    <select name="lead_source" style="width:100%;">
+                        <option value="">-- Select --</option>
+                        <option>Wapiverse</option>
+                        <option>Website</option>
+                        <option>Tiktok</option>
+                        <option>Facebook</option>
+                        <option>Call Center</option>
+                        <option>Client Referral</option>
+                        <option>Other</option>
+                    </select>
+                </div>
+                <div class="ops-hide estate-field" style="grid-column:1/-1;">
+                    <label style="font-size:12px;color:#6b7280;font-weight:600;">Destination Estate(s)</label>
+                    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;padding:10px;border:1px solid #d1d5db;border-radius:6px;background:#f9fafb;">
+                        {{ range $.Estates }}
+                        <label data-estate="{{ .Name }}" style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;">
+                            <input type="checkbox" name="estates" value="{{ .Name }}"> {{ .Name }}
+                        </label>
+                        {{ end }}
+                        <label data-estate="Other" style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;">
+                            <input type="checkbox" name="estates" value="Other"> Other
+                        </label>
+                    </div>
+                </div>
+                <div style="grid-column:1/-1;">
+                    <label style="font-size:12px;color:#6b7280;font-weight:600;">Notes{{ if true }} <span class="ops-note" style="display:none;color:#0369a1;">(describe where you're going)</span>{{ end }}</label>
+                    <textarea name="purpose" rows="2" style="width:100%;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;resize:vertical;" placeholder="Any additional notes for this trip..."></textarea>
+                </div>
+            </div>
+            <button type="submit" style="margin-top:12px;background:#15803d;padding:8px 20px;font-size:13px;">
+                Create Session & Book
+            </button>
+        </form>
+    </div>
+</div>
+{{ end }}
+{{ end }}
+
+<script>
+var NACHU_ESTATES = [
+    'nachu views estate phase 1','nachu views estate phase 2','nachu views estate phase 3',
+    'nachu views estate phase 4','nachu views estate phase 5',
+    'peak view estate phase 1','peak view estate phase 2','peak view estate phase 3',
+    'peak view estate phase 4','peak view estate phase 5','West View Estate Phase 1'
+    
+];
+
+var ALL_TIME_SLOTS = [
+    {v:'08:00', l:'8:00 AM \u2013 10:00 AM', e:'10:00'},
+    {v:'09:00', l:'9:00 AM \u2013 11:00 AM', e:'11:00'},
+    {v:'10:00', l:'10:00 AM \u2013 12:00 PM', e:'12:00'},
+    {v:'11:00', l:'11:00 AM \u2013 1:00 PM',  e:'13:00'},
+    {v:'12:00', l:'12:00 PM \u2013 2:00 PM',  e:'14:00'},
+    {v:'13:00', l:'1:00 PM \u2013 3:00 PM',   e:'15:00'},
+    {v:'14:00', l:'2:00 PM \u2013 4:00 PM',   e:'16:00'},
+    {v:'15:00', l:'3:00 PM \u2013 5:00 PM',   e:'17:00'},
+    {v:'16:00', l:'4:00 PM \u2013 6:00 PM',   e:'18:00'},
+    {v:'custom',l:'Custom time...',            e:''}
+];
+var MIKU_TIME_SLOTS = [
+    {v:'11:00', l:'11:00 AM \u2013 3:00 PM', e:'15:00'},
+    {v:'13:00', l:'1:00 PM \u2013 5:00 PM',  e:'17:00'}
+];
+var DIGITAL_TIME_SLOTS = [
+    {v:'custom', l:'Custom time...', e:''}
+];
+
+function populateTimeSlots(sel, slots) {
+    var prev = sel.value;
+    sel.innerHTML = '<option value="">-- Select slot --</option>';
+    slots.forEach(function(s) {
+        var opt = document.createElement('option');
+        opt.value = s.v;
+        opt.textContent = s.l;
+        if (s.e) opt.dataset.end = s.e;
+        if (s.v === prev) opt.selected = true;
+        sel.appendChild(opt);
+    });
+    syncTripTimeEnd(sel);
+}
+
+function syncTripTimeEnd(sel) {
+    var form = sel.closest('form');
+    var endInput = form.querySelector('input[name="trip_time_end"]');
+    if (!endInput) return;
+    var opt = sel.options[sel.selectedIndex];
+    endInput.value = (opt && opt.dataset.end) ? opt.dataset.end : '';
+}
+
+function handleTimeChange(sel) {
+    toggleCustomTime(sel);
+    syncTripTimeEnd(sel);
+}
+
+function handleDestChange(sel) {
+    var destText = sel.options[sel.selectedIndex].text.toLowerCase().trim();
+    var isOps      = destText === 'operations' || destText.indexOf('rose haven') !== -1;
+    var isMiku     = destText.indexOf('mikuyuini') !== -1;
+    var isDigital  = destText.indexOf('digital') !== -1;
+    var form = sel.closest('form');
+
+    // Show/hide Operations-specific fields (also applies to Rose Haven Team)
+    form.querySelectorAll('.ops-hide').forEach(function(el) {
+        el.style.display = isOps ? 'none' : '';
+        el.querySelectorAll('input:not([type=checkbox]), select').forEach(function(inp) {
+            inp.disabled = isOps;
+            if (isOps) { if (inp.tagName === 'SELECT') inp.value = ''; else if (inp.type === 'number') inp.value = 0; }
+        });
+        el.querySelectorAll('input[type=checkbox]').forEach(function(cb) {
+            if (isOps) cb.checked = false;
+        });
+    });
+    form.querySelectorAll('.ops-note').forEach(function(el) { el.style.display = isOps ? '' : 'none'; });
+
+    // Swap time slots based on destination
+    var timeSelect = form.querySelector('select[name="trip_time"]');
+    var slots = isDigital ? DIGITAL_TIME_SLOTS : isMiku ? MIKU_TIME_SLOTS : ALL_TIME_SLOTS;
+    populateTimeSlots(timeSelect, slots);
+    if (isDigital) {
+        timeSelect.value = 'custom';
+        toggleCustomTime(timeSelect);
+    }
+
+    // Estate filtering (only when not Operations / Rose Haven)
+    if (!isOps) {
+        var isNachu = destText.indexOf('nachu') !== -1;
+        var isOther = destText.indexOf('other') !== -1;
+        form.querySelectorAll('[data-estate]').forEach(function(lbl) {
+            var name = lbl.getAttribute('data-estate').toLowerCase();
+            var inNachu = NACHU_ESTATES.indexOf(name) !== -1;
+            var show = isNachu ? inNachu : (!isNachu && !isOther) ? true : !inNachu;
+            lbl.style.display = show ? '' : 'none';
+            if (!show) lbl.querySelector('input[type="checkbox"]').checked = false;
+        });
+    }
+}
+
+function toggleNewSession(id) {
+    var el = document.getElementById(id);
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+function toggleCustomTime(sel) {
+    var row = sel.parentElement.querySelector('.custom-time-row');
+    var isCustom = sel.value === 'custom';
+    row.style.display = isCustom ? 'block' : 'none';
+    row.querySelectorAll('input[type=time]').forEach(function(inp) { inp.required = isCustom; });
+    sel.required = !isCustom;
+    if (!isCustom) sel.required = true;
+}
+
+document.querySelector('input[type=date]').addEventListener('change', function() {
+    this.form.submit();
+});
+</script>
+{{ end }}
+{{ template "van_agent_base" . }}

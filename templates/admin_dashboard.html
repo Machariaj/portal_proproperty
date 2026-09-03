@@ -1,0 +1,184 @@
+{{ define "title" }}Dashboard Overview - Pro-Property{{ end }}
+{{ define "content" }}
+<div class="top-bar">
+    <h1>Dashboard Overview</h1>
+</div>
+
+<!-- Summary stat cards -->
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:20px;">
+    <div style="background:#fff;border-radius:10px;padding:18px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);border-left:4px solid #2563eb;">
+        <div style="font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Total Estates</div>
+        <div style="font-size:28px;font-weight:700;color:#1e293b;">{{ .Stats.Estates }}</div>
+    </div>
+    <div style="background:#fff;border-radius:10px;padding:18px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);border-left:4px solid #16a34a;">
+        <div style="font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Available Plots</div>
+        <div style="font-size:28px;font-weight:700;color:#16a34a;">{{ .Stats.Available }}</div>
+    </div>
+    <div style="background:#fff;border-radius:10px;padding:18px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);border-left:4px solid #ca8a04;">
+        <div style="font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">
+            {{ if .Stats.MonthFiltered }}Bookings This Month{{ else }}Booked Plots{{ end }}
+        </div>
+        <div style="font-size:28px;font-weight:700;color:#ca8a04;">{{ .Stats.Booked }}</div>
+    </div>
+    <div style="background:#fff;border-radius:10px;padding:18px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);border-left:4px solid #dc2626;">
+        <div style="font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">
+            {{ if .Stats.MonthFiltered }}SA Signed This Month{{ else }}SA Signed Plots{{ end }}
+        </div>
+        <div style="font-size:28px;font-weight:700;color:#dc2626;">{{ .Stats.SaSigned }}</div>
+    </div>
+    <div style="background:#fff;border-radius:10px;padding:18px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);border-left:4px solid #7c3aed;">
+        <div style="font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">
+            {{ if .Stats.MonthFiltered }}Fully Paid This Month{{ else }}Fully Paid Plots{{ end }}
+        </div>
+        <div style="font-size:28px;font-weight:700;color:#7c3aed;">{{ .Stats.Sold }}</div>
+    </div>
+</div>
+
+<form method="GET" action="/admin/dashboard" style="margin-bottom:20px;">
+    <div class="card" style="max-width:420px;display:flex;align-items:center;gap:12px;padding:14px 18px;">
+        <label for="month" style="margin:0;white-space:nowrap;font-weight:600;">Filter by Month:</label>
+        <select id="month" name="month" onchange="this.form.submit()" style="flex:1;margin:0;">
+            <option value="">All Months</option>
+            {{ range .Months }}
+            <option value="{{ . }}" {{ if eq . $.SelectedMonth }}selected{{ end }}>{{ . }}</option>
+            {{ end }}
+        </select>
+        {{ if .SelectedMonth }}
+        <a href="/admin/dashboard" style="white-space:nowrap;font-size:13px;color:#dc2626;text-decoration:none;font-weight:600;">✕ Clear</a>
+        {{ end }}
+    </div>
+</form>
+
+<div class="chart-grid">
+    <div class="card">
+        <h3>Total Plots per Estate</h3>
+        <div class="chart-wrap"><canvas id="totalChart"></canvas></div>
+    </div>
+    <div class="card">
+        <h3>Available Plots per Estate</h3>
+        <div class="chart-wrap"><canvas id="availableChart"></canvas></div>
+    </div>
+    <div class="card">
+        <h3>{{ if .SelectedMonth }}Bookings — {{ .SelectedMonth }}{{ else }}Booked Plots per Estate{{ end }}</h3>
+        <div class="chart-wrap"><canvas id="bookedChart"></canvas></div>
+    </div>
+    <div class="card">
+        <h3>{{ if .SelectedMonth }}SA Signed — {{ .SelectedMonth }}{{ else }}SA Signed per Estate{{ end }}</h3>
+        <div class="chart-wrap"><canvas id="saSignedChart"></canvas></div>
+    </div>
+    <div class="card">
+        <h3>{{ if .SelectedMonth }}Fully Paid — {{ .SelectedMonth }}{{ else }}Fully Paid per Estate{{ end }}</h3>
+        <div class="chart-wrap"><canvas id="soldChart"></canvas></div>
+    </div>
+    <div class="card chart-full">
+        <h3>Top Sales Agents by Value — SA Signed (KES){{ if .SelectedMonth }} — {{ .SelectedMonth }}{{ end }}</h3>
+        <div class="chart-wrap"><canvas id="agentsChart"></canvas></div>
+    </div>
+    <div class="card chart-full">
+        <h3>Plots Fully Sold per Agent{{ if .SelectedMonth }} — {{ .SelectedMonth }}{{ end }}</h3>
+        <div class="chart-wrap"><canvas id="soldAgentsChart"></canvas></div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+(function () {
+    var d = {{ .ChartData }};
+    if (!d) return;
+    var opts = {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: { y: { beginAtZero: true } }
+    };
+    function make(id, labels, data, label, color) {
+        var ctx = document.getElementById(id);
+        if (!ctx) return;
+        new Chart(ctx, {
+            type: 'bar',
+            data: { labels: labels, datasets: [{ label: label, data: data, backgroundColor: color }] },
+            options: opts
+        });
+    }
+    make('totalChart',     d.estates, d.totalPlots,     'Total Plots',     'rgba(52,152,219,0.6)');
+    make('availableChart', d.estates, d.availablePlots, 'Available Plots', 'rgba(46,204,113,0.6)');
+    make('bookedChart',    d.estates, d.bookedPlots,    'Booked Plots',    'rgba(241,196,15,0.6)');
+    make('saSignedChart',  d.estates, d.saSignedPlots,  'SA Signed',       'rgba(220,38,38,0.6)');
+    make('soldChart',      d.estates, d.soldPlots,      'Fully Paid',      'rgba(124,58,237,0.6)');
+
+    // Agents chart — value-based with KES formatting (SA Signed)
+    var agentsCtx = document.getElementById('agentsChart');
+    if (agentsCtx) {
+        new Chart(agentsCtx, {
+            type: 'bar',
+            data: {
+                labels: d.agents,
+                datasets: [{
+                    label: 'Total Sales Value (KES)',
+                    data: d.agentValues,
+                    backgroundColor: 'rgba(155,89,182,0.6)'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: function(value) {
+                                return 'KES ' + value.toLocaleString();
+                            }
+                        }
+                    }
+                },
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            label: function(ctx) {
+                                return 'KES ' + ctx.parsed.y.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0});
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // Sold per agent — count-based
+    var soldAgentsCtx = document.getElementById('soldAgentsChart');
+    if (soldAgentsCtx) {
+        new Chart(soldAgentsCtx, {
+            type: 'bar',
+            data: {
+                labels: d.soldAgents,
+                datasets: [{
+                    label: 'Plots Fully Sold',
+                    data: d.soldAgentCounts,
+                    backgroundColor: 'rgba(22,163,74,0.65)'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: { stepSize: 1 }
+                    }
+                },
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            label: function(ctx) {
+                                return ctx.parsed.y + ' plot' + (ctx.parsed.y !== 1 ? 's' : '') + ' sold';
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+})();
+</script>
+{{ end }}
+{{ template "admin_base" . }}

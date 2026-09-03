@@ -1,0 +1,142 @@
+{{ define "title" }}Staff Welfare – Expenses{{ end }}
+
+{{ define "content" }}
+<div style="padding:28px 32px 40px; max-width:1100px;">
+
+    {{ if .Success }}<div class="alert alert-success">{{ .Success }}</div>{{ end }}
+    {{ if .Error   }}<div class="alert alert-error">{{ .Error }}</div>{{ end }}
+
+    <div class="page-header">
+        <div>
+            <h1>Expenses & Withdrawals</h1>
+            <p>Track how welfare funds have been spent</p>
+        </div>
+        <button class="btn-primary" onclick="openModal('addExpenseModal')">+ Record Expense</button>
+    </div>
+
+    <!-- Summary cards -->
+    <div class="stat-grid">
+        <div class="stat-card">
+            <span class="stat-label">Total Contributions</span>
+            <span class="stat-value" style="color:#15803d;">KES {{ printf "%.0f" .TotalContributions }}</span>
+            <span class="stat-sub">All-time collections</span>
+        </div>
+        <div class="stat-card">
+            <span class="stat-label">Expenses / Withdrawals</span>
+            <span class="stat-value" style="color:#dc2626;">KES {{ printf "%.0f" .TotalExpenses }}</span>
+            <span class="stat-sub">Recorded withdrawals</span>
+        </div>
+        <div class="stat-card">
+            <span class="stat-label">Beneficiary Payouts</span>
+            <span class="stat-value" style="color:#b45309;">KES {{ printf "%.0f" .TotalBeneficiaryPayouts }}</span>
+            <span class="stat-sub">Completed benefit cases</span>
+        </div>
+        <div class="stat-card">
+            <span class="stat-label">Fund Balance</span>
+            <span class="stat-value" style="color:{{ if lt .Balance 0.0 }}#dc2626{{ else }}#15803d{{ end }};">
+                KES {{ printf "%.0f" .Balance }}
+            </span>
+            <span class="stat-sub">{{ if lt .Balance 0.0 }}Deficit{{ else }}Available{{ end }}</span>
+        </div>
+    </div>
+
+    <!-- Expenses table -->
+    <div style="background:#fff;border-radius:14px;box-shadow:0 2px 12px rgba(0,0,0,0.06);overflow:hidden;">
+        <div style="padding:18px 20px 14px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;">
+            <span style="font-size:15px;font-weight:700;color:#0f172a;">Expense Records</span>
+            <span style="font-size:13px;color:#64748b;">{{ if .Expenses }}{{ len .Expenses }} record{{ if gt (len .Expenses) 1 }}s{{ end }}{{ else }}No records{{ end }}</span>
+        </div>
+
+        {{ if .Expenses }}
+        <div style="overflow-x:auto;">
+            <table class="wf-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Purpose</th>
+                        <th>Beneficiary</th>
+                        <th>Amount</th>
+                        <th>Recorded By</th>
+                        <th>Notes</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                {{ range .Expenses }}
+                <tr>
+                    <td style="white-space:nowrap;color:#64748b;font-size:12.5px;">{{ .ExpenseDate }}</td>
+                    <td style="font-weight:600;max-width:220px;">{{ .Purpose }}</td>
+                    <td>{{ if .BeneficiaryName }}{{ .BeneficiaryName }}{{ else }}<span style="color:#cbd5e1;">—</span>{{ end }}</td>
+                    <td style="font-weight:700;color:#dc2626;white-space:nowrap;">KES {{ printf "%.0f" .Amount }}</td>
+                    <td style="color:#64748b;">{{ if .RecordedBy }}{{ .RecordedBy }}{{ else }}<span style="color:#cbd5e1;">—</span>{{ end }}</td>
+                    <td style="color:#64748b;max-width:180px;font-size:12.5px;">{{ if .Notes }}{{ .Notes }}{{ else }}<span style="color:#cbd5e1;">—</span>{{ end }}</td>
+                    <td>
+                        <form method="post" action="/welfare/expenses/{{ .ID }}/delete" style="margin:0" onsubmit="return confirm('Delete this expense record?');">
+                            <button class="btn-danger btn-sm">Delete</button>
+                        </form>
+                    </td>
+                </tr>
+                {{ end }}
+                </tbody>
+                <tfoot>
+                    <tr>
+                        <td colspan="3" style="font-weight:700;color:#0f172a;padding:12px 14px;background:#f8fafc;">Total</td>
+                        <td style="font-weight:800;color:#dc2626;padding:12px 14px;background:#f8fafc;white-space:nowrap;">KES {{ printf "%.0f" .TotalExpenses }}</td>
+                        <td colspan="3" style="background:#f8fafc;"></td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+        {{ else }}
+        <div style="text-align:center;padding:60px 20px;color:#94a3b8;">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:0.4;display:block;margin:0 auto 14px;">
+                <rect x="2" y="5" width="20" height="14" rx="2"/>
+                <path d="M2 10h20"/>
+            </svg>
+            <p style="font-size:14px;font-weight:600;">No expense records yet</p>
+            <p style="font-size:13px;">Click <strong>+ Record Expense</strong> to log a withdrawal.</p>
+        </div>
+        {{ end }}
+    </div>
+</div>
+
+<!-- Add Expense Modal -->
+<div class="wf-modal-overlay" id="addExpenseModal" onclick="if(event.target===this)closeModal('addExpenseModal')">
+    <div class="wf-modal">
+        <div class="wf-modal-title">
+            Record Expense / Withdrawal
+            <button class="wf-modal-close" onclick="closeModal('addExpenseModal')">✕</button>
+        </div>
+        <form action="/welfare/expenses/add" method="post">
+            <div class="wf-form-row">
+                <div class="wf-form-group">
+                    <label>Amount (KES) *</label>
+                    <input type="number" name="amount" placeholder="e.g. 5000" min="1" step="0.01" required>
+                </div>
+                <div class="wf-form-group">
+                    <label>Date *</label>
+                    <input type="date" name="expense_date" value="{{ .Today }}" required>
+                </div>
+            </div>
+            <div class="wf-form-row">
+                <div class="wf-form-group" style="flex:2">
+                    <label>Purpose *</label>
+                    <input type="text" name="purpose" placeholder="e.g. Medical assistance for John Kamau" required>
+                </div>
+            </div>
+            {{/* Beneficiary Name and Recorded By fields removed */}}
+            <div class="wf-form-row">
+                <div class="wf-form-group" style="flex:1">
+                    <label>Notes</label>
+                    <textarea name="notes" rows="2" placeholder="Optional additional details" style="resize:vertical;"></textarea>
+                </div>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;">
+                <button type="button" class="btn-ghost" onclick="closeModal('addExpenseModal')">Cancel</button>
+                <button type="submit" class="btn-primary">Record Expense</button>
+            </div>
+        </form>
+    </div>
+</div>
+{{ end }}
+{{ template "welfare_base" . }}

@@ -1,0 +1,23 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8080:8090"
+    volumes:
+      - uploads_data:/app/uploads
+      - /var/www/html/Marketers_portal/logs:/app/logs
+    environment:
+      - DB_HOST=host.docker.internal
+      - DB_USER=proproperty
+      - DB_PASS=Proproperty!2025
+      - DB_NAME=proproperty
+      - TZ=Africa/Nairobi
+      - UPLOADS_DIR=/app/uploads
+      - VIDATECH_TOKEN=eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJhdWQiOiI1IiwianRpIjoiOWRhMDNmZDlkNTc3NDk1NDgwZjI1ZGZjMzI0ZWQxMzNhYTFlZDNkOGZlZDY3ZWRhODQwM2ZmOTQ2YTVhNDk5OThkNTFlMDQzYjQ3ZDUzNTciLCJpYXQiOjE3NjkxNjQwMDcsIm5iZiI6MTc2OTE2NDAwNywiZXhwIjo0OTI0ODM3NjA3LCJzdWIiOiI4NyIsInNjb3BlcyI6W119.nTwn-AnYfdkN6Q3aJvrn8cb09LxSItpJH6Q435PpgQkZmsZWWmRRLlaTAxOcodj0TuV-iiqHTtyqzmPujswvgLWcpNb-r5L-gYiHJDJiX6jAxyESPlNPHsXlY5cRt_4BbmWS9CUmANzkbYiG-J0JhDkGWdTt3d1xknI81kNEbIPBCu7W_MhDw8yi4lsj7PNRnSOSCZ1QWR7HJv0Pa2u5VV8P0DaSVpMnTfK5fRIUDTFTw3RGTcP2X7hXC6lfmBs84gnEpGv4eeo0fD7DXu2W7Nx1P9JVscB4m-azCsh0hLX4VyZhpkpWXjkDI1izWG2zNKJysgoC-0YhGYbyoyLJz8aFUnnfVC7kZ6-4A6nJr-LGdxlndphSYtk7Fp-HgwT1eXHiZIFB2kdS7fLOdcazZyaRri_56PVHzA8OzM_2JkOv1vKRQ8Xx0EUSCZtlaFQiDq7j_EnO_TCluDEKixLfzTX5DnckCoTzZHS5JHJ-GPMTwW4PxkOPy9ISCYs_jVMoev0V7Cn8d9wQwJf4jkq8aVSPRTz6CuVn0PmCR7sc2rWtvTmLWjwgr1Do7Gh7jEs3hg_hnoMngi5cs69-baxQ7PuXaUYc-Odj0Yt9DSI47MqMlDF-iLUParYO46n_ashjZr7q6OIlwQ5BvByJNQ-M6CHCIo6_OucA6o9ASlhO3Ck
+      - VIDATECH_SENDER=Pro_Propety
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # lets container reach host MySQL
+
+volumes:
+  uploads_data:

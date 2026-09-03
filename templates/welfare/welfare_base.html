@@ -1,0 +1,206 @@
+{{ define "welfare_base" }}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ block "title" . }}Staff Welfare{{ end }}</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <link rel="stylesheet" href="/static/css/admin.css">
+    <style>
+        :root {
+            --welfare-primary: #0369a1;
+            --welfare-dark:    #075985;
+            --welfare-sidebar: #0c4a6e;
+            --welfare-hover:   #075985;
+            --welfare-light:   #e0f2fe;
+        }
+        .sidebar { background: var(--welfare-sidebar) !important; }
+        .sidebar .logo-container h2 { color: #fff; }
+        .sidebar ul li a { color: #7dd3fc; }
+        .sidebar ul li a:hover,
+        .sidebar ul li a.active {
+            background: var(--welfare-hover) !important;
+            color: #fff !important;
+        }
+        .sidebar-back-link {
+            display: flex; align-items: center; gap: 7px;
+            padding: 8px 12px; border-radius: 8px;
+            font-size: 13px; color: #7dd3fc;
+            margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.2);
+            text-decoration: none; transition: background 0.15s;
+        }
+        .sidebar-back-link:hover { background: var(--welfare-hover); color: #fff; }
+        .sidebar-module-tag {
+            font-size: 10px; font-weight: 700; letter-spacing: 0.8px;
+            text-transform: uppercase; color: #7dd3fc; margin-bottom: 6px;
+            display: block; padding: 0 12px;
+        }
+        .sidebar-logout-btn {
+            width: 100%; text-align: left; background: none;
+            border: 1px solid rgba(255,255,255,0.2); color: #7dd3fc;
+            padding: 8px 14px; border-radius: 8px; cursor: pointer;
+            font-size: 13px; transition: background 0.15s;
+        }
+        .sidebar-logout-btn:hover { background: var(--welfare-hover); color: #fff; }
+
+        .welfare-badge {
+            display: inline-flex; align-items: center; justify-content: center;
+            font-size: 10px; font-weight: 700; padding: 2px 8px;
+            border-radius: 20px; letter-spacing: 0.3px;
+        }
+        .badge-paid    { background: #dcfce7; color: #166534; }
+        .badge-pending { background: #fef9c3; color: #854d0e; }
+        .badge-active  { background: #dcfce7; color: #166534; }
+        .badge-inactive{ background: #f1f5f9; color: #64748b; }
+        .badge-approved   { background: #dbeafe; color: #1d4ed8; }
+        .badge-completed  { background: #f0fdf4; color: #15803d; }
+
+        .stat-card {
+            background: #fff; border-radius: 14px; padding: 20px 24px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+            display: flex; flex-direction: column; gap: 4px;
+        }
+        .stat-card .stat-label { font-size: 12px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
+        .stat-card .stat-value { font-size: 24px; font-weight: 800; color: #0f172a; }
+        .stat-card .stat-sub   { font-size: 12px; color: #94a3b8; }
+
+        .wf-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+        .wf-table th { background: #f8fafc; color: #64748b; font-weight: 700; font-size: 11px;
+            text-transform: uppercase; letter-spacing: 0.5px; padding: 10px 14px; border-bottom: 2px solid #e2e8f0; }
+        .wf-table td { padding: 11px 14px; border-bottom: 1px solid #f1f5f9; color: #1e293b; vertical-align: middle; }
+        .wf-table tbody tr:hover { background: #fafafa; }
+
+        .btn-primary {
+            background: var(--welfare-primary); color: #fff;
+            border: none; padding: 8px 18px; border-radius: 8px;
+            font-size: 13px; font-weight: 600; cursor: pointer;
+            transition: background 0.15s; text-decoration: none; display: inline-block;
+        }
+        .btn-primary:hover { background: var(--welfare-dark); color: #fff; }
+        .btn-ghost {
+            background: #f1f5f9; color: #475569;
+            border: none; padding: 7px 14px; border-radius: 8px;
+            font-size: 13px; font-weight: 600; cursor: pointer;
+            transition: background 0.15s; text-decoration: none; display: inline-block;
+        }
+        .btn-ghost:hover { background: #e2e8f0; }
+        .btn-danger {
+            background: #fef2f2; color: #dc2626;
+            border: none; padding: 6px 12px; border-radius: 7px;
+            font-size: 12px; font-weight: 600; cursor: pointer;
+            transition: background 0.15s;
+        }
+        .btn-danger:hover { background: #fee2e2; }
+        .btn-sm {
+            padding: 5px 11px !important; font-size: 12px !important; border-radius: 6px !important;
+        }
+        .btn-approve {
+            background: #dbeafe; color: #1d4ed8;
+            border: none; padding: 6px 12px; border-radius: 7px;
+            font-size: 12px; font-weight: 600; cursor: pointer;
+        }
+        .btn-approve:hover { background: #bfdbfe; }
+        .btn-complete {
+            background: #dcfce7; color: #15803d;
+            border: none; padding: 6px 12px; border-radius: 7px;
+            font-size: 12px; font-weight: 600; cursor: pointer;
+        }
+        .btn-complete:hover { background: #bbf7d0; }
+
+        .wf-form-row { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 14px; }
+        .wf-form-group { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 160px; }
+        .wf-form-group label { font-size: 12px; font-weight: 600; color: #475569; }
+        .wf-form-group input,
+        .wf-form-group select,
+        .wf-form-group textarea {
+            padding: 8px 11px; border: 1px solid #e2e8f0; border-radius: 7px;
+            font-size: 13px; color: #1e293b; width: 100%; box-sizing: border-box;
+            transition: border-color 0.15s;
+        }
+        .wf-form-group input:focus,
+        .wf-form-group select:focus,
+        .wf-form-group textarea:focus {
+            border-color: var(--welfare-primary); outline: none;
+        }
+
+        .wf-modal-overlay {
+            display: none; position: fixed; inset: 0;
+            background: rgba(0,0,0,0.4); z-index: 1000;
+            align-items: center; justify-content: center;
+        }
+        .wf-modal-overlay.open { display: flex; }
+        .wf-modal {
+            background: #fff; border-radius: 16px; padding: 28px 28px 20px;
+            max-width: 520px; width: 95%; max-height: 90vh; overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+        }
+        .wf-modal-title {
+            font-size: 16px; font-weight: 800; color: #0f172a;
+            margin: 0 0 20px; display: flex; justify-content: space-between; align-items: center;
+        }
+        .wf-modal-close {
+            background: none; border: none; cursor: pointer;
+            color: #94a3b8; font-size: 20px; line-height: 1; padding: 0;
+        }
+        .wf-modal-close:hover { color: #475569; }
+
+        .alert {
+            padding: 11px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; margin-bottom: 16px;
+        }
+        .alert-success { background: #dcfce7; color: #15803d; }
+        .alert-error   { background: #fee2e2; color: #dc2626; }
+
+        .page-header {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 24px; flex-wrap: wrap; gap: 12px;
+        }
+        .page-header h1 { font-size: 20px; font-weight: 800; color: #0f172a; margin: 0; }
+        .page-header p  { font-size: 13px; color: #64748b; margin: 4px 0 0; }
+
+        .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 28px; }
+    </style>
+</head>
+<body>
+
+<button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('sidebar--open')">☰ Menu</button>
+
+<div class="sidebar">
+    <div class="logo-container">
+        <img src="/static/img/logo.png" alt="Pro-Property Logo" class="logo" onerror="this.style.display='none'">
+        <h2>Staff Welfare</h2>
+    </div>
+    <a href="/hub" class="sidebar-back-link">&#8592; Back to Hub</a>
+    <span class="sidebar-module-tag">Welfare</span>
+    <ul>
+        <li><a href="/welfare/members"       {{ if eq .Active "members"             }}class="active"{{ end }}>Members</a></li>
+        <li><a href="/welfare/expenses"      {{ if eq .Active "expenses"            }}class="active"{{ end }}>Expenses</a></li>
+        <li><a href="/welfare/beneficiaries" {{ if eq .Active "beneficiaries"       }}class="active"{{ end }}>Claims</a></li>
+        {{ if .IsSystemAdmin }}
+        <li><a href="/welfare/permissions"   {{ if eq .Active "welfare-permissions" }}class="active"{{ end }}>Permissions</a></li>
+        {{ end }}
+    </ul>
+    <div style="padding:8px 12px; margin-top:auto;">
+        <form action="/logout" method="post" style="margin:0">
+            <button type="submit" class="sidebar-logout-btn">Logout</button>
+        </form>
+    </div>
+</div>
+
+<div class="main">
+    {{ block "content" . }}{{ end }}
+</div>
+
+<script>
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        document.querySelector('.sidebar').classList.remove('sidebar--open');
+        document.querySelectorAll('.wf-modal-overlay').forEach(function(m){ m.classList.remove('open'); });
+    }
+});
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+</script>
+
+</body>
+</html>
+{{ end }}

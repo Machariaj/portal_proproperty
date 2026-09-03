@@ -1,0 +1,81 @@
+{{ define "agent_base" }}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>{{ block "title" . }}Pro-Property{{ end }}</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <link rel="stylesheet" href="/static/css/admin.css">
+    <style>
+        .sidebar-back-link {
+            display: block;
+            color: #94a3b8 !important;
+            text-decoration: none;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 13px;
+            margin-bottom: 8px;
+            border: 1px solid #334155;
+            background: none !important;
+            transition: background 0.15s, color 0.15s;
+        }
+        .sidebar-back-link:hover { background: #334155 !important; color: #fff !important; }
+    </style>
+</head>
+
+<body>
+
+    <button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('sidebar--open')">☰
+        Menu</button>
+
+    <div class="sidebar">
+        <div class="logo-container">
+            <img src="/static/img/logo.png" alt="Pro-Property Logo" class="logo" onerror="this.style.display='none'">
+            <h2>Pro-Property</h2>
+        </div>
+        <a href="/hub" class="sidebar-back-link">&#8592; Back to Hub</a>
+        <ul>
+            <li><a href="/dashboard" {{ if eq .Active "dashboard" }}class="active" {{ end }}>Dashboard</a></li>
+            <li><a href="/agent/estates" {{ if eq .Active "estates" }}class="active" {{ end }}>Estates</a></li>
+            <li>
+                <a href="/agent/cart" {{ if eq .Active "cart" }}class="active" {{ end }} style="display:flex;align-items:center;justify-content:space-between;">
+                    <span>🛒 My Cart</span>
+                    <span id="cart-badge" style="display:none;background:#ef4444;color:#fff;border-radius:999px;font-size:11px;font-weight:700;padding:1px 7px;min-width:20px;text-align:center;"></span>
+                </a>
+            </li>
+            <li><a href="/agent/bookings" {{ if eq .Active "bookings" }}class="active" {{ end }}>My Booked Plots</a></li>
+            <li><a href="/agent/sales" {{ if eq .Active "sales" }}class="active" {{ end }}>My Sold Plots</a></li>
+            {{ if .CanSeePrivateEstates }}<li><a href="/agent/private-estates" {{ if eq .Active "private-estates" }}class="active" {{ end }}>🔒 Private Estates</a></li>{{ end }}
+            <li>
+                <form action="/logout" method="post" style="margin:0">
+                    <button type="submit" class="sidebar-logout-btn">Logout</button>
+                </form>
+            </li>
+        </ul>
+    </div>
+
+    <div class="main">
+        {{ block "content" . }}{{ end }}
+    </div>
+
+    <script>
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') document.querySelector('.sidebar').classList.remove('sidebar--open');
+        });
+        var PPM_CART_KEY = 'ppm_cart';
+        function ppmGetCart() { try { return JSON.parse(localStorage.getItem(PPM_CART_KEY) || '[]'); } catch(e) { return []; } }
+        function ppmSaveCart(c) { localStorage.setItem(PPM_CART_KEY, JSON.stringify(c)); }
+        function updateCartBadge() {
+            var n = ppmGetCart().length;
+            var b = document.getElementById('cart-badge');
+            if (!b) return;
+            if (n > 0) { b.textContent = n; b.style.display = 'inline-block'; }
+            else { b.style.display = 'none'; }
+        }
+        updateCartBadge();
+    </script>
+</body>
+
+</html>
+{{ end }}

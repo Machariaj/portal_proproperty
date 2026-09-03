@@ -1,0 +1,149 @@
+{{ define "title" }}{{ .Title }} - Pro-Property{{ end }}
+{{ define "content" }}
+<style>
+    .ppd-card { border:1px solid #e5e7eb; border-radius:10px; padding:14px 16px; background:#fafafa; margin-bottom:14px; }
+    .ppd-card.done { border-color:#86efac; background:#f0fdf4; }
+    .ppd-h { font-size:13px; font-weight:700; color:#1e3a5f; margin-bottom:8px; }
+    .ppd-chips { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
+    .ppd-chip { font-size:11px; color:#2563eb; text-decoration:none; background:#fff; border:1px solid #bfdbfe; padding:2px 8px; border-radius:5px; max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .ppd-meta { font-size:11px; color:#6b7280; margin-top:4px; }
+    .ppd-up { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .ppd-up input[type=file] { font-size:12px; flex:1; min-width:0; }
+    .ppd-up button { background:#1e3a5f; color:#fff; border:none; padding:8px 18px; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; white-space:nowrap; }
+    .ppd-up button:disabled { background:#94a3b8; cursor:progress; }
+    .ppd-lock { font-size:12px; color:#9ca3af; }
+    .ppd-steps { display:flex; gap:6px; flex-wrap:wrap; margin:4px 0 18px; }
+    .ppd-step { font-size:11px; font-weight:700; padding:3px 10px; border-radius:999px; background:#f1f5f9; color:#94a3b8; }
+    .ppd-step.on { background:#dbeafe; color:#1e40af; }
+    .ppd-step.ok { background:#dcfce7; color:#166534; }
+</style>
+
+<div class="top-bar">
+    <h1>Documents — {{ .D.DealName }}</h1>
+    <a href="{{ .BackURL }}" class="edit-btn" style="background:#6b7280;">&larr; Back to list</a>
+</div>
+
+{{ if .OkStep }}
+<div style="background:#dcfce7;border:1px solid #86efac;color:#166534;padding:10px 16px;border-radius:8px;margin-bottom:16px;font-size:13px;font-weight:600;">
+    &#10003;
+    {{ if eq .OkStep "consent" }}Approved Letter of Consent{{ else if eq .OkStep "transfer" }}Signed Transfer Forms{{ else if eq .OkStep "title" }}Title Deed{{ else }}Document{{ end }}
+    uploaded — saved here and pushed to the Zoho CRM deal.
+</div>
+{{ end }}
+{{ if .ErrLocked }}
+<div style="background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;padding:10px 16px;border-radius:8px;margin-bottom:16px;font-size:13px;font-weight:600;">
+    That document can't be uploaded yet — the deal must be 100% paid and the previous document uploaded first.
+</div>
+{{ end }}
+
+<div class="card" style="max-width:760px;">
+
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;margin-bottom:16px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;">
+            <div><span style="color:#6b7280;font-weight:600;">Client:</span> {{ .D.DealName }}</div>
+            <div><span style="color:#6b7280;font-weight:600;">Phone:</span> {{ .D.Phone }}</div>
+            <div><span style="color:#6b7280;font-weight:600;">Estate:</span> {{ .D.Estate }}</div>
+            <div><span style="color:#6b7280;font-weight:600;">Plot:</span> {{ .D.Plot }}</div>
+            <div><span style="color:#6b7280;font-weight:600;">Plan:</span> {{ if .D.IsThreeMonth }}3-Month{{ else }}{{ .D.PaymentPlan }}{{ end }}</div>
+            <div><span style="color:#6b7280;font-weight:600;">Paid:</span> <strong>{{ .D.PercentagePaid }}%</strong></div>
+            <div style="grid-column:1/-1;">
+                <span style="color:#6b7280;font-weight:600;">Matched plot:</span>
+                {{ if .MatchedPlot }}{{ .PlotEstate }} &mdash; Plot {{ .PlotNumber }} <em>({{ .PlotStatus }})</em>{{ else }}<span style="color:#b45309;">no matching signed plot found — completion will need the manual Mark Sold page</span>{{ end }}
+            </div>
+        </div>
+    </div>
+
+    <div class="ppd-steps">
+        <span class="ppd-step {{ if .D.ConsentFile }}ok{{ else }}on{{ end }}">1. Consent</span>
+        <span class="ppd-step {{ if .D.TransferFile }}ok{{ else if .D.CanTransfer }}on{{ end }}">2. Transfer Forms</span>
+        <span class="ppd-step {{ if .D.TitleFile }}ok{{ else if .D.CanTitle }}on{{ end }}">3. Title Deed</span>
+        <span class="ppd-step {{ if .D.SoldAt }}ok{{ end }}">Sold</span>
+    </div>
+
+    {{ if .D.SoldAt }}
+    <div style="background:#dcfce7;border:1px solid #86efac;color:#166534;padding:10px 14px;border-radius:8px;margin-bottom:16px;font-size:13px;">
+        <strong>Fully paid / Sold</strong> — recorded {{ .D.SoldAt }}.
+        {{ if .D.SoldNote }}<div style="color:#b45309;margin-top:4px;">{{ .D.SoldNote }}</div>{{ end }}
+    </div>
+    {{ end }}
+
+    {{ if not .CanConvey }}
+    <p style="font-size:12px;color:#b45309;">You don't have permission to upload these documents (needs <em>Conveyancing: Upload Consent/Transfer/Title</em> and <em>Signed &rarr; Sold</em>).</p>
+    {{ end }}
+
+    <!-- 1. Consent -->
+    <div class="ppd-card {{ if .D.ConsentFile }}done{{ end }}">
+        <div class="ppd-h">{{ if .D.ConsentFile }}&#10003;{{ else }}&#9312;{{ end }} Approved Letter of Consent</div>
+        {{ if .D.ConsentFiles }}
+        <div class="ppd-chips">{{ range .D.ConsentFiles }}<a href="/uploads/{{ . }}" target="_blank" class="ppd-chip" title="{{ . }}">&#128196; {{ . }}</a>{{ end }}</div>
+        {{ if .D.ConsentBy }}<div class="ppd-meta">Uploaded by {{ .D.ConsentBy }} &middot; {{ .D.ConsentAt }}</div>{{ end }}
+        {{ end }}
+        {{ if .CanConvey }}
+        <form method="POST" enctype="multipart/form-data" action="/admin/payment-plans/deal/{{ .D.DealID }}/upload-consent" class="ppd-up" onsubmit="return ppUp(this)" style="margin-top:8px;">
+            <input type="hidden" name="from" value="{{ .From }}">
+            <input type="file" name="docfile" accept="image/*,.pdf" multiple required>
+            <button type="submit">&#8593; {{ if .D.ConsentFile }}Add more{{ else }}Upload &amp; save{{ end }}</button>
+        </form>
+        {{ end }}
+    </div>
+
+    <!-- 2. Transfer Forms -->
+    <div class="ppd-card {{ if .D.TransferFile }}done{{ end }}">
+        <div class="ppd-h">{{ if .D.TransferFile }}&#10003;{{ else }}&#9313;{{ end }} Signed Transfer Forms</div>
+        {{ if .D.TransferFiles }}
+        <div class="ppd-chips">{{ range .D.TransferFiles }}<a href="/uploads/{{ . }}" target="_blank" class="ppd-chip" title="{{ . }}">&#128196; {{ . }}</a>{{ end }}</div>
+        {{ if .D.TransferBy }}<div class="ppd-meta">Uploaded by {{ .D.TransferBy }} &middot; {{ .D.TransferAt }}</div>{{ end }}
+        {{ end }}
+        {{ if .CanConvey }}
+            {{ if .D.CanTransfer }}
+            <form method="POST" enctype="multipart/form-data" action="/admin/payment-plans/deal/{{ .D.DealID }}/upload-transfer" class="ppd-up" onsubmit="return ppUp(this)" style="margin-top:8px;">
+                <input type="hidden" name="from" value="{{ .From }}">
+                <input type="file" name="docfile" accept="image/*,.pdf" multiple required>
+                <button type="submit">&#8593; {{ if .D.TransferFile }}Add more{{ else }}Upload &amp; save{{ end }}</button>
+            </form>
+            {{ else }}
+            <div class="ppd-lock">&#128274; Unlocks once the deal is 100% paid and Consent is uploaded (currently {{ .D.PercentagePaid }}% paid).</div>
+            {{ end }}
+        {{ end }}
+    </div>
+
+    <!-- 3. Title Deed -->
+    <div class="ppd-card {{ if .D.TitleFile }}done{{ end }}">
+        <div class="ppd-h">{{ if .D.TitleFile }}&#10003;{{ else }}&#9314;{{ end }} Title Deed</div>
+        {{ if .D.TitleFiles }}
+        <div class="ppd-chips">{{ range .D.TitleFiles }}<a href="/uploads/{{ . }}" target="_blank" class="ppd-chip" title="{{ . }}">&#128196; {{ . }}</a>{{ end }}</div>
+        {{ if .D.TitleBy }}<div class="ppd-meta">Uploaded by {{ .D.TitleBy }} &middot; {{ .D.TitleAt }}</div>{{ end }}
+        {{ end }}
+        {{ if .CanConvey }}
+            {{ if .D.CanTitle }}
+            <form method="POST" enctype="multipart/form-data" action="/admin/payment-plans/deal/{{ .D.DealID }}/upload-title" class="ppd-up" onsubmit="return ppUp(this)" style="margin-top:8px;">
+                <input type="hidden" name="from" value="{{ .From }}">
+                <input type="file" name="docfile" accept="image/*,.pdf" multiple required>
+                <button type="submit">&#8593; {{ if .D.TitleFile }}Add more{{ else }}Upload &amp; save{{ end }}</button>
+            </form>
+            {{ else }}
+            <div class="ppd-lock">&#128274; Unlocks once the deal is 100% paid and Transfer Forms are uploaded.</div>
+            {{ end }}
+        {{ end }}
+    </div>
+
+    <p style="font-size:12px;color:#94a3b8;margin-bottom:0;">
+        When all three are uploaded on a 100%-paid deal, the matched plot is switched to <strong>Sold</strong>
+        automatically (booking completed, sale recorded, documents pushed to Zoho, sold email sent).
+    </p>
+</div>
+
+<script>
+function ppUp(form) {
+    var b = form.querySelector('button[type=submit]');
+    if (b) {
+        setTimeout(function () {
+            b.disabled = true;
+            b.textContent = 'Uploading…';
+        }, 0);
+    }
+    return true;
+}
+</script>
+{{ end }}
+{{ template "admin_base" . }}

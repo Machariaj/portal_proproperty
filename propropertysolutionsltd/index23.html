@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Property Management</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    h2 { color: #2c3e50; }
+    .section { margin-bottom: 30px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+    th { background: #f4f4f4; }
+    button { padding: 6px 12px; margin: 4px; cursor: pointer; }
+    .available { background: #2ecc71; color: white; }
+    .booked { background: #f39c12; color: white; }
+    .sold { background: #e74c3c; color: white; }
+    .form-container { display: none; padding: 10px; border: 1px solid #ccc; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h1>🏡 Property Management Dashboard</h1>
+
+  <!-- All Plots -->
+  <div class="section">
+    <h2>All Plots</h2>
+    <button onclick="loadPlots()">Reload Plots</button>
+    <table id="plotsTable">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Estate</th>
+          <th>Plot Number</th>
+          <th>Status</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <!-- Bookings -->
+  <div class="section">
+    <h2>Active Bookings</h2>
+    <button onclick="loadBookings()">Reload Bookings</button>
+    <table id="bookingsTable">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Client</th>
+          <th>Phone</th>
+          <th>Email</th>
+          <th>Plot</th>
+          <th>Estate</th>
+          <th>Expiry</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <!-- Booking Form -->
+  <div id="bookingForm" class="form-container">
+    <h3>Book Plot</h3>
+    <form onsubmit="submitBooking(event)">
+      <input type="hidden" id="plotIdInput">
+      <label>Name: <input type="text" id="clientName" required></label><br><br>
+      <label>Phone: <input type="text" id="clientPhone" required></label><br><br>
+      <label>Email: <input type="email" id="clientEmail" required></label><br><br>
+      <button type="submit">Submit Booking</button>
+      <button type="button" onclick="closeForm()">Cancel</button>
+    </form>
+  </div>
+
+  <script>
+    const apiBase = "http://localhost/proproperty"; // 🔹 Adjust path to your PHP folder
+
+    async function loadPlots() {
+      const res = await fetch(apiBase + "/plots.php");
+      const plots = await res.json();
+      const tbody = document.querySelector("#plotsTable tbody");
+      tbody.innerHTML = "";
+      plots.forEach(p => {
+        let row = `<tr>
+          <td>${p.id}</td>
+          <td>${p.estate_name}</td>
+          <td>${p.plot_number}</td>
+          <td>${p.status}</td>
+          <td>`;
+        if (p.status === "available") {
+          row += `<button class="available" onclick="openForm(${p.id})">Book</button>`;
+        } else if (p.status === "booked") {
+          row += `<button class="sold" onclick="sellPlot(${p.id})">Mark Sold</button>`;
+        } else {
+          row += `-`;
+        }
+        row += `</td></tr>`;
+        tbody.innerHTML += row;
+      });
+    }
+
+    async function loadBookings() {
+      const res = await fetch(apiBase + "/bookings.php");
+      const bookings = await res.json();
+      const tbody = document.querySelector("#bookingsTable tbody");
+      tbody.innerHTML = "";
+      bookings.forEach(b => {
+        tbody.innerHTML += `<tr>
+          <td>${b.id}</td>
+          <td>${b.client_name}</td>
+          <td>${b.phone}</td>
+          <td>${b.email}</td>
+          <td>${b.plot_number}</td>
+          <td>${b.estate_name}</td>
+          <td>${b.expiry_date}</td>
+        </tr>`;
+      });
+    }
+
+    function openForm(plotId) {
+      document.getElementById("plotIdInput").value = plotId;
+      document.getElementById("bookingForm").style.display = "block";
+    }
+
+    function closeForm() {
+      document.getElementById("bookingForm").style.display = "none";
+    }
+
+    async function submitBooking(e) {
+      e.preventDefault();
+      const data = new FormData();
+      data.append("plot_id", document.getElementById("plotIdInput").value);
+      data.append("name", document.getElementById("clientName").value);
+      data.append("phone", document.getElementById("clientPhone").value);
+      data.append("email", document.getElementById("clientEmail").value);
+
+      const res = await fetch(apiBase + "/book.php", { method: "POST", body: data });
+      const result = await res.json();
+      alert("Booking successful! Expiry: " + result.expiry);
+      closeForm();
+      loadPlots();
+      loadBookings();
+    }
+
+    async function sellPlot(plotId) {
+      const data = new FormData();
+      data.append("plot_id", plotId);
+      const res = await fetch(apiBase + "/sell.php", { method: "POST", body: data });
+      const result = await res.json();
+      if (result.success) {
+        alert("Plot marked as SOLD!");
+        loadPlots();
+        loadBookings();
+      }
+    }
+
+    // Load data at startup
+    loadPlots();
+    loadBookings();
+  </script>
+</body>
+</html>

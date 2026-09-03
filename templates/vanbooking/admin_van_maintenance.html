@@ -1,0 +1,126 @@
+{{ define "title" }}Van Maintenance - Pro-Property{{ end }}
+{{ define "content" }}
+<div class="top-bar">
+    <h1>Maintenance Schedule</h1>
+    <a href="/admin/van-availability" class="edit-btn" style="background:#0369a1;">View Availability</a>
+    <a href="/admin/vans" class="edit-btn" style="background:#6b7280;">Manage Fleet</a>
+</div>
+
+<div style="display:grid;grid-template-columns:360px 1fr;gap:16px;align-items:start;">
+
+    <!-- Add form -->
+    <div class="card">
+        <h3 style="margin:0 0 14px;font-size:15px;color:#374151;">Schedule Maintenance</h3>
+        <form method="POST" action="/admin/van-maintenance">
+            <input type="hidden" name="action" value="add">
+            <div style="margin-bottom:10px;">
+                <label style="font-size:12px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">Van *</label>
+                <select name="van_id" required style="width:100%;">
+                    <option value="">-- Select van --</option>
+                    {{ range .Vans }}
+                    <option value="{{ .ID }}">{{ .PlateNumber }} — {{ .Name }}</option>
+                    {{ end }}
+                </select>
+            </div>
+            <div style="margin-bottom:10px;">
+                <label style="font-size:12px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">Unavailability Type *</label>
+                <select name="type" required style="width:100%;">
+                    <option value="maintenance">🔧 Maintenance</option>
+                    <option value="unavailable">🚫 Unavailable</option>
+                    <option value="reserved">📌 Reserved</option>
+                    <option value="other">⚠️ Other</option>
+                </select>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+                <div>
+                    <label style="font-size:12px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">From Date *</label>
+                    <input type="date" name="start_date" required style="width:100%;">
+                </div>
+                <div>
+                    <label style="font-size:12px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">To Date</label>
+                    <input type="date" name="end_date" style="width:100%;">
+                    <div style="font-size:11px;color:#94a3b8;margin-top:2px;">Leave blank for single day</div>
+                </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+                <div>
+                    <label style="font-size:12px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">Start Time</label>
+                    <input type="time" name="start_time" style="width:100%;font-size:13px;padding:6px 8px;">
+                    <div style="font-size:11px;color:#94a3b8;margin-top:2px;">Leave blank for full day</div>
+                </div>
+                <div>
+                    <label style="font-size:12px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">End Time</label>
+                    <input type="time" name="end_time" style="width:100%;font-size:13px;padding:6px 8px;">
+                </div>
+            </div>
+            <div style="margin-bottom:14px;">
+                <label style="font-size:12px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">Reason</label>
+                <input type="text" name="reason" placeholder="e.g. Engine servicing, Tyre change" style="width:100%;">
+            </div>
+            <button type="submit" style="background:#dc2626;width:100%;padding:9px;">Schedule Maintenance</button>
+        </form>
+    </div>
+
+    <!-- Existing windows -->
+    <div class="card">
+        <h3 style="margin:0 0 14px;font-size:15px;color:#374151;">Scheduled Windows</h3>
+        {{ if .Windows }}
+        <div class="table-responsive">
+            <table style="font-size:13px;">
+                <thead>
+                    <tr>
+                        <th>Van</th>
+                        <th>Type</th>
+                        <th>Date(s)</th>
+                        <th>Time</th>
+                        <th>Reason</th>
+                        <th>Set By</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{ range .Windows }}
+                    <tr>
+                        <td style="font-weight:600;">{{ .VanName }}</td>
+                        <td>
+                            {{ if eq .Type "unavailable" }}<span style="color:#dc2626;font-weight:600;">Unavailable</span>
+                            {{ else if eq .Type "reserved" }}<span style="color:#7c3aed;font-weight:600;">Reserved</span>
+                            {{ else if eq .Type "other" }}<span style="color:#d97706;font-weight:600;">Other</span>
+                            {{ else }}<span style="color:#b45309;font-weight:600;">Maintenance</span>{{ end }}
+                        </td>
+                        <td>
+                            {{ .StartDate }}
+                            {{ if ne .StartDate .EndDate }}
+                            <span style="color:#6b7280;"> → {{ .EndDate }}</span>
+                            {{ end }}
+                        </td>
+                        <td>
+                            {{ if .StartTime }}
+                            {{ .StartTime }}{{ if .EndTime }} – {{ .EndTime }}{{ end }}
+                            {{ else }}
+                            <span style="color:#dc2626;font-weight:600;">Full day</span>
+                            {{ end }}
+                        </td>
+                        <td style="color:#6b7280;">{{ .Reason }}</td>
+                        <td style="color:#94a3b8;font-size:12px;">{{ .CreatedBy }}</td>
+                        <td>
+                            <form method="POST" action="/admin/van-maintenance" style="margin:0;"
+                                  onsubmit="return confirm('Remove this maintenance window?');">
+                                <input type="hidden" name="action" value="delete">
+                                <input type="hidden" name="maint_id" value="{{ .ID }}">
+                                <button type="submit" class="delete-btn" style="font-size:12px;padding:4px 12px;">Remove</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {{ end }}
+                </tbody>
+            </table>
+        </div>
+        {{ else }}
+        <p style="color:#94a3b8;text-align:center;padding:2rem 0;">No maintenance windows scheduled.</p>
+        {{ end }}
+    </div>
+
+</div>
+{{ end }}
+{{ template "van_admin_base" . }}

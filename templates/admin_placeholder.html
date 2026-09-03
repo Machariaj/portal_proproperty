@@ -1,0 +1,10 @@
+{{ define "title" }}{{ .Title }} - Pro-Property{{ end }}
+{{ define "content" }}
+<div class="top-bar">
+    <h1>{{ .Title }}</h1>
+</div>
+<div class="card">
+    <p style="color: #6b7280; text-align: center; padding: 2rem 0;">{{ .Message }}</p>
+</div>
+{{ end }}
+{{ template "admin_base" . }}

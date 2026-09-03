@@ -1,0 +1,200 @@
+{{ define "title" }}{{ .EstateName }} – Plots - Pro-Property{{ end }}
+{{ define "content" }}
+<div class="top-bar">
+    <h1>🔒 {{ .EstateName }}</h1>
+    <div style="display:flex;gap:8px;">
+        {{ if .IsSA }}
+        <button onclick="document.getElementById('add-plots-modal').style.display='flex'"
+                style="background:#16a34a;color:#fff;border:none;padding:8px 14px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600;">
+            + Add Plots
+        </button>
+        <a href="/admin/private-estate/{{ .EstateID }}/access"
+           style="background:#7c3aed;color:#fff;padding:8px 14px;border-radius:6px;font-size:13px;text-decoration:none;">
+            Manage Access
+        </a>
+        {{ end }}
+        <a href="/admin/private-estates" class="edit-btn" style="background:#6b7280;">← Private Estates</a>
+    </div>
+</div>
+
+<!-- Status tabs -->
+<div class="estate-status-btns" style="margin-bottom:16px;">
+    <a href="/admin/private-estate/{{ .EstateID }}/plots?status=available"
+       class="estate-btn-available" style="text-decoration:none;{{ if eq .Status "available" }}box-shadow:0 0 0 3px #2563eb;{{ end }}">
+        Available <strong>{{ index .Counts "available" }}</strong>
+    </a>
+    <a href="/admin/private-estate/{{ .EstateID }}/plots?status=booked"
+       class="estate-btn-booked" style="text-decoration:none;{{ if eq .Status "booked" }}box-shadow:0 0 0 3px #ca8a04;{{ end }}">
+        Booked <strong>{{ index .Counts "booked" }}</strong>
+    </a>
+    <a href="/admin/private-estate/{{ .EstateID }}/plots?status=sa_signed"
+       class="estate-btn-signed" style="text-decoration:none;{{ if eq .Status "sa_signed" }}box-shadow:0 0 0 3px #1d4ed8;{{ end }}">
+        SA Signed <strong>{{ index .Counts "sa_signed" }}</strong>
+    </a>
+    <a href="/admin/private-estate/{{ .EstateID }}/plots?status=sold"
+       class="estate-btn-sold" style="text-decoration:none;{{ if eq .Status "sold" }}box-shadow:0 0 0 3px #16a34a;{{ end }}">
+        Sold <strong>{{ index .Counts "sold" }}</strong>
+    </a>
+</div>
+
+<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
+        <h3 style="margin:0;font-size:16px;color:var(--text);text-transform:capitalize;">
+            {{ .Status }} Plots
+            <span style="font-size:13px;color:var(--muted);font-weight:400;">({{ len .Plots }} total)</span>
+        </h3>
+        {{ if eq .Status "available" }}
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <button type="button" onclick="selectAll()" style="background:#475569;font-size:13px;padding:7px 12px;">☑ All</button>
+            <button type="button" onclick="clearSel()" style="background:#94a3b8;font-size:13px;padding:7px 12px;">☐ Clear</button>
+            <button type="button" onclick="addSelectedToCart()" style="background:#2563eb;font-size:13px;padding:7px 14px;">
+                🛒 Add to Cart (<span id="sel-count">0</span>)
+            </button>
+            <a href="/admin/cart" style="background:#16a34a;color:#fff;font-size:13px;padding:7px 14px;border-radius:6px;text-decoration:none;display:inline-flex;align-items:center;gap:5px;">
+                View Cart <span id="hdr-badge" style="background:#fff;color:#16a34a;border-radius:999px;font-size:11px;font-weight:700;padding:1px 6px;"></span>
+            </a>
+        </div>
+        {{ end }}
+    </div>
+
+    {{ if .Plots }}
+    <div class="table-responsive">
+        <table>
+            <thead>
+                <tr>
+                    {{ if eq .Status "available" }}<th style="width:36px;"><input type="checkbox" id="master-cb" onchange="toggleAll(this)"></th>{{ end }}
+                    <th>Plot Number</th>
+                    <th>Status</th>
+                    {{ if or (eq .Status "booked") (eq .Status "sa_signed") }}<th>Buyer</th><th>Agent</th><th>Date</th>{{ end }}
+                    {{ if eq .Status "available" }}<th>Action</th>{{ end }}
+                </tr>
+            </thead>
+            <tbody>
+                {{ range .Plots }}
+                <tr>
+                    {{ if eq $.Status "available" }}
+                    <td><input type="checkbox" class="plot-cb" value="{{ .ID }}" onchange="updateCount()"></td>
+                    {{ end }}
+                    <td><strong>{{ .Number }}</strong></td>
+                    <td>
+                        <span class="badge
+                            {{ if eq .Status "available" }}badge-available
+                            {{ else if eq .Status "booked" }}badge-booked
+                            {{ else if eq .Status "sa_signed" }}badge-signed
+                            {{ else if eq .Status "sold" }}badge-sold{{ end }}">{{ .Status }}</span>
+                    </td>
+                    {{ if or (eq $.Status "booked") (eq $.Status "sa_signed") }}
+                    <td>{{ .BuyerName }}<br><span style="font-size:11px;color:#6b7280;">{{ .BuyerPhone }}</span></td>
+                    <td>{{ .AgentName }}</td>
+                    <td style="font-size:12px;color:#6b7280;">{{ .DateBooked }}</td>
+                    {{ end }}
+                    {{ if eq $.Status "available" }}
+                    <td>
+                        <button type="button"
+                                onclick="addOneToCart('{{ .ID }}','{{ .Number }}','{{ $.EstateName }}','{{ $.EstateID }}')"
+                                class="add-btn" style="font-size:12px;padding:5px 12px;border:none;cursor:pointer;"
+                                id="cart-btn-{{ .ID }}">
+                            🛒 Add to Cart
+                        </button>
+                    </td>
+                    {{ end }}
+                </tr>
+                {{ end }}
+            </tbody>
+        </table>
+    </div>
+    {{ else }}
+    <p style="color:var(--muted);text-align:center;padding:32px 0;">No {{ .Status }} plots.</p>
+    {{ end }}
+</div>
+
+{{ if .IsSA }}
+<!-- Add Plots Modal -->
+<div id="add-plots-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;align-items:center;justify-content:center;">
+    <div style="background:#fff;border-radius:12px;padding:28px;max-width:400px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.18);">
+        <h3 style="margin:0 0 14px;font-size:16px;color:var(--text);">Add Plots</h3>
+        <form method="POST" action="/admin/private-estate/{{ .EstateID }}/add-plots">
+            <label for="plot_numbers">Plot Numbers (one per line)</label>
+            <textarea id="plot_numbers" name="plot_numbers" rows="8"
+                      placeholder="Plot 1&#10;Plot 2&#10;A-101&#10;..."
+                      style="font-family:monospace;font-size:13px;"></textarea>
+            <p style="font-size:12px;color:#6b7280;margin:4px 0 14px;">
+                Duplicates are skipped automatically.
+            </p>
+            <div style="display:flex;gap:10px;">
+                <button type="submit" class="add-btn">Add Plots</button>
+                <button type="button" onclick="document.getElementById('add-plots-modal').style.display='none'"
+                        style="background:#6b7280;color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;">
+                    Cancel
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{{ end }}
+
+<script>
+var ESTATE_ID = '{{ .EstateID }}';
+var ESTATE_NAME = '{{ .EstateName }}';
+
+function updateCount() {
+    var n = document.querySelectorAll('.plot-cb:checked').length;
+    document.getElementById('sel-count').textContent = n;
+}
+function selectAll() {
+    document.querySelectorAll('.plot-cb').forEach(function(cb){ cb.checked = true; });
+    updateCount();
+}
+function clearSel() {
+    document.querySelectorAll('.plot-cb').forEach(function(cb){ cb.checked = false; });
+    updateCount();
+}
+function toggleAll(master) {
+    document.querySelectorAll('.plot-cb').forEach(function(cb){ cb.checked = master.checked; });
+    updateCount();
+}
+function addOneToCart(plotId, plotNumber, estateName, estId) {
+    var cart = ppmGetCart();
+    if (cart.some(function(i){ return i.plotId === plotId; })) {
+        alert('Already in cart');
+        return;
+    }
+    cart.push({ plotId: plotId, plotNumber: plotNumber, estateName: estateName, estateId: estId });
+    ppmSaveCart(cart);
+    updateCartBadge();
+    var btn = document.getElementById('cart-btn-' + plotId);
+    if (btn) { btn.textContent = '✅ Added'; btn.disabled = true; }
+    updateBadge();
+}
+function addSelectedToCart() {
+    var cbs = document.querySelectorAll('.plot-cb:checked');
+    if (cbs.length === 0) { alert('Select at least one plot'); return; }
+    var cart = ppmGetCart();
+    cbs.forEach(function(cb) {
+        var plotId = cb.value;
+        var row = cb.closest('tr');
+        var plotNumber = row ? row.querySelector('td:nth-child(2)').textContent.trim() : plotId;
+        if (!cart.some(function(i){ return i.plotId === plotId; })) {
+            cart.push({ plotId: plotId, plotNumber: plotNumber, estateName: ESTATE_NAME, estateId: ESTATE_ID });
+        }
+    });
+    ppmSaveCart(cart);
+    updateCartBadge();
+    updateBadge();
+}
+function updateBadge() {
+    var n = ppmGetCart().length;
+    var el = document.getElementById('hdr-badge');
+    if (el) el.textContent = n > 0 ? n : '';
+}
+document.addEventListener('DOMContentLoaded', function() {
+    var cart = ppmGetCart();
+    cart.forEach(function(item) {
+        var btn = document.getElementById('cart-btn-' + item.plotId);
+        if (btn) { btn.textContent = '✅ Added'; btn.disabled = true; }
+    });
+    updateBadge();
+});
+</script>
+{{ end }}
+{{ template "admin_base" . }}

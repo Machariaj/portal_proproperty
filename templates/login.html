@@ -1,0 +1,59 @@
+{{ define "login" }}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>ProProperty Portal - Login</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+
+<body class="login-body">
+    <div class="login-wrapper">
+        <div class="login-card">
+            <div class="login-logo">
+                <img src="/static/img/logo.png" alt="ProProperty" class="login-logo-img">
+                <div class="login-title">
+                    <span class="logo-text">ProProperty</span>
+                    <span class="login-subtitle">Management Portal</span>
+                </div>
+            </div>
+            {{ if .Error }}
+            <div class="alert alert-error">{{ .Error }}</div>
+            {{ end }}
+            <form method="post" action="/login" class="login-form">
+                <div class="form-group">
+                    <label for="email">Email</label>
+                    <input id="email" name="email" type="email" required value="{{ .Email }}"
+                        placeholder="systemadmin@proproperty.co.ke">
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <div style="position:relative;">
+                        <input id="password" name="password" type="password" required placeholder="Password" style="padding-right:44px;width:100%;box-sizing:border-box;">
+                        <button type="button" id="toggle-pw" onclick="
+                            var p=document.getElementById('password');
+                            var show=p.type==='password';
+                            p.type=show?'text':'password';
+                            document.getElementById('eye-show').style.display=show?'none':'block';
+                            document.getElementById('eye-hide').style.display=show?'block':'none';"
+                            style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;padding:0;color:#a0aec0;line-height:0;">
+                            <svg id="eye-show" xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.477 0 8.268 2.943 9.542 7-1.274 4.057-5.065 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                            </svg>
+                            <svg id="eye-hide" xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="display:none;">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.477 0-8.268-2.943-9.542-7a9.97 9.97 0 012.563-4.082M6.343 6.343A9.96 9.96 0 0112 5c4.477 0 8.268 2.943 9.542 7a9.97 9.97 0 01-1.685 2.9M6.343 6.343L3 3m3.343 3.343l11.314 11.314M17.657 17.657L21 21"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <button type="submit" class="btn-primary full-width">Login</button>
+            </form>
+        </div>
+    </div>
+</body>
+
+</html>
+{{ end }}

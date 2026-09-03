@@ -1,0 +1,198 @@
+{{ define "title" }}{{ .Title }} - Pro-Property{{ end }}
+{{ define "content" }}
+<div class="top-bar">
+    <h1>{{ .Title }}</h1>
+    <a href="/admin/estate/{{ .EstateID }}/plots?status=available" class="edit-btn" style="background:#6b7280;">← Back to Plots</a>
+</div>
+
+<div class="card" style="max-width:720px;">
+    <p style="margin:0 0 4px;font-size:14px;color:var(--muted);">Estate: <strong>{{ .EstateName }}</strong></p>
+
+    <!-- Plots being booked -->
+    <div style="margin-bottom:18px;padding:12px 14px;background:#f8fafc;border-radius:8px;border:1px solid var(--border);">
+        <p style="margin:0 0 8px;font-size:13px;font-weight:600;color:var(--text);">
+            Plots to Book ({{ len .Plots }}):
+        </p>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;">
+            {{ range .Plots }}
+            <span style="background:#dbeafe;color:#1e40af;padding:3px 10px;border-radius:20px;font-size:13px;font-weight:600;">
+                Plot {{ .Number }}
+            </span>
+            {{ end }}
+        </div>
+    </div>
+
+    {{ if .FormError }}
+    <div style="background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;padding:10px 16px;border-radius:8px;margin-bottom:16px;font-size:13px;font-weight:600;">
+        {{ .FormError }}
+    </div>
+    {{ end }}
+
+    <form method="POST" enctype="multipart/form-data" autocomplete="off">
+        {{ range .Plots }}
+        <input type="hidden" name="plot_ids" value="{{ .ID }}">
+        {{ end }}
+        <input type="hidden" name="rebook_confirmed" id="rebook-confirmed-field" value="0">
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;">
+            <div>
+                <label for="buyer_name">Buyer Name <span style="color:#dc2626;">*</span></label>
+                <input type="text" id="buyer_name" name="buyer_name" placeholder="Full name" required>
+            </div>
+            <div>
+                <label for="buyer_phone">Buyer Phone <span style="color:#dc2626;">*</span></label>
+                <input type="tel" id="buyer_phone" name="buyer_phone" placeholder="+254 700 000 000" required>
+            </div>
+            <div>
+                <label for="buyer_email">Buyer Email</label>
+                <input type="email" id="buyer_email" name="buyer_email" placeholder="Optional">
+            </div>
+            <div>
+                <label for="deposit">Deposit (Ksh) <span style="color:#dc2626;">*</span></label>
+                <input type="number" id="deposit" name="deposit" min="1" step="0.01" placeholder="0.00" required>
+            </div>
+            <div>
+                <label for="payment_plan">Payment Plan <span style="color:#dc2626;">*</span></label>
+                <select id="payment_plan" name="payment_plan" required>
+                    <option value="">Select Payment Plan</option>
+                    <option value="3_months">3 Months Plan</option>
+                    <option value="6_months">6 Months Plan</option>
+                    <option value="12_months">12 Months Plan</option>
+                </select>
+            </div>
+            <div>
+                <label for="lead_source">Lead Source <span style="color:#dc2626;">*</span></label>
+                <select id="lead_source" name="lead_source" required>
+                    <option value="">Select Lead Source</option>
+                    <option value="Wapiverse">Wapiverse</option>
+                    <option value="Website">Website</option>
+                    <option value="Tiktok">Tiktok</option>
+                    <option value="Facebook">Facebook</option>
+                    <option value="Call Center">Call Center</option>
+                    <option value="Client referral">Client referral</option>
+                    <option value="Other">Other</option>
+                </select>
+            </div>
+            <div style="grid-column:1/-1;">
+                <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;font-size:12px;color:#92400e;">
+                    <strong>Payment reference is required to confirm booking.</strong>
+                    Other documents (ID, KRA, Passport) can be uploaded later.
+                    Email, Zoho CRM and Zoho Books will only be triggered once <em>all four</em> attachments are uploaded.
+                </div>
+            </div>
+            <div>
+                <label>Deposit Reference <span style="color:#dc2626;">*</span></label>
+                <input type="file" id="fi-deposit_ref" name="deposit_ref" multiple accept="image/*,.pdf" required style="display:none;">
+                <div id="fl-deposit_ref" style="min-height:4px;margin-bottom:4px;overflow:hidden;"></div>
+                <button type="button" onclick="ppAdd('deposit_ref')" style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;width:100%;">+ Add File(s)</button>
+            </div>
+            <div>
+                <label>ID Photo</label>
+                <input type="file" id="fi-id_photo" name="id_photo" multiple accept="image/*,.pdf" style="display:none;">
+                <div id="fl-id_photo" style="min-height:4px;margin-bottom:4px;overflow:hidden;"></div>
+                <button type="button" onclick="ppAdd('id_photo')" style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;width:100%;">+ Add File(s)</button>
+            </div>
+            <div>
+                <label>KRA</label>
+                <input type="file" id="fi-kra" name="kra" multiple accept="image/*,.pdf" style="display:none;">
+                <div id="fl-kra" style="min-height:4px;margin-bottom:4px;overflow:hidden;"></div>
+                <button type="button" onclick="ppAdd('kra')" style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;width:100%;">+ Add File(s)</button>
+            </div>
+            <div>
+                <label>Passport Photo</label>
+                <input type="file" id="fi-passport_photo" name="passport_photo" multiple accept="image/*,.pdf" style="display:none;">
+                <div id="fl-passport_photo" style="min-height:4px;margin-bottom:4px;overflow:hidden;"></div>
+                <button type="button" onclick="ppAdd('passport_photo')" style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;width:100%;">+ Add File(s)</button>
+            </div>
+        </div>
+        <div style="margin-top:16px;">
+            <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">Notes</label>
+            <textarea name="notes" rows="3" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea>
+        </div>
+        <div style="margin-top:20px;display:flex;gap:10px;">
+            <button type="submit" style="background:#2563eb;">✅ Confirm Sale</button>
+            <a href="/admin/estate/{{ .EstateID }}/plots?status=available"
+               class="edit-btn" style="background:#6b7280;text-decoration:none;">Cancel</a>
+        </div>
+    </form>
+</div>
+<script>
+(function() {
+    var stores = {};
+    function store(n) { return stores[n] || (stores[n] = []); }
+    function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+    function ppRebookConfirm(lines) {
+        return new Promise(function(resolve) {
+            var overlay = document.createElement('div');
+            overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+            overlay.innerHTML =
+                '<div style="background:#fff;border-radius:10px;max-width:420px;width:100%;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,.25);">' +
+                    '<div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:10px;">This plot was booked before</div>' +
+                    '<div style="font-size:13px;color:#374151;white-space:pre-line;margin-bottom:8px;line-height:1.5;">' + lines + '</div>' +
+                    '<div style="font-size:13px;color:#111827;font-weight:600;margin-bottom:18px;">Is the buyer booking now the SAME person as before?</div>' +
+                    '<div style="display:flex;gap:10px;justify-content:flex-end;">' +
+                        '<button type="button" id="pp-rebook-no" style="background:#f3f4f6;color:#374151;border:1px solid #d1d5db;padding:8px 16px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">No</button>' +
+                        '<button type="button" id="pp-rebook-yes" style="background:#2563eb;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">Yes</button>' +
+                    '</div>' +
+                '</div>';
+            document.body.appendChild(overlay);
+            overlay.querySelector('#pp-rebook-no').onclick = function() { document.body.removeChild(overlay); resolve(false); };
+            overlay.querySelector('#pp-rebook-yes').onclick = function() { document.body.removeChild(overlay); resolve(true); };
+        });
+    }
+    function sync(n) {
+        var dt = new DataTransfer();
+        store(n).forEach(function(f) { dt.items.add(f); });
+        document.getElementById('fi-' + n).files = dt.files;
+        var list = document.getElementById('fl-' + n);
+        list.innerHTML = '';
+        store(n).forEach(function(f, i) {
+            var d = document.createElement('div');
+            d.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:12px;color:#374151;padding:2px 0;overflow:hidden;min-width:0;';
+            d.innerHTML = '📄 <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(f.name) + '</span>'
+                + '<span style="color:#6b7280;flex-shrink:0;">(' + (f.size/1024).toFixed(0) + 'KB)</span>'
+                + '<button type="button" onclick="ppRm(\'' + n + '\',' + i + ')" style="background:#fee2e2;color:#b91c1c;border:none;border-radius:3px;padding:1px 5px;cursor:pointer;font-size:10px;font-weight:700;">✕</button>';
+            list.appendChild(d);
+        });
+    }
+    window.ppAdd = function(n) {
+        var p = document.createElement('input');
+        p.type = 'file'; p.multiple = true; p.accept = 'image/*,.pdf';
+        p.onchange = function() {
+            var a = store(n);
+            for (var i = 0; i < this.files.length; i++) a.push(this.files[i]);
+            stores[n] = a; sync(n);
+        };
+        p.click();
+    };
+    window.ppRm = function(n, i) { store(n).splice(i, 1); sync(n); };
+    document.querySelector('form').addEventListener('submit', function(e) {
+        e.preventDefault();
+        if (!store('deposit_ref').length) {
+            alert('Please add at least one Deposit Reference file.');
+            return;
+        }
+        var form = e.target;
+        var plotIds = Array.from(document.querySelectorAll('input[name="plot_ids"]')).map(function(i){ return i.value; }).join(',');
+        var buyerName = document.getElementById('buyer_name').value;
+        var buyerPhone = document.getElementById('buyer_phone').value;
+        fetch('/check-rebook-match?plot_ids=' + encodeURIComponent(plotIds) + '&buyer_name=' + encodeURIComponent(buyerName) + '&buyer_phone=' + encodeURIComponent(buyerPhone))
+            .then(function(r) { return r.json(); })
+            .then(function(matches) {
+                if (matches && matches.length) {
+                    var lines = matches.map(function(m) {
+                        return 'Plot ' + esc(m.plot_number) + ' (' + esc(m.estate_name) + ') — previously booked by ' + esc(m.previous_buyer_name);
+                    }).join('\n');
+                    return ppRebookConfirm(lines).then(function(isRebook) {
+                        document.getElementById('rebook-confirmed-field').value = isRebook ? '1' : '0';
+                        form.submit();
+                    });
+                }
+                form.submit();
+            })
+            .catch(function() { form.submit(); });
+    });
+})();
+</script>
+{{ end }}
+{{ template "admin_base" . }}

@@ -1,0 +1,178 @@
+{{ define "title" }}{{ .Title }} - Pro-Property{{ end }}
+{{ define "content" }}
+<div class="top-bar">
+    <h1>Mark Plot as Sold</h1>
+    <a href="/admin/signed-plots" class="edit-btn" style="background:#6b7280;">← Back to Signed Plots</a>
+</div>
+
+{{ if .ErrMsg }}
+<div style="background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;padding:10px 16px;border-radius:8px;margin-bottom:16px;font-size:13px;font-weight:600;">
+    ⚠ All three documents must be uploaded before marking as sold.
+</div>
+{{ end }}
+
+{{ if .SavedField }}
+<div style="background:#dcfce7;border:1px solid #86efac;color:#166534;padding:10px 16px;border-radius:8px;margin-bottom:16px;font-size:13px;font-weight:600;">
+    ✅ Document saved successfully.
+</div>
+{{ end }}
+
+<div class="card" style="max-width:720px;">
+
+    <!-- Plot / buyer summary -->
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;margin-bottom:24px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;">
+            <div><span style="color:#6b7280;font-weight:600;">Plot:</span> {{ .Info.PlotNumber }}</div>
+            <div><span style="color:#6b7280;font-weight:600;">Estate:</span> {{ .Info.EstateName }}</div>
+            <div><span style="color:#6b7280;font-weight:600;">Buyer:</span> {{ .Info.BuyerName }}</div>
+            <div><span style="color:#6b7280;font-weight:600;">Phone:</span> {{ .Info.BuyerPhone }}</div>
+            <div><span style="color:#6b7280;font-weight:600;">Email:</span> {{ if .Info.BuyerEmail }}{{ .Info.BuyerEmail }}{{ else }}—{{ end }}</div>
+            <div><span style="color:#6b7280;font-weight:600;">Agent:</span> {{ .Info.AgentName }}</div>
+        </div>
+    </div>
+
+    <p style="font-size:13px;color:#374151;margin:0 0 20px;">
+        Upload each document below. Once all three are saved the <strong>Mark as Sold</strong> button will become active.
+    </p>
+
+    <!-- Document upload cards -->
+    <div style="display:flex;flex-direction:column;gap:16px;margin-bottom:28px;">
+
+        <!-- Letter of Consent -->
+        <div style="border:1px solid {{ if .Info.LetterOfConsent }}#86efac{{ else }}#e5e7eb{{ end }};border-radius:10px;padding:14px 16px;background:{{ if .Info.LetterOfConsent }}#f0fdf4{{ else }}#fafafa{{ end }};">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <div style="font-size:13px;font-weight:700;color:#1e3a5f;">
+                    {{ if .Info.LetterOfConsent }}✅{{ else }}⬜{{ end }} Approved Letter of Consent
+                </div>
+                {{ if .Info.LetterOfConsentFiles }}
+                <span style="font-size:11px;color:#16a34a;font-weight:600;">{{ len .Info.LetterOfConsentFiles }} file(s) saved</span>
+                {{ end }}
+            </div>
+            {{ if .Info.LetterOfConsentFiles }}
+            <div style="border:1px solid #bfdbfe;border-radius:7px;background:#eff6ff;padding:8px 10px;margin-bottom:10px;display:flex;flex-wrap:wrap;gap:6px;">
+                {{ range .Info.LetterOfConsentFiles }}
+                <a href="/uploads/{{ . }}" target="_blank" style="font-size:11px;color:#2563eb;text-decoration:none;background:#fff;border:1px solid #bfdbfe;padding:2px 8px;border-radius:5px;display:inline-flex;align-items:center;gap:4px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ . }}">📄 {{ . }}</a>
+                {{ end }}
+            </div>
+            {{ end }}
+            <form method="POST" enctype="multipart/form-data" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <input type="hidden" name="action" value="upload_doc">
+                <input type="hidden" name="doc_field" value="letter_of_consent">
+                <input type="file" name="letter_of_consent" accept="image/*,.pdf" multiple
+                       onchange="showPick(this,'ploc')" style="font-size:12px;flex:1;min-width:0;">
+                <button type="submit" onclick="lockBtn(this)"
+                        style="background:#1e3a5f;color:#fff;border:none;padding:7px 16px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">
+                    ⬆ Save
+                </button>
+            </form>
+            <div id="ploc" style="font-size:11px;margin-top:4px;color:#6b7280;"></div>
+        </div>
+
+        <!-- Transfer Forms -->
+        <div style="border:1px solid {{ if .Info.TransferForms }}#86efac{{ else }}#e5e7eb{{ end }};border-radius:10px;padding:14px 16px;background:{{ if .Info.TransferForms }}#f0fdf4{{ else }}#fafafa{{ end }};">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <div style="font-size:13px;font-weight:700;color:#1e3a5f;">
+                    {{ if .Info.TransferForms }}✅{{ else }}⬜{{ end }} Signed Transfer Forms
+                </div>
+                {{ if .Info.TransferFormsFiles }}
+                <span style="font-size:11px;color:#16a34a;font-weight:600;">{{ len .Info.TransferFormsFiles }} file(s) saved</span>
+                {{ end }}
+            </div>
+            {{ if .Info.TransferFormsFiles }}
+            <div style="border:1px solid #bfdbfe;border-radius:7px;background:#eff6ff;padding:8px 10px;margin-bottom:10px;display:flex;flex-wrap:wrap;gap:6px;">
+                {{ range .Info.TransferFormsFiles }}
+                <a href="/uploads/{{ . }}" target="_blank" style="font-size:11px;color:#2563eb;text-decoration:none;background:#fff;border:1px solid #bfdbfe;padding:2px 8px;border-radius:5px;display:inline-flex;align-items:center;gap:4px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ . }}">📄 {{ . }}</a>
+                {{ end }}
+            </div>
+            {{ end }}
+            <form method="POST" enctype="multipart/form-data" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <input type="hidden" name="action" value="upload_doc">
+                <input type="hidden" name="doc_field" value="transfer_forms">
+                <input type="file" name="transfer_forms" accept="image/*,.pdf" multiple
+                       onchange="showPick(this,'ptf')" style="font-size:12px;flex:1;min-width:0;">
+                <button type="submit" onclick="lockBtn(this)"
+                        style="background:#1e3a5f;color:#fff;border:none;padding:7px 16px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">
+                    ⬆ Save
+                </button>
+            </form>
+            <div id="ptf" style="font-size:11px;margin-top:4px;color:#6b7280;"></div>
+        </div>
+
+        <!-- Title Deed -->
+        <div style="border:1px solid {{ if .Info.TitleDeed }}#86efac{{ else }}#e5e7eb{{ end }};border-radius:10px;padding:14px 16px;background:{{ if .Info.TitleDeed }}#f0fdf4{{ else }}#fafafa{{ end }};">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <div style="font-size:13px;font-weight:700;color:#1e3a5f;">
+                    {{ if .Info.TitleDeed }}✅{{ else }}⬜{{ end }} Title Deed
+                </div>
+                {{ if .Info.TitleDeedFiles }}
+                <span style="font-size:11px;color:#16a34a;font-weight:600;">{{ len .Info.TitleDeedFiles }} file(s) saved</span>
+                {{ end }}
+            </div>
+            {{ if .Info.TitleDeedFiles }}
+            <div style="border:1px solid #bfdbfe;border-radius:7px;background:#eff6ff;padding:8px 10px;margin-bottom:10px;display:flex;flex-wrap:wrap;gap:6px;">
+                {{ range .Info.TitleDeedFiles }}
+                <a href="/uploads/{{ . }}" target="_blank" style="font-size:11px;color:#2563eb;text-decoration:none;background:#fff;border:1px solid #bfdbfe;padding:2px 8px;border-radius:5px;display:inline-flex;align-items:center;gap:4px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ . }}">📄 {{ . }}</a>
+                {{ end }}
+            </div>
+            {{ end }}
+            <form method="POST" enctype="multipart/form-data" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <input type="hidden" name="action" value="upload_doc">
+                <input type="hidden" name="doc_field" value="title_deed">
+                <input type="file" name="title_deed" accept="image/*,.pdf" multiple
+                       onchange="showPick(this,'ptd')" style="font-size:12px;flex:1;min-width:0;">
+                <button type="submit" onclick="lockBtn(this)"
+                        style="background:#1e3a5f;color:#fff;border:none;padding:7px 16px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">
+                    ⬆ Save
+                </button>
+            </form>
+            <div id="ptd" style="font-size:11px;margin-top:4px;color:#6b7280;"></div>
+        </div>
+
+    </div>
+
+    <!-- Mark as Sold -->
+    <div style="border-top:1px solid #e5e7eb;padding-top:20px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+        {{ if .Info.AllDocsPresent }}
+        <form method="POST">
+            <input type="hidden" name="action" value="mark_sold">
+            <button type="submit" id="sold-btn"
+                    style="background:#dc2626;color:#fff;border:none;padding:11px 28px;border-radius:7px;font-size:14px;font-weight:700;cursor:pointer;"
+                    onclick="this.disabled=true;this.textContent='Processing…';this.form.submit();">
+                ✔ Confirm Mark as Sold
+            </button>
+        </form>
+        {{ else }}
+        <button disabled
+                style="background:#d1d5db;color:#9ca3af;border:none;padding:11px 28px;border-radius:7px;font-size:14px;font-weight:700;cursor:not-allowed;"
+                title="Upload all three documents first">
+            ✔ Confirm Mark as Sold
+        </button>
+        <span style="font-size:12px;color:#6b7280;">Upload all 3 documents to enable this button.</span>
+        {{ end }}
+        <a href="/admin/signed-plots" style="color:#6b7280;font-size:13px;text-decoration:none;">Cancel</a>
+    </div>
+
+</div>
+
+<script>
+function showPick(input, statusId) {
+    var el = document.getElementById(statusId);
+    if (!el) return;
+    if (input.files && input.files.length > 0) {
+        var names = [];
+        for (var i = 0; i < input.files.length; i++) names.push(input.files[i].name);
+        el.textContent = 'Ready to upload: ' + names.join(', ');
+    } else {
+        el.textContent = '';
+    }
+}
+function lockBtn(btn) {
+    setTimeout(function() {
+        btn.disabled = true;
+        btn.textContent = 'Uploading…';
+        btn.style.background = '#94a3b8';
+    }, 0);
+}
+</script>
+{{ end }}
+{{ template "admin_base" . }}

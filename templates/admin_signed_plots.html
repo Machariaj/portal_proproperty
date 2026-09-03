@@ -1,0 +1,99 @@
+{{ define "title" }}Signed Plots - Pro-Property{{ end }}
+{{ define "content" }}
+<div class="top-bar">
+    <h1>SA Signed Plots</h1>
+</div>
+
+<!-- Filter bar -->
+<div class="card" style="margin-bottom:16px;">
+    <form method="GET" action="/admin/signed-plots" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">
+        <div style="display:flex;flex-direction:column;gap:4px;min-width:160px;">
+            <label style="font-size:12px;color:#6b7280;font-weight:600;">Agent</label>
+            <select name="agent" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                <option value="">All Agents</option>
+                {{ range .Agents }}<option value="{{ .ID }}" {{ if eq $.FAgent .ID }}selected{{ end }}>{{ .Name }}</option>{{ end }}
+            </select>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;min-width:180px;">
+            <label style="font-size:12px;color:#6b7280;font-weight:600;">Estate</label>
+            <select name="estate" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                <option value="">All Estates</option>
+                {{ range .Estates }}<option value="{{ .ID }}" {{ if eq $.FEstate .ID }}selected{{ end }}>{{ .Name }}</option>{{ end }}
+            </select>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+            <label style="font-size:12px;color:#6b7280;font-weight:600;">Date Signed From</label>
+            <input type="date" name="date_from" value="{{ .FFrom }}" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+            <label style="font-size:12px;color:#6b7280;font-weight:600;">Date Signed To</label>
+            <input type="date" name="date_to" value="{{ .FTo }}" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+        </div>
+        <button type="submit" style="padding:7px 18px;font-size:13px;">Filter</button>
+        {{ if or .FAgent .FEstate .FFrom .FTo }}
+        <a href="/admin/signed-plots" style="padding:7px 14px;font-size:13px;background:#6b7280;color:#fff;border-radius:6px;text-decoration:none;">Clear</a>
+        {{ end }}
+    </form>
+</div>
+
+{{ if eq (index . "Success") "zoho_retry" }}
+<div style="background:#d1fae5;border:1px solid #6ee7b7;color:#065f46;padding:10px 16px;border-radius:8px;margin-bottom:16px;font-size:13px;">
+    Zoho Books retry triggered — the estimate will appear in Zoho Books within a few seconds.
+</div>
+{{ end }}
+
+<div class="card">
+    <div class="table-responsive">
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Client Name</th>
+                    <th>Phone</th>
+                    <th>Estate</th>
+                    <th>Plot Number</th>
+                    <th>Agent</th>
+                    <th>Date Booked</th>
+                    <th>Date Signed</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{ range $i, $b := .Bookings }}
+                <tr>
+                    <td>{{ add $i 1 }}</td>
+                    <td>{{ $b.BuyerName }}</td>
+                    <td>{{ $b.BuyerPhone }}</td>
+                    <td>{{ $b.EstateName }}</td>
+                    <td>{{ $b.PlotNumber }}</td>
+                    <td>{{ $b.AgentName }}</td>
+                    <td>{{ $b.DateBooked }}</td>
+                    <td><span class="badge badge-signed">{{ $b.DateSigned }}</span></td>
+                    <td style="display:flex;gap:6px;flex-wrap:wrap;">
+                        {{ if and $.CanRetryZoho (eq $b.ZohoBooksID "") }}
+                        <form method="POST" action="/admin/signed-booking-retry-zoho/{{ $b.BookingID }}" style="margin:0;">
+                            <button type="submit" style="background:#f59e0b;color:#fff;font-size:12px;padding:5px 10px;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;"
+                                    onclick="return confirm('Retry Zoho Books for {{ $b.BuyerName }} — Plot {{ $b.PlotNumber }}?')">Retry Zoho</button>
+                        </form>
+                        {{ end }}
+                        {{ if $.CanSignedToSold }}
+                        <a href="/admin/mark-sold/{{ $b.PlotID }}?estate_id={{ $b.EstateID }}"
+                           style="display:inline-block;background:#16a34a;color:#fff;font-size:12px;padding:5px 10px;border-radius:4px;text-decoration:none;white-space:nowrap;">Mark Sold</a>
+                        {{ end }}
+                        {{ if $.CanSignedToAvailable }}
+                        <form method="POST" action="/admin/estate/{{ $b.EstateID }}/plot-status" style="margin:0;">
+                            <input type="hidden" name="plot_id" value="{{ $b.PlotID }}">
+                            <input type="hidden" name="status" value="available">
+                            <button type="submit" style="background:#6b7280;font-size:12px;padding:5px 10px;white-space:nowrap;"
+                                    onclick="return confirm('Return Plot {{ $b.PlotNumber }} to Available?')">← Available</button>
+                        </form>
+                        {{ end }}
+                    </td>
+                </tr>
+                {{ end }}
+            </tbody>
+        </table>
+    </div>
+</div>
+{{ end }}
+{{ template "admin_base" . }}

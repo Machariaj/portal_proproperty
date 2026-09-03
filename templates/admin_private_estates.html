@@ -1,0 +1,123 @@
+{{ define "title" }}Private Estates - Pro-Property{{ end }}
+{{ define "content" }}
+<div class="top-bar">
+    <h1>🔒 Private Estates</h1>
+    {{ if .IsSA }}
+    <button onclick="document.getElementById('add-modal').style.display='flex'"
+            class="add-btn">+ Add Private Estate</button>
+    {{ end }}
+</div>
+
+{{ if .FormError }}
+<div style="background:#fee2e2;border:1px solid #fca5a5;color:#b91c1c;padding:10px 14px;border-radius:6px;margin-bottom:14px;font-size:14px;">
+    {{ .FormError }}
+</div>
+{{ end }}
+
+<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 16px;margin-bottom:16px;font-size:13px;color:#92400e;">
+    🔒 These estates are only visible to users who have been granted access.
+    {{ if .IsSA }}Manage access per estate using the <strong>Manage Access</strong> button.{{ end }}
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:20px;">
+    <div style="background:#fff;border-radius:10px;padding:16px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);border-left:4px solid #2563eb;">
+        <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Total Estates</div>
+        <div style="font-size:26px;font-weight:700;color:#1e293b;">{{ .Stats.TotalEstates }}</div>
+    </div>
+    <div style="background:#fff;border-radius:10px;padding:16px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);border-left:4px solid #16a34a;">
+        <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Available Plots</div>
+        <div style="font-size:26px;font-weight:700;color:#16a34a;">{{ .Stats.Available }}</div>
+    </div>
+    <div style="background:#fff;border-radius:10px;padding:16px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);border-left:4px solid #ca8a04;">
+        <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Booked Plots</div>
+        <div style="font-size:26px;font-weight:700;color:#ca8a04;">{{ .Stats.Booked }}</div>
+    </div>
+    <div style="background:#fff;border-radius:10px;padding:16px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);border-left:4px solid #dc2626;">
+        <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">SA Signed Plots</div>
+        <div style="font-size:26px;font-weight:700;color:#dc2626;">{{ .Stats.SaSigned }}</div>
+    </div>
+    <div style="background:#fff;border-radius:10px;padding:16px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);border-left:4px solid #7c3aed;">
+        <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Fully Paid Plots</div>
+        <div style="font-size:26px;font-weight:700;color:#7c3aed;">{{ .Stats.Sold }}</div>
+    </div>
+</div>
+
+{{ if .Estates }}
+<div class="table-responsive card">
+    <table>
+        <thead>
+            <tr>
+                <th>Estate Name</th>
+                <th>Total Plots</th>
+                <th>Available</th>
+                <th>Booked</th>
+                <th>SA Signed</th>
+                <th>Sold</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{ range .Estates }}
+            <tr>
+                <td><strong>{{ .Name }}</strong></td>
+                <td>{{ .Total }}</td>
+                <td><span class="badge badge-available">{{ .Available }}</span></td>
+                <td><span class="badge badge-booked">{{ .Booked }}</span></td>
+                <td><span class="badge badge-signed">{{ .SaSigned }}</span></td>
+                <td><span class="badge badge-sold">{{ .Sold }}</span></td>
+                <td style="display:flex;gap:6px;flex-wrap:wrap;">
+                    <a href="/admin/private-estate/{{ .ID }}/plots"
+                       style="background:#2563eb;color:#fff;padding:5px 12px;border-radius:5px;font-size:12px;text-decoration:none;">
+                        View Plots
+                    </a>
+                    {{ if $.IsSA }}
+                    <a href="/admin/estate/{{ .ID }}/edit"
+                       style="background:#0891b2;color:#fff;padding:5px 12px;border-radius:5px;font-size:12px;text-decoration:none;">
+                        Edit
+                    </a>
+                    <a href="/admin/private-estate/{{ .ID }}/access"
+                       style="background:#7c3aed;color:#fff;padding:5px 12px;border-radius:5px;font-size:12px;text-decoration:none;">
+                        Manage Access
+                    </a>
+                    {{ end }}
+                </td>
+            </tr>
+            {{ end }}
+        </tbody>
+    </table>
+</div>
+{{ else }}
+<div class="card" style="text-align:center;padding:48px 0;">
+    <div style="font-size:48px;margin-bottom:12px;">🔒</div>
+    <h3 style="margin:0 0 8px;color:var(--text);">No private estates available</h3>
+    <p style="color:var(--muted);margin:0;">
+        {{ if .IsSA }}Create your first private estate using the button above.
+        {{ else }}You have not been granted access to any private estates yet.{{ end }}
+    </p>
+</div>
+{{ end }}
+
+{{ if .IsSA }}
+<!-- Add Estate Modal -->
+<div id="add-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;align-items:center;justify-content:center;">
+    <div style="background:#fff;border-radius:12px;padding:32px;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.18);">
+        <h3 style="margin:0 0 18px;font-size:17px;color:var(--text);">Add Private Estate</h3>
+        <form method="POST" action="/admin/private-estates">
+            <label for="estate-name">Estate Name <span style="color:#dc2626;">*</span></label>
+            <input type="text" id="estate-name" name="name" required placeholder="e.g. Sunset Ridge Phase 1" style="margin-bottom:16px;">
+            <p style="font-size:12px;color:#6b7280;margin:0 0 16px;">
+                You can add plots and upload a site plan after creation.
+            </p>
+            <div style="display:flex;gap:10px;">
+                <button type="submit" class="add-btn">Create Estate</button>
+                <button type="button" onclick="document.getElementById('add-modal').style.display='none'"
+                        style="background:#6b7280;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;">
+                    Cancel
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{{ end }}
+{{ end }}
+{{ template "admin_base" . }}

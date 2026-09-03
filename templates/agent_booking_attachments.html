@@ -1,0 +1,238 @@
+{{ define "title" }}{{ .Title }} - Pro-Property{{ end }}
+{{ define "content" }}
+<div class="top-bar">
+    <h1>Upload Documents</h1>
+    <a href="{{ .BackURL }}" class="edit-btn" style="background:#6b7280;">← Back to My Bookings</a>
+</div>
+
+{{ if .SaveOK }}
+<div id="success-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;display:flex;align-items:center;justify-content:center;">
+    <div style="background:#fff;border-radius:14px;padding:36px 40px;max-width:380px;width:90%;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.18);">
+        <div style="font-size:52px;margin-bottom:12px;">✅</div>
+        <h2 style="margin:0 0 8px;font-size:20px;color:#166534;">Documents Saved!</h2>
+        <p style="color:#6b7280;font-size:14px;margin:0 0 8px;">Your documents have been uploaded successfully.</p>
+        <p style="color:#94a3b8;font-size:13px;margin:0 0 24px;">Redirecting to My Bookings in <span id="countdown">10</span>s...</p>
+        <button onclick="goNow()"
+                style="background:#2563eb;color:#fff;border:none;padding:10px 28px;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;">
+            Go Now
+        </button>
+    </div>
+</div>
+<script>
+var secs = 10;
+var timer = setInterval(function() {
+    secs--;
+    var el = document.getElementById('countdown');
+    if (el) el.textContent = secs;
+    if (secs <= 0) { clearInterval(timer); goNow(); }
+}, 1000);
+function goNow() { clearInterval(timer); window.location.href = '/agent/bookings'; }
+</script>
+{{ end }}
+
+<div class="card" style="max-width:680px;width:100%;box-sizing:border-box;">
+
+    <!-- Client info (read-only) -->
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;margin-bottom:20px;">
+        <div class="upload-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;font-size:13px;">
+            <div><span style="color:#6b7280;font-weight:600;">Client:</span> {{ .Info.BuyerName }}</div>
+            <div><span style="color:#6b7280;font-weight:600;">Phone:</span> {{ .Info.BuyerPhone }}</div>
+            <div><span style="color:#6b7280;font-weight:600;">Email:</span> {{ if .Info.BuyerEmail }}{{ .Info.BuyerEmail }}{{ else }}—{{ end }}</div>
+            <div><span style="color:#6b7280;font-weight:600;">Plot:</span> {{ .Info.PlotNumber }} — {{ .Info.EstateName }}</div>
+        </div>
+    </div>
+
+    <!-- Attachment status -->
+    <div style="margin-bottom:20px;">
+        <p style="font-size:13px;font-weight:600;color:#374151;margin:0 0 10px;">Current Attachment Status</p>
+        <div class="upload-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;font-size:13px;">
+            <div style="padding:8px 12px;border-radius:6px;{{ if .Info.DepositRef }}background:#dcfce7;color:#166534;{{ else }}background:#fee2e2;color:#991b1b;{{ end }}">
+                {{ if .Info.DepositRef }}✓{{ else }}✗{{ end }} Deposit Reference
+            </div>
+            <div style="padding:8px 12px;border-radius:6px;{{ if .Info.IDPhoto }}background:#dcfce7;color:#166534;{{ else }}background:#fee2e2;color:#991b1b;{{ end }}">
+                {{ if .Info.IDPhoto }}✓{{ else }}✗{{ end }} ID Photo
+            </div>
+            <div style="padding:8px 12px;border-radius:6px;{{ if .Info.KRA }}background:#dcfce7;color:#166534;{{ else }}background:#fee2e2;color:#991b1b;{{ end }}">
+                {{ if .Info.KRA }}✓{{ else }}✗{{ end }} KRA
+            </div>
+            <div style="padding:8px 12px;border-radius:6px;{{ if .Info.PassportPhoto }}background:#dcfce7;color:#166534;{{ else }}background:#fee2e2;color:#991b1b;{{ end }}">
+                {{ if .Info.PassportPhoto }}✓{{ else }}✗{{ end }} Passport Photo
+            </div>
+        </div>
+        <p style="font-size:11px;color:#94a3b8;margin:8px 0 0;">
+            You will be notified once all four documents are uploaded and your booking is fully processed.
+        </p>
+    </div>
+
+    <!-- Upload form -->
+    <form method="POST" enctype="multipart/form-data">
+        <div class="upload-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-bottom:16px;">
+            <div>
+                <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">Buyer Name <span style="font-weight:400;color:#6b7280;">(correct if needed)</span></label>
+                <input type="text" name="buyer_name" value="{{ .Info.BuyerName }}" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;box-sizing:border-box;">
+            </div>
+            <div>
+                <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">Buyer Phone <span style="font-weight:400;color:#6b7280;">(correct if needed)</span></label>
+                <input type="text" name="buyer_phone" value="{{ .Info.BuyerPhone }}" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;box-sizing:border-box;">
+            </div>
+            <div>
+                <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">Buyer Email <span style="font-weight:400;color:#6b7280;">(correct if needed)</span></label>
+                <input type="email" name="buyer_email" value="{{ .Info.BuyerEmail }}" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;box-sizing:border-box;">
+            </div>
+            <div>
+                <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">Payment Plan</label>
+                <select name="payment_plan" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;box-sizing:border-box;">
+                    <option value="">— Not set —</option>
+                    <option value="3_months" {{ if eq .Info.PaymentPlan "3_months" }}selected{{ end }}>3 Months Plan</option>
+                    <option value="6_months" {{ if eq .Info.PaymentPlan "6_months" }}selected{{ end }}>6 Months Plan</option>
+                    <option value="12_months" {{ if eq .Info.PaymentPlan "12_months" }}selected{{ end }}>12 Months Plan</option>
+                </select>
+            </div>
+        </div>
+        <div class="upload-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;">
+            <div>
+                <label style="font-size:12px;font-weight:600;color:#374151;">
+                    Deposit Reference
+                    {{ if .Info.DepositRefFiles }}<span style="color:#16a34a;font-weight:400;">({{ len .Info.DepositRefFiles }} saved)</span>{{ end }}
+                </label>
+                {{ if .Info.DepositRefFiles }}
+                <div style="margin:4px 0 6px;display:flex;flex-direction:column;gap:3px;">
+                    {{ range .Info.DepositRefFiles }}<a href="/uploads/{{ . }}" target="_blank" style="font-size:11px;color:#2563eb;text-decoration:none;background:#eff6ff;padding:2px 7px;border-radius:4px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="{{ . }}">📄 {{ . }}</a>{{ end }}
+                </div>
+                {{ end }}
+                <input type="file" id="fi-deposit_ref" name="deposit_ref" accept="image/*,.pdf" multiple style="display:none;">
+                <div id="fl-deposit_ref" style="min-height:4px;margin-bottom:4px;"></div>
+                <button type="button" onclick="ppAdd('deposit_ref')" style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;width:100%;">+ Add File(s)</button>
+            </div>
+            <div>
+                <label style="font-size:12px;font-weight:600;color:#374151;">
+                    ID Photo
+                    {{ if .Info.IDPhotoFiles }}<span style="color:#16a34a;font-weight:400;">({{ len .Info.IDPhotoFiles }} saved)</span>{{ end }}
+                </label>
+                {{ if .Info.IDPhotoFiles }}
+                <div style="margin:4px 0 6px;display:flex;flex-direction:column;gap:3px;">
+                    {{ range .Info.IDPhotoFiles }}<a href="/uploads/{{ . }}" target="_blank" style="font-size:11px;color:#2563eb;text-decoration:none;background:#eff6ff;padding:2px 7px;border-radius:4px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="{{ . }}">📄 {{ . }}</a>{{ end }}
+                </div>
+                {{ end }}
+                <input type="file" id="fi-id_photo" name="id_photo" accept="image/*,.pdf" multiple style="display:none;">
+                <div id="fl-id_photo" style="min-height:4px;margin-bottom:4px;"></div>
+                <button type="button" onclick="ppAdd('id_photo')" style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;width:100%;">+ Add File(s)</button>
+            </div>
+            <div>
+                <label style="font-size:12px;font-weight:600;color:#374151;">
+                    KRA
+                    {{ if .Info.KRAFiles }}<span style="color:#16a34a;font-weight:400;">({{ len .Info.KRAFiles }} saved)</span>{{ end }}
+                </label>
+                {{ if .Info.KRAFiles }}
+                <div style="margin:4px 0 6px;display:flex;flex-direction:column;gap:3px;">
+                    {{ range .Info.KRAFiles }}<a href="/uploads/{{ . }}" target="_blank" style="font-size:11px;color:#2563eb;text-decoration:none;background:#eff6ff;padding:2px 7px;border-radius:4px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="{{ . }}">📄 {{ . }}</a>{{ end }}
+                </div>
+                {{ end }}
+                <input type="file" id="fi-kra" name="kra" accept="image/*,.pdf" multiple style="display:none;">
+                <div id="fl-kra" style="min-height:4px;margin-bottom:4px;"></div>
+                <button type="button" onclick="ppAdd('kra')" style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;width:100%;">+ Add File(s)</button>
+            </div>
+            <div>
+                <label style="font-size:12px;font-weight:600;color:#374151;">
+                    Passport Photo
+                    {{ if .Info.PassportPhotoFiles }}<span style="color:#16a34a;font-weight:400;">({{ len .Info.PassportPhotoFiles }} saved)</span>{{ end }}
+                </label>
+                {{ if .Info.PassportPhotoFiles }}
+                <div style="margin:4px 0 6px;display:flex;flex-direction:column;gap:3px;">
+                    {{ range .Info.PassportPhotoFiles }}<a href="/uploads/{{ . }}" target="_blank" style="font-size:11px;color:#2563eb;text-decoration:none;background:#eff6ff;padding:2px 7px;border-radius:4px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="{{ . }}">📄 {{ . }}</a>{{ end }}
+                </div>
+                {{ end }}
+                <input type="file" id="fi-passport_photo" name="passport_photo" accept="image/*,.pdf" multiple style="display:none;">
+                <div id="fl-passport_photo" style="min-height:4px;margin-bottom:4px;"></div>
+                <button type="button" onclick="ppAdd('passport_photo')" style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;width:100%;">+ Add File(s)</button>
+            </div>
+        </div>
+        <div style="margin-top:16px;">
+            <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">Notes</label>
+            <textarea name="notes" rows="3" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;resize:vertical;">{{ .Info.Notes }}</textarea>
+        </div>
+        <div style="margin-top:16px;display:flex;gap:10px;">
+            <button type="submit" id="save-btn" style="background:#2563eb;">💾 Save Documents</button>
+            <a href="{{ .BackURL }}" class="edit-btn" style="background:#6b7280;text-decoration:none;">Cancel</a>
+        </div>
+    </form>
+
+    <!-- Generate Booking Receipt -->
+    <div style="border-top:1px solid #e5e7eb;margin-top:28px;padding-top:24px;">
+        <h3 style="font-size:15px;font-weight:700;color:#1e3a5f;margin:0 0 14px;">Generate Booking Confirmation Receipt</h3>
+        <form method="POST" action="/agent/booking-receipt" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
+            <input type="hidden" name="booking_id" value="{{ .Info.BookingID }}">
+            <div>
+                <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">Amount Received (KES)</label>
+                <input type="number" name="amount" min="0" step="0.01" required placeholder="e.g. 50000"
+                       style="padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;width:200px;">
+            </div>
+            <button type="submit" style="background:#1e3a5f;color:#fff;border:none;padding:9px 20px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">
+                🧾 Generate Receipt
+            </button>
+        </form>
+
+        {{ if .Receipts }}
+        <div style="margin-top:18px;">
+            <p style="font-size:12px;font-weight:600;color:#6b7280;margin:0 0 8px;text-transform:uppercase;letter-spacing:0.4px;">Past Receipts</p>
+            <div style="display:flex;flex-direction:column;gap:6px;">
+                {{ range .Receipts }}
+                <div style="display:flex;align-items:center;justify-content:space-between;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;font-size:13px;">
+                    <div>
+                        <span style="font-weight:700;color:#1e3a5f;">{{ .ReceiptNumber }}</span>
+                        <span style="color:#6b7280;margin-left:12px;">KES {{ .Amount }}</span>
+                        <span style="color:#94a3b8;margin-left:12px;font-size:11px;">{{ .CreatedAt }}</span>
+                    </div>
+                    <a href="{{ $.ReceiptPrefix }}/booking-receipt/{{ .ID }}"
+                       style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;padding:4px 12px;border-radius:5px;font-size:12px;font-weight:600;text-decoration:none;">
+                        View / Print
+                    </a>
+                </div>
+                {{ end }}
+            </div>
+        </div>
+        {{ end }}
+    </div>
+
+<script>
+(function() {
+    var stores = {};
+    function store(n) { return stores[n] || (stores[n] = []); }
+    function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+    function sync(n) {
+        var dt = new DataTransfer();
+        store(n).forEach(function(f) { dt.items.add(f); });
+        document.getElementById('fi-' + n).files = dt.files;
+        var list = document.getElementById('fl-' + n);
+        list.innerHTML = '';
+        store(n).forEach(function(f, i) {
+            var d = document.createElement('div');
+            d.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:12px;color:#374151;padding:2px 0;';
+            d.innerHTML = '📄 <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(f.name) + '</span>'
+                + '<span style="color:#6b7280;flex-shrink:0;">(' + (f.size/1024).toFixed(0) + 'KB)</span>'
+                + '<button type="button" onclick="ppRm(\'' + n + '\',' + i + ')" style="background:#fee2e2;color:#b91c1c;border:none;border-radius:3px;padding:1px 5px;cursor:pointer;font-size:10px;font-weight:700;">✕</button>';
+            list.appendChild(d);
+        });
+    }
+    window.ppAdd = function(n) {
+        var p = document.createElement('input');
+        p.type = 'file'; p.multiple = true; p.accept = 'image/*,.pdf';
+        p.onchange = function() {
+            var a = store(n);
+            for (var i = 0; i < this.files.length; i++) a.push(this.files[i]);
+            stores[n] = a; sync(n);
+        };
+        p.click();
+    };
+    window.ppRm = function(n, i) { store(n).splice(i, 1); sync(n); };
+    document.querySelector('form').addEventListener('submit', function() {
+        var btn = document.getElementById('save-btn');
+        btn.disabled = true;
+        btn.textContent = 'Uploading...';
+        btn.style.background = '#94a3b8';
+    });
+})();
+</script>
+</div>
+{{ end }}
+{{ template "agent_base" . }}
