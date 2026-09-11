@@ -1,0 +1,71 @@
+{{ define "content" }}
+<div class="page-header">
+    <div>
+        <h1>Review — {{ .Info.BuyerName }}</h1>
+        <p>{{ .Info.EstateName }} — Plot {{ .Info.PlotNumber }}</p>
+    </div>
+    <a href="/accounts/queue" class="btn-ghost">← Back to Queue</a>
+</div>
+
+{{ if .Error }}
+<div class="alert alert-error">{{ .Error }}</div>
+{{ end }}
+
+<div class="review-section">
+    <h3>Buyer &amp; Agent</h3>
+    <div class="review-field"><span>Buyer Name</span><span>{{ .Info.BuyerName }}</span></div>
+    <div class="review-field"><span>Buyer Phone</span><span>{{ .Info.BuyerPhone }}</span></div>
+    <div class="review-field"><span>Buyer Email</span><span>{{ .Info.BuyerEmail }}</span></div>
+    <div class="review-field"><span>Agent</span><span>{{ .Info.AgentName }} {{ if .Info.AgentPhone }}({{ .Info.AgentPhone }}){{ end }}</span></div>
+    <div class="review-field"><span>Payment Plan</span><span>{{ .Info.PaymentPlan }}</span></div>
+    <div class="review-field"><span>Notes at booking</span><span>{{ if .Info.Notes }}{{ .Info.Notes }}{{ else }}—{{ end }}</span></div>
+</div>
+
+<div class="review-section">
+    <h3>Deposit</h3>
+    <div class="review-field"><span>Deposit Paid</span><span>KES {{ fmtAmount (printf "%.2f" .Info.Deposit) }}</span></div>
+    <div class="review-field"><span>Estate Threshold</span><span>KES {{ fmtAmount (printf "%.2f" .Info.Threshold) }}</span></div>
+    {{ if .Receipts }}
+    <p style="margin:14px 0 8px;font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;">Payment History</p>
+    {{ range .Receipts }}
+    <div class="review-field"><span>{{ .ReceiptNumber }} — {{ .CreatedAt }}</span><span>KES {{ fmtAmount .Amount }}</span></div>
+    {{ end }}
+    {{ end }}
+</div>
+
+<div class="review-section">
+    <h3>KYC Documents</h3>
+    <div style="margin-bottom:10px;">
+        <p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#6b7280;">Deposit Reference</p>
+        {{ range .Info.DepositRefFiles }}<a class="file-chip" href="/uploads/{{ . }}" target="_blank">📄 {{ . }}</a>{{ else }}<span style="color:#94a3b8;font-size:13px;">None</span>{{ end }}
+    </div>
+    <div style="margin-bottom:10px;">
+        <p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#6b7280;">ID Photo</p>
+        {{ range .Info.IDPhotoFiles }}<a class="file-chip" href="/uploads/{{ . }}" target="_blank">📄 {{ . }}</a>{{ else }}<span style="color:#94a3b8;font-size:13px;">None</span>{{ end }}
+    </div>
+    <div style="margin-bottom:10px;">
+        <p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#6b7280;">KRA PIN</p>
+        {{ range .Info.KRAFiles }}<a class="file-chip" href="/uploads/{{ . }}" target="_blank">📄 {{ . }}</a>{{ else }}<span style="color:#94a3b8;font-size:13px;">None</span>{{ end }}
+    </div>
+    <div>
+        <p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#6b7280;">Passport Photo</p>
+        {{ range .Info.PassportPhotoFiles }}<a class="file-chip" href="/uploads/{{ . }}" target="_blank">📄 {{ . }}</a>{{ else }}<span style="color:#94a3b8;font-size:13px;">None</span>{{ end }}
+    </div>
+</div>
+
+<div class="review-section">
+    <h3>Decision</h3>
+    <form method="POST" action="/accounts/review/{{ .Info.BookingID }}/approve" style="margin-bottom:16px;">
+        <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:6px;">Notes (optional)</label>
+        <textarea name="notes" rows="2" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;box-sizing:border-box;margin-bottom:10px;"></textarea>
+        <button type="submit" class="btn-primary">✅ Approve — Send to Legal</button>
+    </form>
+
+    <form method="POST" action="/accounts/review/{{ .Info.BookingID }}/cancel" onsubmit="return confirm('Cancel this booking and release the plot back to available?');">
+        <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:6px;">Reason for cancelling <span style="color:#dc2626;">*</span></label>
+        <textarea name="notes" rows="2" required style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;box-sizing:border-box;margin-bottom:10px;"></textarea>
+        <button type="submit" class="btn-danger">✖ Cancel Booking</button>
+    </form>
+</div>
+{{ end }}
+{{ template "accounts_base" . }}

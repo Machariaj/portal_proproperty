@@ -1,0 +1,51 @@
+{{ define "content" }}
+<div class="page-header">
+    <div>
+        <h1>Completed Sale Agreement</h1>
+        <p>Every booking whose sale agreement has been signed — stays listed here even after the plot is later marked sold.</p>
+    </div>
+</div>
+
+<form method="GET" action="/legal/completed" style="display:flex;align-items:flex-end;gap:10px;margin-bottom:20px;">
+    <div>
+        <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:6px;">Filter by month</label>
+        <input type="month" name="month" value="{{ .Month }}"
+               style="padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;">
+    </div>
+    <button type="submit" class="btn-primary">Filter</button>
+    {{ if .Month }}<a href="/legal/completed" class="btn-ghost">Clear</a>{{ end }}
+</form>
+
+<div class="stat-card" style="max-width:220px;margin-bottom:20px;">
+    <span class="stat-label">{{ if .Month }}Signed in {{ .Month }}{{ else }}Total Signed{{ end }}</span>
+    <span class="stat-value">{{ .Total }}</span>
+</div>
+
+<div style="background:#fff;border-radius:14px;box-shadow:0 2px 12px rgba(0,0,0,0.06);overflow-x:auto;">
+    <table class="rv-table">
+        <thead>
+            <tr>
+                <th>Buyer</th>
+                <th>Estate / Plot</th>
+                <th>Agent</th>
+                <th>Date Signed</th>
+                <th>Plot Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{ range .List }}
+            <tr>
+                <td>{{ .BuyerName }}</td>
+                <td>{{ .EstateName }} — Plot {{ .PlotNumber }}</td>
+                <td>{{ .AgentName }}</td>
+                <td>{{ .DateSigned }}</td>
+                <td>{{ .PlotStatus }}</td>
+            </tr>
+            {{ else }}
+            <tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:24px;">No records found{{ if .Month }} for {{ .Month }}{{ end }}.</td></tr>
+            {{ end }}
+        </tbody>
+    </table>
+</div>
+{{ end }}
+{{ template "legal_base" . }}

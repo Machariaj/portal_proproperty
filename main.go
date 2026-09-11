@@ -18,6 +18,8 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"marketers_portal/accounts"
+	"marketers_portal/legal"
 	"marketers_portal/vanbooking"
 	"marketers_portal/welfare"
 )
@@ -45,6 +47,8 @@ const (
 	nameCookie    = "pp_name"
 	roleAdmin     = "admin"
 	roleAgent     = "agent"
+	roleAccounts  = "accounts"
+	roleLegal     = "legal"
 )
 
 var pageTemplates map[string]*template.Template
@@ -161,6 +165,10 @@ func main() {
 		getUserID,
 	)
 	welfare.InitTables()
+	accounts.Init(db, render, getAgentName, cancelBooksEstimate, sendReviewOutcomeEmail)
+	legal.Init(db, render, getAgentName, getUserID,
+		func(r *http.Request) bool { return getRole(r) == roleSystemAdmin },
+		saveUploadedFiles, processSignedIntegrations, cancelBooksEstimate, sendReviewOutcomeEmail)
 	initPermissionTables()
 	init2FATables()
 	initSchedulerTables()
@@ -179,6 +187,28 @@ func main() {
 	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN installment_page VARCHAR(20) DEFAULT NULL`)
 	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN batch_ref VARCHAR(64) DEFAULT NULL`)
 	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN receipt_number VARCHAR(20) DEFAULT NULL`)
+	// Accounts + Legal review workflow: two new intermediate statuses between
+	// 'active' and 'sa_signed'.
+	db.Exec(`ALTER TABLE prop_bookings MODIFY COLUMN status
+		ENUM('active','pending_accounts_review','pending_wakili_review','cancelled','expired','completed','sa_signed')
+		DEFAULT 'active'`)
+	db.Exec(`ALTER TABLE prop_estates ADD COLUMN deposit_threshold DECIMAL(15,2) DEFAULT NULL`)
+	// Each estate's sale agreements are handled by exactly one lawyer — a
+	// specific prop_agents row with role='legal'. Loosely referenced (no FK
+	// constraint), matching the pattern used elsewhere in this schema.
+	db.Exec(`ALTER TABLE prop_estates ADD COLUMN lawyer_id INT DEFAULT NULL`)
+	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN accounts_notes TEXT DEFAULT NULL`)
+	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN accounts_reviewed_by VARCHAR(255) DEFAULT NULL`)
+	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN accounts_reviewed_at TIMESTAMP NULL DEFAULT NULL`)
+	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN wakili_notes TEXT DEFAULT NULL`)
+	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN wakili_reviewed_by VARCHAR(255) DEFAULT NULL`)
+	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN wakili_reviewed_at TIMESTAMP NULL DEFAULT NULL`)
+	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN deposit_topups TEXT DEFAULT NULL`)
+	// Legal has three internal stages while status='pending_wakili_review':
+	// drafting the sale agreement, then awaiting the client's signature, then
+	// (on upload) status flips to 'sa_signed'. legal_stage is meaningless once
+	// status has moved past 'pending_wakili_review'.
+	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN legal_stage ENUM('drafting','awaiting_signature') NOT NULL DEFAULT 'drafting'`)
 	db.Exec(`CREATE TABLE IF NOT EXISTS prop_booking_receipts (
 		id INT AUTO_INCREMENT PRIMARY KEY,
 		booking_id INT NOT NULL,
@@ -223,14 +253,10 @@ func main() {
 		"admin_estate_plots.html":          mustParse("templates/admin_base.html", "templates/admin_estate_plots.html"),
 		"admin_estate_book.html":           mustParse("templates/admin_base.html", "templates/admin_estate_book.html"),
 		"admin_estate_edit.html":           mustParse("templates/admin_base.html", "templates/admin_estate_edit.html"),
-		"admin_create_user.html":           mustParse("templates/admin_base.html", "templates/admin_create_user.html"),
-		"admin_edit_user.html":             mustParse("templates/admin_base.html", "templates/admin_edit_user.html"),
 		"admin_booking_attachments.html":   mustParse("templates/admin_base.html", "templates/admin_booking_attachments.html"),
 		"admin_mark_sold.html":             mustParse("templates/admin_base.html", "templates/admin_mark_sold.html"),
 		"admin_plots_overview.html":        mustParse("templates/admin_base.html", "templates/admin_plots_overview.html"),
 		"agent_booking_attachments.html":   mustParse("templates/agent_base.html", "templates/agent_booking_attachments.html"),
-		"admin_permissions_list.html":      mustParse("templates/admin_base.html", "templates/admin_permissions_list.html"),
-		"admin_permissions.html":           mustParse("templates/admin_base.html", "templates/admin_permissions.html"),
 		"admin_add_estate.html":            mustParse("templates/admin_base.html", "templates/admin_add_estate.html"),
 		"admin_pending_projects.html":      mustParse("templates/admin_base.html", "templates/admin_pending_projects.html"),
 		"admin_completed_projects.html":    mustParse("templates/admin_base.html", "templates/admin_completed_projects.html"),
@@ -280,6 +306,18 @@ func main() {
 		"welfare_beneficiaries.html":    mustParse("templates/welfare/welfare_base.html", "templates/welfare/welfare_beneficiaries.html"),
 		"welfare_permissions_list.html": mustParse("templates/welfare/welfare_base.html", "templates/welfare/welfare_permissions_list.html"),
 		"welfare_permissions.html":      mustParse("templates/welfare/welfare_base.html", "templates/welfare/welfare_permissions.html"),
+		// Accounts review pages
+		"accounts_queue.html":  mustParse("templates/accounts/accounts_base.html", "templates/accounts/accounts_queue.html"),
+		"accounts_review.html": mustParse("templates/accounts/accounts_base.html", "templates/accounts/accounts_review.html"),
+		// Legal review pages
+		"legal_queue.html":     mustParse("templates/legal/legal_base.html", "templates/legal/legal_queue.html"),
+		"legal_awaiting.html":  mustParse("templates/legal/legal_base.html", "templates/legal/legal_awaiting.html"),
+		"legal_review.html":    mustParse("templates/legal/legal_base.html", "templates/legal/legal_review.html"),
+		"legal_completed.html": mustParse("templates/legal/legal_base.html", "templates/legal/legal_completed.html"),
+		// Settings pages (system_admin only)
+		"settings_users.html":     mustParse("templates/settings/settings_base.html", "templates/settings/settings_users.html"),
+		"settings_edit_user.html": mustParse("templates/settings/settings_base.html", "templates/settings/settings_edit_user.html"),
+		"settings_modules.html":   mustParse("templates/settings/settings_base.html", "templates/settings/settings_modules.html"),
 	}
 
 	mux := http.NewServeMux()
@@ -296,10 +334,10 @@ func main() {
 	mux.Handle("/admin/estate/", authMiddleware(requireRole(roleAdmin, requirePerm("admin.estates", "read", http.HandlerFunc(adminEstateRouter)))))
 	mux.Handle("/admin/add-estate", authMiddleware(requireRole(roleAdmin, requirePerm("admin.estates", "write", http.HandlerFunc(adminAddEstateHandler)))))
 	mux.Handle("/admin/add-plots", authMiddleware(requireRole(roleAdmin, requirePerm("admin.estates", "write", http.HandlerFunc(adminAddPlotsHandler)))))
-	mux.Handle("/admin/create-user", authMiddleware(requireRole(roleAdmin, requirePerm("admin.create_user", "read", http.HandlerFunc(adminCreateUserHandler)))))
-	mux.Handle("/admin/edit-user/", authMiddleware(requireRole(roleAdmin, requirePerm("admin.create_user", "write", http.HandlerFunc(adminEditUserHandler)))))
 	mux.Handle("/admin/booking/", authMiddleware(requireRole(roleAdmin, requirePerm("admin.booked_plots", "write", http.HandlerFunc(adminBookingAttachmentsHandler)))))
 	mux.Handle("/admin/mark-sold/", authMiddleware(requireRole(roleAdmin, requirePerm("admin.signed_to_sold", "read", http.HandlerFunc(adminMarkSoldHandler)))))
+	// System-admin-only emergency override — bypasses Accounts + Legal review entirely.
+	mux.Handle("/admin/force-sa-signed/", authMiddleware(requireRole(roleSystemAdmin, http.HandlerFunc(adminForceSASignedHandler))))
 	mux.Handle("/admin/booking-extend/", authMiddleware(requireRole(roleAdmin, requirePerm("admin.extend_booking", "read", http.HandlerFunc(extendBookingHandler)))))
 	mux.Handle("/admin/booking-retry-zoho/", authMiddleware(requireRole(roleAdmin, http.HandlerFunc(adminRetryZohoHandler))))
 	mux.Handle("/admin/signed-booking-retry-zoho/", authMiddleware(requireRole(roleAdmin, http.HandlerFunc(adminRetryZohoSignedHandler))))
@@ -337,8 +375,6 @@ func main() {
 	mux.Handle("/admin/van-notify", authMiddleware(requireRole(roleAdmin, requirePerm("admin.van_manage", "write", http.HandlerFunc(vanbooking.AdminVanNotifyHandler)))))
 	mux.Handle("/admin/van-permissions", authMiddleware(http.HandlerFunc(vanPermissionsListHandler)))
 	mux.Handle("/admin/van-permissions/", authMiddleware(http.HandlerFunc(vanPermissionsHandler)))
-	mux.Handle("/admin/permissions", authMiddleware(http.HandlerFunc(adminPermissionsListHandler)))
-	mux.Handle("/admin/permissions/", authMiddleware(http.HandlerFunc(adminPermissionsHandler)))
 	// Agent routes
 	mux.Handle("/dashboard", authMiddleware(requireRole(roleAgent, requirePerm("agent.dashboard", "read", http.HandlerFunc(dashboardHandler)))))
 	mux.Handle("/agent/estates", authMiddleware(requireRole(roleAgent, requirePerm("agent.estates", "read", http.HandlerFunc(agentEstatesHandler)))))
@@ -372,6 +408,15 @@ func main() {
 	mux.Handle("/welfare/permissions/", authMiddleware(http.HandlerFunc(welfarePermissionsHandler)))
 	// Welfare routes (accessible to any authenticated user)
 	mux.Handle("/welfare/", authMiddleware(http.HandlerFunc(welfare.Router)))
+	// Accounts + Legal review modules — role-exclusive.
+	mux.Handle("/accounts/", authMiddleware(requireAccountsAccess(http.HandlerFunc(accounts.Router))))
+	mux.Handle("/legal/", authMiddleware(requireLegalAccess(http.HandlerFunc(legal.Router))))
+	// Settings — system_admin only: user creation, password resets, config.
+	mux.Handle("/settings", authMiddleware(requireRole(roleSystemAdmin, http.HandlerFunc(settingsRootHandler))))
+	mux.Handle("/settings/", authMiddleware(requireRole(roleSystemAdmin, http.HandlerFunc(settingsRootHandler))))
+	mux.Handle("/settings/users", authMiddleware(requireRole(roleSystemAdmin, http.HandlerFunc(settingsUsersHandler))))
+	mux.Handle("/settings/edit-user/", authMiddleware(requireRole(roleSystemAdmin, http.HandlerFunc(settingsEditUserHandler))))
+	mux.Handle("/settings/modules/", authMiddleware(requireRole(roleSystemAdmin, http.HandlerFunc(settingsModulesHandler))))
 	mux.Handle("/", http.HandlerFunc(rootHandler))
 
 	fs := http.FileServer(http.Dir("static"))
@@ -404,7 +449,7 @@ func getRole(r *http.Request) string {
 		return ""
 	}
 	switch c.Value {
-	case roleAdmin, roleAgent, roleSystemAdmin:
+	case roleAdmin, roleAgent, roleSystemAdmin, roleAccounts, roleLegal:
 		return c.Value
 	}
 	return ""
@@ -470,14 +515,83 @@ func requireRole(role string, next http.Handler) http.Handler {
 			return
 		}
 		if userRole != role {
-			if userRole == roleAdmin || userRole == roleAgent {
+			switch userRole {
+			case roleAdmin, roleAgent:
 				http.Redirect(w, r, "/hub", http.StatusFound)
-				return
+			case roleAccounts:
+				http.Redirect(w, r, "/accounts", http.StatusFound)
+			case roleLegal:
+				http.Redirect(w, r, "/legal", http.StatusFound)
+			default:
+				http.Redirect(w, r, "/login", http.StatusFound)
 			}
-			http.Redirect(w, r, "/login", http.StatusFound)
 			return
 		}
 		next.ServeHTTP(w, r)
+	})
+}
+
+// canAccessAccounts reports whether the current user may use the Accounts
+// module: role "accounts" or system_admin (always), an admin with
+// admin.accounts_access, or any user explicitly granted accounts.access.
+func canAccessAccounts(r *http.Request) bool {
+	role := getRole(r)
+	if role == roleSystemAdmin || role == roleAccounts {
+		return true
+	}
+	uid := getUserID(r)
+	if role == roleAdmin && hasPermission(uid, "admin.accounts_access", "read") {
+		return true
+	}
+	return hasPermission(uid, "accounts.access", "read")
+}
+
+// requireAccountsAccess gates /accounts/* to canAccessAccounts, redirecting
+// anyone else to their own home rather than erroring — same pattern as
+// requireRole.
+func requireAccountsAccess(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if canAccessAccounts(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		switch getRole(r) {
+		case roleAdmin, roleAgent:
+			http.Redirect(w, r, "/hub", http.StatusFound)
+		case roleLegal:
+			http.Redirect(w, r, "/legal", http.StatusFound)
+		default:
+			http.Redirect(w, r, "/login", http.StatusFound)
+		}
+	})
+}
+
+// canAccessLegal reports whether the current user may use the Legal module:
+// role "legal" or system_admin (always), or any user explicitly granted
+// legal.access via the Modules page.
+func canAccessLegal(r *http.Request) bool {
+	role := getRole(r)
+	if role == roleSystemAdmin || role == roleLegal {
+		return true
+	}
+	return hasPermission(getUserID(r), "legal.access", "read")
+}
+
+// requireLegalAccess gates /legal/* to canAccessLegal.
+func requireLegalAccess(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if canAccessLegal(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		switch getRole(r) {
+		case roleAdmin, roleAgent:
+			http.Redirect(w, r, "/hub", http.StatusFound)
+		case roleAccounts:
+			http.Redirect(w, r, "/accounts", http.StatusFound)
+		default:
+			http.Redirect(w, r, "/login", http.StatusFound)
+		}
 	})
 }
 
@@ -512,6 +626,43 @@ func pathSegment(prefix, path string) string {
 		return s[:i]
 	}
 	return s
+}
+
+// redirectBack sends the user back to wherever they came from (the Referer
+// header) instead of a bare fallback page — so after acting on one row in a
+// filtered/paginated list, they land back on that same filtered view rather
+// than a reset, top-of-list, no-filters page. Pass anchor (an element id,
+// without "#") to also have the browser scroll straight back to that row;
+// leave it empty to just preserve the query string. extra, if given, is one
+// or more pre-encoded "key=value" pairs (e.g. a one-shot success banner
+// flag) merged into the query string regardless of whether the Referer or
+// fallbackPath ends up being used.
+//
+// Only the Referer's path+query is ever used — never its scheme/host — so a
+// forged Referer can at most bounce the request back into this same app,
+// never off-site (no open-redirect risk). Falls back to fallbackPath if
+// there's no usable Referer (e.g. the action was triggered some other way).
+func redirectBack(w http.ResponseWriter, r *http.Request, fallbackPath, anchor string, extra ...string) {
+	target := fallbackPath
+	if ref := r.Referer(); ref != "" {
+		if u, err := url.Parse(ref); err == nil && strings.HasPrefix(u.Path, "/") {
+			target = u.Path
+			if u.RawQuery != "" {
+				target += "?" + u.RawQuery
+			}
+		}
+	}
+	for _, kv := range extra {
+		sep := "?"
+		if strings.Contains(target, "?") {
+			sep = "&"
+		}
+		target += sep + kv
+	}
+	if anchor != "" {
+		target += "#" + anchor
+	}
+	http.Redirect(w, r, target, http.StatusFound)
 }
 
 func withID(r *http.Request, id string) *http.Request {
@@ -628,14 +779,24 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 
 	var id int
 	var name, hash, role, phone string
+	var blocked int
 	err := db.QueryRow(
-		`SELECT id, name, password, role, COALESCE(phone,'') FROM prop_agents WHERE email = ? LIMIT 1`, email,
-	).Scan(&id, &name, &hash, &role, &phone)
+		`SELECT id, name, password, role, COALESCE(phone,''), COALESCE(blocked,0) FROM prop_agents WHERE email = ? LIMIT 1`, email,
+	).Scan(&id, &name, &hash, &role, &phone, &blocked)
 	if err != nil || bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil {
 		logAccess("LOGIN_FAIL", email, "unknown", clientIP(r), "bad credentials")
 		render(w, "login", map[string]any{
 			"Title": "Login",
 			"Error": "Invalid email or password",
+			"Email": email,
+		})
+		return
+	}
+	if blocked == 1 {
+		logAccess("LOGIN_BLOCKED", email, role, clientIP(r), "blocked account")
+		render(w, "login", map[string]any{
+			"Title": "Login",
+			"Error": "This account has been blocked. Contact your administrator.",
 			"Email": email,
 		})
 		return
@@ -695,17 +856,45 @@ func logoutHandler(w http.ResponseWriter, r *http.Request) {
 
 func hubHandler(w http.ResponseWriter, r *http.Request) {
 	role := getRole(r)
+	isSA := role == roleSystemAdmin
+	uid := getUserID(r)
+
 	portalURL := "/dashboard"
 	vanBookingURL := "/agent/van-bookings"
-	if role == roleAdmin || role == roleSystemAdmin {
+	if role == roleAdmin || isSA {
 		portalURL = "/admin/dashboard"
 		vanBookingURL = "/admin/van-bookings"
 	}
+
+	showWelfare := isSA ||
+		hasPermission(uid, "welfare.members", "read") ||
+		hasPermission(uid, "welfare.expenses", "read") ||
+		hasPermission(uid, "welfare.claims", "read")
+
+	// Each module card only appears when the user has at least one granted
+	// feature in that module, or is system_admin (who sees everything).
+	showPortal := isSA || hasAnyModulePermission(uid, "Marketers Portal")
+	showVan := isSA || hasAnyModulePermission(uid, "Van Booking")
+	showAsset := isSA || hasAnyModulePermission(uid, "Asset Management")
+	showLeave := isSA || hasAnyModulePermission(uid, "Leave Management")
+	showHR := isSA || hasAnyModulePermission(uid, "HR Management")
+	showTask := isSA || hasAnyModulePermission(uid, "Task Management")
+
 	render(w, "hub", map[string]any{
 		"Title":         "Portal Hub",
 		"UserName":      getAgentName(r),
 		"PortalURL":     portalURL,
 		"VanBookingURL": vanBookingURL,
+		"IsSystemAdmin": isSA,
+		"ShowPortal":    showPortal,
+		"ShowVan":       showVan,
+		"ShowWelfare":   showWelfare,
+		"ShowAccounts":  canAccessAccounts(r),
+		"ShowLegal":     canAccessLegal(r),
+		"ShowAsset":     showAsset,
+		"ShowLeave":     showLeave,
+		"ShowHR":        showHR,
+		"ShowTask":      showTask,
 	})
 }
 
@@ -1284,10 +1473,13 @@ func adminUpdatePlotStatusHandler(w http.ResponseWriter, r *http.Request) {
 	plotID := r.FormValue("plot_id")
 	newStatus := r.FormValue("status")
 
-	// Allow forward transitions and revert to available
-	allowed := map[string]bool{"sa_signed": true, "sold": true, "available": true}
+	// Allow forward transitions and revert to available. booked -> sa_signed is
+	// deliberately NOT allowed here anymore — that transition now only happens
+	// via the Accounts + Legal review chain (or the system_admin-only force
+	// override), not directly by an admin/agent.
+	allowed := map[string]bool{"sold": true, "available": true}
 	if !allowed[newStatus] || plotID == "" {
-		http.Redirect(w, r, "/admin/estate/"+id+"/plots?status=booked", http.StatusFound)
+		redirectBack(w, r, "/admin/estate/"+id+"/plots?status=booked", "")
 		return
 	}
 
@@ -1299,7 +1491,7 @@ func adminUpdatePlotStatusHandler(w http.ResponseWriter, r *http.Request) {
 		WHERE p.id=? AND p.estate_id=?`, plotID, id).
 		Scan(&currentStatus, &estateID, &plotNumber, &plotEstateName)
 	if err != nil || (currentStatus != "booked" && currentStatus != "sa_signed" && currentStatus != "sold") {
-		http.Redirect(w, r, "/admin/estate/"+id+"/plots?status=booked", http.StatusFound)
+		redirectBack(w, r, "/admin/estate/"+id+"/plots?status=booked", "")
 		return
 	}
 
@@ -1307,8 +1499,6 @@ func adminUpdatePlotStatusHandler(w http.ResponseWriter, r *http.Request) {
 	uid := getUserID(r)
 	var requiredFeature string
 	switch {
-	case currentStatus == "booked" && newStatus == "sa_signed":
-		requiredFeature = "admin.booked_to_signed"
 	case currentStatus == "booked" && newStatus == "available":
 		requiredFeature = "admin.booked_to_available"
 	case currentStatus == "sa_signed" && newStatus == "sold":
@@ -1346,15 +1536,6 @@ func adminUpdatePlotStatusHandler(w http.ResponseWriter, r *http.Request) {
 			Scan(&buyerName, &buyerPhone, &buyerEmail, &agentName, &deposit, &paymentPlan, &depositRef, &idPhoto, &kra, &passportPhoto)
 		db.Exec(`INSERT IGNORE INTO prop_sales (plot_id, estate_id, buyer_name, buyer_phone, buyer_email, agent_name, amount, payment_plan, deposit_doc, id_doc, kra_doc, passport_photo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
 			plotID, id, buyerName, buyerPhone, buyerEmail, agentName, deposit, paymentPlan, depositRef, idPhoto, kra, passportPhoto)
-	} else if newStatus == "sa_signed" {
-		db.Exec(`UPDATE prop_bookings SET status='sa_signed', date_signed=NOW() WHERE plot_id=? AND status='active'`, plotID)
-		if saleAgreement := saveUploadedFiles(r, "sale_agreement"); saleAgreement != "" {
-			installmentPage := strings.TrimSpace(r.FormValue("installment_page"))
-			db.Exec(`UPDATE prop_bookings SET sale_agreement=?, installment_page=? WHERE plot_id=? AND status='sa_signed'`, saleAgreement, installmentPage, plotID)
-		}
-		if plotIDInt, err2 := strconv.Atoi(plotID); err2 == nil {
-			processSignedIntegrations(plotIDInt, plotNumber, plotEstateName)
-		}
 	} else if newStatus == "available" {
 		// Fetch zoho_books_id before cancelling so we can void the estimate in Zoho Books
 		var zohoBookID string
@@ -1370,7 +1551,57 @@ func adminUpdatePlotStatusHandler(w http.ResponseWriter, r *http.Request) {
 	if newStatus == "available" {
 		redirectStatus = "available"
 	}
-	http.Redirect(w, r, "/admin/estate/"+id+"/plots?status="+redirectStatus, http.StatusFound)
+	redirectBack(w, r, "/admin/estate/"+id+"/plots?status="+redirectStatus, "")
+}
+
+// adminForceSASignedHandler is a system_admin-only emergency override that
+// jumps a booked plot straight to sa_signed, bypassing the Accounts + Legal
+// review chain entirely. Deliberately a separate route and button (not the
+// normal SA-signed flow, which now belongs only to Legal) so it can never be
+// triggered by mistake, and always leaves a distinct, clearly-labeled log
+// entry so the bypass is auditable.
+func adminForceSASignedHandler(w http.ResponseWriter, r *http.Request) {
+	plotID := strings.TrimPrefix(r.URL.Path, "/admin/force-sa-signed/")
+	plotID = strings.Trim(plotID, "/")
+	estateID := r.URL.Query().Get("estate_id")
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/admin/estate/"+estateID+"/plots?status=booked", http.StatusFound)
+		return
+	}
+	r.ParseMultipartForm(10 << 20)
+
+	var currentStatus, plotNumber, plotEstateName string
+	var plotEstateID int
+	err := db.QueryRow(`SELECT p.status, p.estate_id, p.plot_number, e.name
+		FROM prop_plots p JOIN prop_estates e ON e.id = p.estate_id
+		WHERE p.id=?`, plotID).
+		Scan(&currentStatus, &plotEstateID, &plotNumber, &plotEstateName)
+	if err != nil {
+		redirectBack(w, r, "/admin/estate/"+estateID+"/plots?status=booked", "")
+		return
+	}
+
+	saleAgreement := saveUploadedFiles(r, "sale_agreement")
+	if saleAgreement == "" {
+		redirectBack(w, r, "/admin/estate/"+estateID+"/plots?status=booked&err=sale_agreement_required", "")
+		return
+	}
+	installmentPage := strings.TrimSpace(r.FormValue("installment_page"))
+
+	db.Exec(`UPDATE prop_plots SET status='sa_signed' WHERE id=?`, plotID)
+	db.Exec(`UPDATE prop_bookings SET status='sa_signed', date_signed=NOW(), sale_agreement=?, installment_page=?
+		WHERE plot_id=? AND status IN ('active','pending_accounts_review','pending_wakili_review')`,
+		saleAgreement, installmentPage, plotID)
+
+	plotIDInt, _ := strconv.Atoi(plotID)
+	logPlotStatus(plotIDInt, plotNumber, plotEstateName, plotEstateID, currentStatus, "sa_signed", getAgentName(r), "SYSTEM ADMIN FORCE OVERRIDE — bypassed Accounts/Legal review")
+	logBooking("SYSADMIN_FORCE_SA_SIGNED", getAgentName(r), "", plotNumber+" — "+plotEstateName, "forced sa_signed bypassing review chain")
+
+	if plotIDInt != 0 {
+		processSignedIntegrations(plotIDInt, plotNumber, plotEstateName)
+	}
+
+	redirectBack(w, r, "/admin/estate/"+estateID+"/plots?status=sa_signed", "")
 }
 
 func adminMarkSoldHandler(w http.ResponseWriter, r *http.Request) {
@@ -1383,21 +1614,21 @@ func adminMarkSoldHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type markSoldInfo struct {
-		PlotID              string
-		EstateID            string
-		PlotNumber          string
-		EstateName          string
-		BuyerName           string
-		BuyerPhone          string
-		BuyerEmail          string
-		AgentName           string
-		LetterOfConsent     string
-		TransferForms       string
-		TitleDeed           string
+		PlotID               string
+		EstateID             string
+		PlotNumber           string
+		EstateName           string
+		BuyerName            string
+		BuyerPhone           string
+		BuyerEmail           string
+		AgentName            string
+		LetterOfConsent      string
+		TransferForms        string
+		TitleDeed            string
 		LetterOfConsentFiles []string
 		TransferFormsFiles   []string
 		TitleDeedFiles       []string
-		AllDocsPresent      bool
+		AllDocsPresent       bool
 	}
 
 	var info markSoldInfo
@@ -1652,11 +1883,14 @@ func adminEstateBookHandler(w http.ResponseWriter, r *http.Request) {
 
 		var plotNumbers []string
 		var bookedPlotIDs []int
+		var newBookingIDs []int
 		estateIDInt, _ := strconv.Atoi(id)
 		for _, p := range plots {
-			if _, err := db.Exec(`INSERT INTO prop_bookings (plot_id, estate_id, buyer_name, buyer_phone, buyer_email, agent_name, deposit, payment_plan, deposit_ref, id_photo, kra, passport_photo, lead_source, notes, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active')`,
+			if res, err := db.Exec(`INSERT INTO prop_bookings (plot_id, estate_id, buyer_name, buyer_phone, buyer_email, agent_name, deposit, payment_plan, deposit_ref, id_photo, kra, passport_photo, lead_source, notes, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active')`,
 				p.ID, id, buyerName, buyerPhone, buyerEmail, agentName, deposit, paymentPlan, depositRef, idPhoto, kra, passportPhoto, leadSource, notes); err != nil {
 				log.Printf("adminBook: booking insert failed for plot %d: %v", p.ID, err)
+			} else if bid, err2 := res.LastInsertId(); err2 == nil {
+				newBookingIDs = append(newBookingIDs, int(bid))
 			}
 			if _, err := db.Exec(`UPDATE prop_plots SET status='booked' WHERE id=?`, p.ID); err != nil {
 				log.Printf("adminBook: plot status update failed for plot %d: %v", p.ID, err)
@@ -1676,6 +1910,9 @@ func adminEstateBookHandler(w http.ResponseWriter, r *http.Request) {
 			DepositRef: depositRef, IDPhoto: idPhoto, KRA: kra, PassportPhoto: passportPhoto,
 			Notes: notes, RebookConfirmed: rebookConfirmed,
 		})
+		for _, bid := range newBookingIDs {
+			go maybeAdvanceToAccountsReview(bid)
+		}
 		http.Redirect(w, r, "/admin/estate/"+id+"/plots?status=booked", http.StatusFound)
 		return
 	}
@@ -1690,6 +1927,29 @@ func adminEstateBookHandler(w http.ResponseWriter, r *http.Request) {
 	renderBookForm(plots, estateName, "")
 }
 
+// lawyerOption is one Legal-role user, selectable as the estate's assigned
+// lawyer (each estate's sale agreements are handled by exactly one lawyer).
+type lawyerOption struct {
+	ID   int
+	Name string
+}
+
+func loadLawyers() []lawyerOption {
+	rows, err := db.Query(`SELECT id, name FROM prop_agents WHERE role='legal' ORDER BY name`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []lawyerOption
+	for rows.Next() {
+		var l lawyerOption
+		if rows.Scan(&l.ID, &l.Name) == nil {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
 func adminAddEstateHandler(w http.ResponseWriter, r *http.Request) {
 	var formErr string
 	if r.Method == http.MethodPost {
@@ -1700,8 +1960,14 @@ func adminAddEstateHandler(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimSpace(r.FormValue("name"))
 		plotInfo := r.FormValue("prop_plotinfo")
 		plotPrice := r.FormValue("plot_price")
+		depositThreshold := strings.TrimSpace(r.FormValue("deposit_threshold"))
+		lawyerID := strings.TrimSpace(r.FormValue("lawyer_id"))
 		if name == "" {
 			formErr = "Estate name is required"
+		} else if depositThreshold == "" {
+			formErr = "Deposit threshold is required"
+		} else if lawyerID == "" {
+			formErr = "Assigned lawyer is required"
 		} else {
 			var mutationImage string
 			file, header, ferr := r.FormFile("mutation_image")
@@ -1731,8 +1997,8 @@ func adminAddEstateHandler(w http.ResponseWriter, r *http.Request) {
 			if r.FormValue("visibility") == "hide" {
 				isRestricted = 1
 			}
-			res, ierr := db.Exec(`INSERT INTO prop_estates (name, prop_plotinfo, mutation_image, plot_price, is_restricted) VALUES (?,?,?,?,?)`,
-				name, plotInfo, mutationImage, plotPriceVal, isRestricted)
+			res, ierr := db.Exec(`INSERT INTO prop_estates (name, prop_plotinfo, mutation_image, plot_price, is_restricted, deposit_threshold, lawyer_id) VALUES (?,?,?,?,?,?,?)`,
+				name, plotInfo, mutationImage, plotPriceVal, isRestricted, depositThreshold, lawyerID)
 			if ierr != nil {
 				log.Printf("add estate: %v", ierr)
 				formErr = "Database error creating estate"
@@ -1747,173 +2013,15 @@ func adminAddEstateHandler(w http.ResponseWriter, r *http.Request) {
 		"Title":     "Add Estate",
 		"Active":    "add-estate",
 		"FormError": formErr,
+		"Lawyers":   loadLawyers(),
 	})
 }
 func adminAddPlotsHandler(w http.ResponseWriter, r *http.Request) {
 	renderAdmin(w, r, "admin_placeholder.html", map[string]any{"Title": "Add Plots", "Active": "add-plots", "Message": "Add Plots form (placeholder)."})
 }
-func adminCreateUserHandler(w http.ResponseWriter, r *http.Request) {
-	type userRow struct {
-		ID    int
-		Name  string
-		Email string
-		Phone string
-		Role  string
-	}
 
-	var formErr, formSuccess string
-
-	if r.Method == http.MethodPost {
-		r.ParseForm()
-		name := strings.TrimSpace(r.FormValue("name"))
-		email := strings.TrimSpace(r.FormValue("email"))
-		password := r.FormValue("password")
-		phone := strings.TrimSpace(r.FormValue("phone"))
-		role := r.FormValue("role")
-
-		switch {
-		case name == "":
-			formErr = "Name is required"
-		case email == "":
-			formErr = "Email is required"
-		case len(password) < 6:
-			formErr = "Password must be at least 6 characters"
-		case role != roleAdmin && role != roleAgent:
-			formErr = "Invalid role"
-		default:
-			var cnt int
-			db.QueryRow(`SELECT COUNT(*) FROM prop_agents WHERE email=?`, email).Scan(&cnt)
-			if cnt > 0 {
-				formErr = "A user with that email already exists"
-			} else {
-				hash, herr := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-				if herr != nil {
-					formErr = "Could not hash password"
-				} else {
-					_, ierr := db.Exec(`INSERT INTO prop_agents (name, email, password, phone, role) VALUES (?,?,?,?,?)`,
-						name, email, string(hash), phone, role)
-					if ierr != nil {
-						log.Printf("create user: %v", ierr)
-						formErr = "Database error"
-					} else {
-						formSuccess = "User created successfully"
-					}
-				}
-			}
-		}
-	}
-
-	// Handle delete
-	if r.Method == http.MethodGet {
-		if del := r.URL.Query().Get("delete"); del != "" {
-			db.Exec(`DELETE FROM prop_agents WHERE id=?`, del)
-			http.Redirect(w, r, "/admin/create-user", http.StatusFound)
-			return
-		}
-	}
-
-	rows, _ := db.Query(`SELECT id, name, email, COALESCE(phone,''), role FROM prop_agents ORDER BY name`)
-	var users []userRow
-	if rows != nil {
-		defer rows.Close()
-		for rows.Next() {
-			var u userRow
-			if rows.Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &u.Role) == nil {
-				users = append(users, u)
-			}
-		}
-	}
-
-	renderAdmin(w, r, "admin_create_user.html", map[string]any{
-		"Title":       "Create User",
-		"Active":      "create-user",
-		"Users":       users,
-		"FormError":   formErr,
-		"FormSuccess": formSuccess,
-	})
-}
-
-func adminEditUserHandler(w http.ResponseWriter, r *http.Request) {
-	userID := strings.TrimPrefix(r.URL.Path, "/admin/edit-user/")
-	userID = strings.Trim(userID, "/")
-	if userID == "" {
-		http.Redirect(w, r, "/admin/create-user", http.StatusFound)
-		return
-	}
-
-	type userRow struct {
-		ID    int
-		Name  string
-		Email string
-		Phone string
-		Role  string
-	}
-
-	var u userRow
-	err := db.QueryRow(`SELECT id, name, email, COALESCE(phone,''), role FROM prop_agents WHERE id=?`, userID).
-		Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &u.Role)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-
-	var formErr, formSuccess string
-
-	if r.Method == http.MethodPost {
-		r.ParseForm()
-		name := strings.TrimSpace(r.FormValue("name"))
-		email := strings.TrimSpace(r.FormValue("email"))
-		phone := strings.TrimSpace(r.FormValue("phone"))
-		role := r.FormValue("role")
-		newPassword := r.FormValue("new_password")
-
-		switch {
-		case name == "":
-			formErr = "Name is required"
-		case email == "":
-			formErr = "Email is required"
-		case role != roleAdmin && role != roleAgent:
-			formErr = "Invalid role"
-		default:
-			// Check email uniqueness (excluding this user)
-			var cnt int
-			db.QueryRow(`SELECT COUNT(*) FROM prop_agents WHERE email=? AND id!=?`, email, userID).Scan(&cnt)
-			if cnt > 0 {
-				formErr = "Another user with that email already exists"
-			} else if newPassword != "" && len(newPassword) < 6 {
-				formErr = "New password must be at least 6 characters"
-			} else {
-				if newPassword != "" {
-					hash, herr := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
-					if herr != nil {
-						formErr = "Could not hash password"
-					} else {
-						db.Exec(`UPDATE prop_agents SET name=?, email=?, phone=?, role=?, password=? WHERE id=?`,
-							name, email, phone, role, string(hash), userID)
-					}
-				} else {
-					db.Exec(`UPDATE prop_agents SET name=?, email=?, phone=?, role=? WHERE id=?`,
-						name, email, phone, role, userID)
-				}
-				if formErr == "" {
-					formSuccess = "User updated successfully"
-					u.Name = name
-					u.Email = email
-					u.Phone = phone
-					u.Role = role
-				}
-			}
-		}
-	}
-
-	renderAdmin(w, r, "admin_edit_user.html", map[string]any{
-		"Title":       "Edit User — " + u.Name,
-		"Active":      "create-user",
-		"User":        u,
-		"FormError":   formErr,
-		"FormSuccess": formSuccess,
-	})
-}
+// User creation, editing, and password resets moved to settings.go under
+// /settings/* — see settingsUsersHandler / settingsEditUserHandler.
 
 // filterAgentsAndEstates loads dropdown data for the filter bar.
 type filterOption struct {
@@ -1950,6 +2058,7 @@ func adminBookedPlotsHandler(w http.ResponseWriter, r *http.Request) {
 	fEstate := q.Get("estate")
 	fFrom := q.Get("date_from")
 	fTo := q.Get("date_to")
+	fLawyer := q.Get("lawyer")
 
 	query := `
 		SELECT b.id, p.id, e.id, b.buyer_name, COALESCE(b.buyer_phone,''), e.name, p.plot_number,
@@ -1958,10 +2067,11 @@ func adminBookedPlotsHandler(w http.ResponseWriter, r *http.Request) {
 			COALESCE(DATE_FORMAT(b.booking_deadline,'%d %b %Y'),
 			         DATE_FORMAT(DATE_ADD(b.date_booked, INTERVAL 14 DAY),'%d %b %Y')),
 			DATEDIFF(COALESCE(b.booking_deadline, DATE_ADD(b.date_booked, INTERVAL 14 DAY)), NOW()),
-			COALESCE(b.zoho_books_id,''), COALESCE(b.batch_ref,'')
+			COALESCE(b.zoho_books_id,''), COALESCE(b.batch_ref,''), COALESCE(lw.name,'')
 		FROM prop_bookings b
 		JOIN prop_estates e ON b.estate_id = e.id
 		JOIN prop_plots p ON b.plot_id = p.id
+		LEFT JOIN prop_agents lw ON lw.id = e.lawyer_id
 		JOIN (
 			SELECT plot_id, MAX(id) AS latest_id
 			FROM prop_bookings
@@ -1986,6 +2096,10 @@ func adminBookedPlotsHandler(w http.ResponseWriter, r *http.Request) {
 		query += " AND DATE(b.date_booked) <= ?"
 		args = append(args, fTo)
 	}
+	if fLawyer != "" {
+		query += " AND e.lawyer_id = ?"
+		args = append(args, fLawyer)
+	}
 	query += " ORDER BY b.date_booked DESC"
 
 	type bookingRow struct {
@@ -2004,6 +2118,7 @@ func adminBookedPlotsHandler(w http.ResponseWriter, r *http.Request) {
 		DaysRemaining int
 		ZohoBooksID   string
 		BatchRef      string
+		LawyerName    string
 	}
 	rows, err := db.Query(query, args...)
 	if err != nil {
@@ -2015,7 +2130,7 @@ func adminBookedPlotsHandler(w http.ResponseWriter, r *http.Request) {
 	var bookings []bookingRow
 	for rows.Next() {
 		var b bookingRow
-		if err := rows.Scan(&b.BookingID, &b.PlotID, &b.EstateID, &b.BuyerName, &b.BuyerPhone, &b.EstateName, &b.PlotNumber, &b.AgentName, &b.DateBooked, &b.Status, &b.DaysBooked, &b.Deadline, &b.DaysRemaining, &b.ZohoBooksID, &b.BatchRef); err != nil {
+		if err := rows.Scan(&b.BookingID, &b.PlotID, &b.EstateID, &b.BuyerName, &b.BuyerPhone, &b.EstateName, &b.PlotNumber, &b.AgentName, &b.DateBooked, &b.Status, &b.DaysBooked, &b.Deadline, &b.DaysRemaining, &b.ZohoBooksID, &b.BatchRef, &b.LawyerName); err != nil {
 			log.Printf("booked scan: %v", err)
 			continue
 		}
@@ -2030,11 +2145,12 @@ func adminBookedPlotsHandler(w http.ResponseWriter, r *http.Request) {
 		"Bookings":             bookings,
 		"Agents":               agents,
 		"Estates":              estates,
+		"Lawyers":              loadLawyers(),
 		"FAgent":               fAgent,
 		"FEstate":              fEstate,
 		"FFrom":                fFrom,
 		"FTo":                  fTo,
-		"CanBookedToSigned":    isSA || hasPermission(uid, "admin.booked_to_signed", "read"),
+		"FLawyer":              fLawyer,
 		"CanBookedToAvailable": isSA || hasPermission(uid, "admin.booked_to_available", "read"),
 		"CanExtendBooking":     isSA || hasPermission(uid, "admin.extend_booking", "read"),
 		"Success":              r.URL.Query().Get("extended"),
@@ -2074,14 +2190,14 @@ func adminRetryZohoHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if zohoBookID != "" {
-		http.Redirect(w, r, "/admin/booked-plots", http.StatusFound)
+		redirectBack(w, r, "/admin/booked-plots", "booking-"+bookingID)
 		return
 	}
 	b.PlotIDs = []int{plotID}
 	b.PlotNumbers = []string{plotNumber}
 	b.Deposit = fmt.Sprintf("%.0f", deposit)
 	go createBooksRecordForBooking(b)
-	http.Redirect(w, r, "/admin/booked-plots?zoho_retry=1", http.StatusFound)
+	redirectBack(w, r, "/admin/booked-plots?zoho_retry=1", "booking-"+bookingID, "zoho_retry=1")
 }
 
 // adminRetryZohoSignedHandler retries Zoho Books creation for SA Signed plots
@@ -2118,7 +2234,7 @@ func adminRetryZohoSignedHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if zohoBookID != "" {
-		http.Redirect(w, r, "/admin/signed-plots", http.StatusFound)
+		redirectBack(w, r, "/admin/signed-plots", "booking-"+bookingID)
 		return
 	}
 	b.PlotIDs = []int{plotID}
@@ -2135,7 +2251,7 @@ func adminRetryZohoSignedHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[zoho-books] signed retry stored estimate %s for booking %s", booksID, bookingID)
 	}()
 
-	http.Redirect(w, r, "/admin/signed-plots?zoho_retry=1", http.StatusFound)
+	redirectBack(w, r, "/admin/signed-plots?zoho_retry=1", "booking-"+bookingID, "zoho_retry=1")
 }
 
 // extendBookingHandler handles POST /admin/booking-extend/{id}
@@ -2152,7 +2268,7 @@ func extendBookingHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	days, _ := strconv.Atoi(strings.TrimSpace(r.FormValue("days")))
 	if days <= 0 {
-		http.Redirect(w, r, "/admin/booked-plots", http.StatusFound)
+		redirectBack(w, r, "/admin/booked-plots", "booking-"+bookingID)
 		return
 	}
 	// Extend: move deadline forward by N days from current deadline (or date_booked+14 if none set)
@@ -2164,7 +2280,7 @@ func extendBookingHandler(w http.ResponseWriter, r *http.Request) {
 		)
 		WHERE id = ?`, days, bookingID)
 
-	http.Redirect(w, r, "/admin/booked-plots?extended=1", http.StatusFound)
+	redirectBack(w, r, "/admin/booked-plots?extended=1", "booking-"+bookingID, "extended=1")
 }
 
 func adminSignedPlotsHandler(w http.ResponseWriter, r *http.Request) {
@@ -3472,11 +3588,14 @@ func agentEstateBookHandler(w http.ResponseWriter, r *http.Request) {
 
 		var plotNumbers []string
 		var bookedPlotIDs []int
+		var newBookingIDs []int
 		agentEstateIDInt, _ := strconv.Atoi(id)
 		for _, p := range plots {
-			if _, err := db.Exec(`INSERT INTO prop_bookings (plot_id, estate_id, buyer_name, buyer_phone, buyer_email, agent_name, deposit, payment_plan, deposit_ref, id_photo, kra, passport_photo, lead_source, notes, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active')`,
+			if res, err := db.Exec(`INSERT INTO prop_bookings (plot_id, estate_id, buyer_name, buyer_phone, buyer_email, agent_name, deposit, payment_plan, deposit_ref, id_photo, kra, passport_photo, lead_source, notes, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active')`,
 				p.ID, id, buyerName, buyerPhone, buyerEmail, agentName, deposit, paymentPlan, depositRef, idPhoto, kra, passportPhoto, leadSource, notes); err != nil {
 				log.Printf("agentBook: booking insert failed for plot %d: %v", p.ID, err)
+			} else if bid, err2 := res.LastInsertId(); err2 == nil {
+				newBookingIDs = append(newBookingIDs, int(bid))
 			}
 			if _, err := db.Exec(`UPDATE prop_plots SET status='booked' WHERE id=?`, p.ID); err != nil {
 				log.Printf("agentBook: plot status update failed for plot %d: %v", p.ID, err)
@@ -3496,6 +3615,9 @@ func agentEstateBookHandler(w http.ResponseWriter, r *http.Request) {
 			DepositRef: depositRef, IDPhoto: idPhoto, KRA: kra, PassportPhoto: passportPhoto,
 			Notes: notes, RebookConfirmed: rebookConfirmed,
 		})
+		for _, bid := range newBookingIDs {
+			go maybeAdvanceToAccountsReview(bid)
+		}
 		http.Redirect(w, r, "/agent/estate/"+id+"/plots?status=booked&booked=1", http.StatusFound)
 		return
 	}
@@ -3621,9 +3743,14 @@ func cartCheckoutHandler(w http.ResponseWriter, r *http.Request, cartPath, recei
 	}
 	groups := map[int]*estateGroup{}
 
+	var newBookingIDs []int
 	for _, cp := range plots {
-		db.Exec(`INSERT INTO prop_bookings (plot_id, estate_id, buyer_name, buyer_phone, buyer_email, agent_name, deposit, payment_plan, deposit_ref, id_photo, kra, passport_photo, lead_source, notes, batch_ref, receipt_number, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active')`,
-			cp.ID, cp.EstateID, buyerName, buyerPhone, buyerEmail, agentName, deposit, paymentPlan, depositRef, idPhoto, kra, passportPhoto, leadSource, notes, batchRef, receiptNumber)
+		if res, err := db.Exec(`INSERT INTO prop_bookings (plot_id, estate_id, buyer_name, buyer_phone, buyer_email, agent_name, deposit, payment_plan, deposit_ref, id_photo, kra, passport_photo, lead_source, notes, batch_ref, receipt_number, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active')`,
+			cp.ID, cp.EstateID, buyerName, buyerPhone, buyerEmail, agentName, deposit, paymentPlan, depositRef, idPhoto, kra, passportPhoto, leadSource, notes, batchRef, receiptNumber); err == nil {
+			if bid, err2 := res.LastInsertId(); err2 == nil {
+				newBookingIDs = append(newBookingIDs, int(bid))
+			}
+		}
 		db.Exec(`UPDATE prop_plots SET status='booked' WHERE id=?`, cp.ID)
 		logPlotStatus(cp.ID, cp.Number, cp.EstateName, cp.EstateID, "available", "booked", agentName, "booked")
 
@@ -3651,6 +3778,10 @@ func cartCheckoutHandler(w http.ResponseWriter, r *http.Request, cartPath, recei
 	logBooking("PLOT_BOOKED", agentName, buyerName,
 		strings.Join(allNums, ", "),
 		fmt.Sprintf("Deposit: KES %s | Plan: %s | Batch: %s", deposit, paymentPlan, batchRef))
+
+	for _, bid := range newBookingIDs {
+		go maybeAdvanceToAccountsReview(bid)
+	}
 
 	http.Redirect(w, r, receiptBasePath+batchRef, http.StatusFound)
 }
@@ -4014,10 +4145,18 @@ func bookingAttachmentsHandler(w http.ResponseWriter, r *http.Request, tmplName,
 		logBooking("DOCS_UPLOADED", info.AgentName, info.BuyerName,
 			info.PlotNumber+" — "+info.EstateName, docStatus)
 
-		// When all docs are now present, notify sales and systemadmin only.
-		// Info and accounts were already notified at booking time.
+		// When all docs are now present, check whether the deposit already meets
+		// the estate's threshold too — if so, this booking moves straight to
+		// Accounts review instead of just sending the "docs complete" email.
 		if allDocs {
 			go func() {
+				advanced, err := maybeAdvanceToAccountsReview(info.BookingID)
+				if err != nil {
+					log.Printf("[accounts-review] check error for booking %d: %v", info.BookingID, err)
+				}
+				if advanced {
+					return
+				}
 				b := bookingInfo{
 					PlotIDs: []int{info.PlotID}, BuyerName: info.BuyerName, BuyerPhone: info.BuyerPhone, BuyerEmail: info.BuyerEmail,
 					EstateName: info.EstateName, PlotNumbers: []string{info.PlotNumber},
@@ -4081,11 +4220,20 @@ func agentBookingAttachmentsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // bookingReceiptGenerateHandler creates a new booking confirmation receipt record.
+// bookingReceiptGenerateHandler both records a printable payment receipt AND
+// tops up the booking's running deposit total by the same amount — a receipt
+// generated here is the "add a payment reference + add the deposit amount"
+// action, since the two are the same real-world event (a payment came in).
+// An optional payment-reference file gets appended to deposit_ref alongside
+// the initial deposit proof, and the accounts-review trigger is re-checked
+// afterward in case this top-up pushes the deposit to/above the estate's
+// threshold.
 func bookingReceiptGenerateHandler(w http.ResponseWriter, r *http.Request, isAdmin bool) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	r.ParseMultipartForm(32 << 20)
 	bookingIDStr := strings.TrimSpace(r.FormValue("booking_id"))
 	amountStr := strings.TrimSpace(r.FormValue("amount"))
 	if bookingIDStr == "" || amountStr == "" {
@@ -4095,7 +4243,8 @@ func bookingReceiptGenerateHandler(w http.ResponseWriter, r *http.Request, isAdm
 
 	// Verify booking exists
 	var bookingID int
-	if err := db.QueryRow(`SELECT id FROM prop_bookings WHERE id=?`, bookingIDStr).Scan(&bookingID); err != nil {
+	var existingDepositRef string
+	if err := db.QueryRow(`SELECT id, COALESCE(deposit_ref,'') FROM prop_bookings WHERE id=?`, bookingIDStr).Scan(&bookingID, &existingDepositRef); err != nil {
 		http.NotFound(w, r)
 		return
 	}
@@ -4114,6 +4263,18 @@ func bookingReceiptGenerateHandler(w http.ResponseWriter, r *http.Request, isAdm
 		return
 	}
 	newID, _ = res.LastInsertId()
+
+	// Payment reference file is optional — the amount alone still tops up the deposit.
+	if newRef := saveUploadedFiles(r, "payment_reference"); newRef != "" {
+		depositRef := newRef
+		if existingDepositRef != "" {
+			depositRef = existingDepositRef + "," + newRef
+		}
+		db.Exec(`UPDATE prop_bookings SET deposit_ref=? WHERE id=?`, depositRef, bookingID)
+	}
+	db.Exec(`UPDATE prop_bookings SET deposit = COALESCE(deposit,0) + ? WHERE id=?`, amountStr, bookingID)
+
+	go maybeAdvanceToAccountsReview(bookingID)
 
 	prefix := "/agent"
 	if isAdmin {
@@ -4299,10 +4460,10 @@ func adminEstateEditHandler(w http.ResponseWriter, r *http.Request) {
 	id := r.Context().Value(ctxID).(string)
 
 	var estateName, image, mutationImage, plotInfo string
-	var plotPrice float64
-	var isRestricted int
-	err := db.QueryRow(`SELECT name, COALESCE(image,''), COALESCE(mutation_image,''), COALESCE(prop_plotinfo,''), COALESCE(plot_price,0), COALESCE(is_restricted,0) FROM prop_estates WHERE id = ?`, id).
-		Scan(&estateName, &image, &mutationImage, &plotInfo, &plotPrice, &isRestricted)
+	var plotPrice, depositThreshold float64
+	var isRestricted, lawyerID int
+	err := db.QueryRow(`SELECT name, COALESCE(image,''), COALESCE(mutation_image,''), COALESCE(prop_plotinfo,''), COALESCE(plot_price,0), COALESCE(is_restricted,0), COALESCE(deposit_threshold,0), COALESCE(lawyer_id,0) FROM prop_estates WHERE id = ?`, id).
+		Scan(&estateName, &image, &mutationImage, &plotInfo, &plotPrice, &isRestricted, &depositThreshold, &lawyerID)
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -4317,6 +4478,8 @@ func adminEstateEditHandler(w http.ResponseWriter, r *http.Request) {
 		name := r.FormValue("name")
 		newPlotInfo := r.FormValue("prop_plotinfo")
 		newPlotPrice := r.FormValue("plot_price")
+		newDepositThreshold := strings.TrimSpace(r.FormValue("deposit_threshold"))
+		newLawyerID := strings.TrimSpace(r.FormValue("lawyer_id"))
 		newIsRestricted := 0
 		if r.FormValue("visibility") == "hide" {
 			newIsRestricted = 1
@@ -4359,15 +4522,19 @@ func adminEstateEditHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Always update the text fields; only update mutation_image if a new one was saved.
 		var dbErr string
-		if imageUpdated {
-			if _, uerr := db.Exec(`UPDATE prop_estates SET name=?, prop_plotinfo=?, mutation_image=?, plot_price=?, is_restricted=? WHERE id=?`,
-				name, newPlotInfo, newMutationImage, newPlotPrice, newIsRestricted, id); uerr != nil {
+		if newDepositThreshold == "" {
+			dbErr = "Deposit threshold is required"
+		} else if newLawyerID == "" {
+			dbErr = "Assigned lawyer is required"
+		} else if imageUpdated {
+			if _, uerr := db.Exec(`UPDATE prop_estates SET name=?, prop_plotinfo=?, mutation_image=?, plot_price=?, is_restricted=?, deposit_threshold=?, lawyer_id=? WHERE id=?`,
+				name, newPlotInfo, newMutationImage, newPlotPrice, newIsRestricted, newDepositThreshold, newLawyerID, id); uerr != nil {
 				log.Printf("estate edit update (with image): %v", uerr)
 				dbErr = fmt.Sprintf("Database error: %v", uerr)
 			}
 		} else {
-			if _, uerr := db.Exec(`UPDATE prop_estates SET name=?, prop_plotinfo=?, plot_price=?, is_restricted=? WHERE id=?`,
-				name, newPlotInfo, newPlotPrice, newIsRestricted, id); uerr != nil {
+			if _, uerr := db.Exec(`UPDATE prop_estates SET name=?, prop_plotinfo=?, plot_price=?, is_restricted=?, deposit_threshold=?, lawyer_id=? WHERE id=?`,
+				name, newPlotInfo, newPlotPrice, newIsRestricted, newDepositThreshold, newLawyerID, id); uerr != nil {
 				log.Printf("estate edit update: %v", uerr)
 				dbErr = fmt.Sprintf("Database error: %v", uerr)
 			}
@@ -4385,15 +4552,18 @@ func adminEstateEditHandler(w http.ResponseWriter, r *http.Request) {
 			zonesFallback := []zoneDisplay{}
 			zonesJSONFallback, _ := json.Marshal(zonesFallback)
 			renderAdmin(w, r, "admin_estate_edit.html", map[string]any{
-				"Title":        "Edit " + estateName,
-				"Active":       "estates",
-				"EstateName":   name,
-				"EstateID":     id,
-				"PlotInfo":     strings.ReplaceAll(newPlotInfo, "\r", ""),
-				"PlotPrice":    newPlotPrice,
-				"DisplayImage": displayImage,
-				"ZonesJSON":    template.JS(zonesJSONFallback),
-				"SaveError":    saveErr,
+				"Title":            "Edit " + estateName,
+				"Active":           "estates",
+				"EstateName":       name,
+				"EstateID":         id,
+				"PlotInfo":         strings.ReplaceAll(newPlotInfo, "\r", ""),
+				"PlotPrice":        newPlotPrice,
+				"DepositThreshold": newDepositThreshold,
+				"LawyerID":         newLawyerID,
+				"Lawyers":          loadLawyers(),
+				"DisplayImage":     displayImage,
+				"ZonesJSON":        template.JS(zonesJSONFallback),
+				"SaveError":        saveErr,
 			})
 			return
 		}
@@ -4433,16 +4603,19 @@ func adminEstateEditHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	renderAdmin(w, r, "admin_estate_edit.html", map[string]any{
-		"Title":        "Edit " + estateName,
-		"Active":       "estates",
-		"EstateName":   estateName,
-		"EstateID":     id,
-		"PlotInfo":     strings.ReplaceAll(plotInfo, "\r", ""),
-		"PlotPrice":    plotPrice,
-		"IsRestricted": isRestricted == 1,
-		"DisplayImage": displayImage,
-		"ZonesJSON":    template.JS(zonesJSON),
-		"SaveOK":       r.URL.Query().Get("saved") == "1",
+		"Title":            "Edit " + estateName,
+		"Active":           "estates",
+		"EstateName":       estateName,
+		"EstateID":         id,
+		"PlotInfo":         strings.ReplaceAll(plotInfo, "\r", ""),
+		"PlotPrice":        plotPrice,
+		"DepositThreshold": depositThreshold,
+		"LawyerID":         strconv.Itoa(lawyerID),
+		"Lawyers":          loadLawyers(),
+		"IsRestricted":     isRestricted == 1,
+		"DisplayImage":     displayImage,
+		"ZonesJSON":        template.JS(zonesJSON),
+		"SaveOK":           r.URL.Query().Get("saved") == "1",
 	})
 }
 

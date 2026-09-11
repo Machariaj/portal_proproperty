@@ -409,3 +409,16 @@ button:hover { background: var(--primary-hover); }
   .top-bar { flex-direction: column; align-items: stretch; }
   .upload-grid { grid-template-columns: 1fr !important; }
 }
+
+/* ── Row highlight on return ──
+   After acting on one row (block/unblock, retry, extend, etc.), the handler
+   redirects back to #<row-id> so the browser scrolls straight to it; this
+   briefly flashes that row so it's clear the action landed and where you
+   are, instead of losing your place in a long list. */
+tr:target {
+  animation: rowFlash 1.6s ease-out;
+}
+@keyframes rowFlash {
+  0%   { background: #fef9c3; }
+  100% { background: transparent; }
+}

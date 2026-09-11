@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/tls"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -78,6 +79,13 @@ var soldRecipients = []string{
 	"sales@proproperty.co.ke",
 	"systemadmin@proproperty.co.ke",
 	"sales@proproperty.co.ke",
+}
+
+// reviewOutcomeRecipients — a terminal outcome from the Accounts or Legal
+// review stage: Accounts cancelling, or Legal signing/cancelling.
+var reviewOutcomeRecipients = []string{
+	"sales@proproperty.co.ke",
+	"accounts@proproperty.co.ke",
 }
 
 // ─── Token Cache ──────────────────────────────────────────────────────────────
@@ -170,6 +178,81 @@ func hasAllAttachments(b bookingInfo) bool {
 	return b.DepositRef != "" && b.IDPhoto != "" && b.KRA != "" && b.PassportPhoto != ""
 }
 
+// maybeAdvanceToAccountsReview checks whether a booking now satisfies both
+// entry conditions for the Accounts review queue — all four KYC docs present,
+// and the deposit paid at or above the estate's deposit_threshold — and, if
+// so, flips it from 'active' to 'pending_accounts_review'. No-ops (returns
+// false, nil) if the booking isn't currently 'active', so it's safe to call
+// redundantly from every path that can change docs or deposit (booking
+// creation, doc upload, deposit top-up).
+func maybeAdvanceToAccountsReview(bookingID int) (bool, error) {
+	var status, depositRef, idPhoto, kra, passportPhoto, depositStr string
+	var threshold sql.NullFloat64
+	err := db.QueryRow(`
+		SELECT b.status, COALESCE(b.deposit_ref,''), COALESCE(b.id_photo,''),
+		       COALESCE(b.kra,''), COALESCE(b.passport_photo,''),
+		       COALESCE(CAST(b.deposit AS CHAR),'0'), e.deposit_threshold
+		FROM prop_bookings b
+		JOIN prop_estates e ON e.id = b.estate_id
+		WHERE b.id = ?`, bookingID).
+		Scan(&status, &depositRef, &idPhoto, &kra, &passportPhoto, &depositStr, &threshold)
+	if err != nil {
+		return false, err
+	}
+	if status != "active" {
+		return false, nil
+	}
+	if !hasAllAttachments(bookingInfo{DepositRef: depositRef, IDPhoto: idPhoto, KRA: kra, PassportPhoto: passportPhoto}) {
+		return false, nil
+	}
+	var deposit float64
+	fmt.Sscanf(depositStr, "%f", &deposit)
+	if threshold.Valid && deposit < threshold.Float64 {
+		return false, nil
+	}
+	res, err := db.Exec(`UPDATE prop_bookings SET status='pending_accounts_review' WHERE id=? AND status='active'`, bookingID)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return false, nil
+	}
+	logBooking("ACCOUNTS_REVIEW_QUEUED", "", "", fmt.Sprintf("booking %d", bookingID), "docs complete and deposit threshold met")
+	return true, nil
+}
+
+// sendReviewOutcomeEmail notifies sales+accounts of a terminal outcome from
+// the Accounts or Legal review stage — outcome is one of "accounts_cancelled",
+// "legal_signed", "legal_cancelled". devMode-gated internally via sendPlainEmail.
+func sendReviewOutcomeEmail(outcome, plotNumber, estateName, buyerName, buyerPhone, agentName, notes string) error {
+	subjectByOutcome := map[string]string{
+		"accounts_cancelled": "Booking Cancelled by Accounts",
+		"legal_signed":       "Sale Agreement Signed",
+		"legal_cancelled":    "Booking Cancelled by Legal",
+	}
+	label := subjectByOutcome[outcome]
+	if label == "" {
+		label = "Booking Review Outcome"
+	}
+	subject := fmt.Sprintf("%s — %s — Plot %s", label, estateName, plotNumber)
+	body := fmt.Sprintf(
+		"Outcome:        %s\r\n\r\n"+
+			"Estate:         %s\r\n"+
+			"Plot:           %s\r\n"+
+			"Buyer Name:     %s\r\n"+
+			"Phone:          %s\r\n"+
+			"Agent:          %s\r\n"+
+			"Date:           %s\r\n",
+		label, estateName, plotNumber, buyerName, buyerPhone, agentName,
+		time.Now().Format("02 Jan 2006 15:04"),
+	)
+	if strings.TrimSpace(notes) != "" {
+		body += fmt.Sprintf("\r\nNotes:\r\n%s\r\n", notes)
+	}
+	return sendPlainEmail(reviewOutcomeRecipients, subject, body)
+}
+
 // processBookingIntegrations runs booking-time integrations asynchronously.
 // Zoho Books estimate is created here (at booking time) so a unique reference ID
 // is available when the plot later moves to SA Signed.
@@ -177,6 +260,12 @@ func hasAllAttachments(b bookingInfo) bool {
 func processBookingIntegrations(b bookingInfo) {
 	// Zoho Books always runs — devMode only blocks email/SMS.
 	go createBooksRecordForBooking(b)
+
+	// Buyer-facing "thank you for booking" SMS fires on every booking,
+	// regardless of whether docs/deposit are already complete — it's the
+	// start of the 14-day KYC/deposit clock, not a completion notice.
+	// vanbooking.SendSMS self-gates on devMode, safe to call unconditionally.
+	go sendBuyerBookingConfirmationSMS(b)
 
 	if devMode {
 		log.Printf("[devMode] notifications skipped for %s — email and SMS disabled", b.BuyerName)
@@ -211,6 +300,38 @@ func processBookingIntegrations(b bookingInfo) {
 		go vanbooking.SendSMS("254721866681", smsMsg)
 		go vanbooking.SendSMS("254798811426", smsMsg)
 	}()
+}
+
+// sendBuyerBookingConfirmationSMS sends the buyer the initial "thank you for
+// booking" SMS: which plot(s)/estate, the 14-day window to pay the estate's
+// deposit threshold and submit KYC docs (ID copy, KRA PIN, passport photo),
+// and that the plot reverts to available if either isn't met in time. Fired
+// once per booking from processBookingIntegrations regardless of docs/
+// deposit completeness at booking time — see checkClientReminderSMS (day
+// 10-14 follow-ups) and checkOverdueBookings' release notice (scheduler.go)
+// for the rest of this SMS sequence.
+func sendBuyerBookingConfirmationSMS(b bookingInfo) {
+	if b.BuyerPhone == "" {
+		return
+	}
+	plotStr := strings.Join(b.PlotNumbers, ", ")
+
+	thresholdMsg := "the set deposit threshold"
+	if len(b.PlotIDs) > 0 {
+		var threshold sql.NullFloat64
+		db.QueryRow(`SELECT e.deposit_threshold FROM prop_plots p JOIN prop_estates e ON e.id=p.estate_id WHERE p.id=?`,
+			b.PlotIDs[0]).Scan(&threshold)
+		if threshold.Valid && threshold.Float64 > 0 {
+			thresholdMsg = fmt.Sprintf("the deposit threshold of KES %.0f", threshold.Float64)
+		}
+	}
+
+	msg := fmt.Sprintf(
+		"Thank you for booking Plot %s at %s. You have 14 days from today to pay %s and share your ID copy, KRA PIN and passport-size photo (soft copy). "+
+			"If either is not done within 14 days, the plot will be released back to available. - Pro-Property",
+		plotStr, b.EstateName, thresholdMsg,
+	)
+	vanbooking.SendSMS(b.BuyerPhone, msg)
 }
 
 // sendPendingDocsAlert notifies bookingPendingRecipients that a booking was made

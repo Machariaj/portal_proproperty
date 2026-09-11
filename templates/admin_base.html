@@ -43,7 +43,9 @@
             {{ end }}
             <li><a href="/admin/add-estate" {{ if eq .Active "add-estate" }}class="active" {{ end }}>Add Estate</a></li>
             {{/* Add Plots removed – plots are added via the zone editor on each estate */}}
-            <li><a href="/admin/create-user" {{ if eq .Active "create-user" }}class="active" {{ end }}>Create User</a></li>
+            {{ if .IsSystemAdmin }}
+            <li><a href="/settings/users">⚙ Settings</a></li>
+            {{ end }}
             <li>
                 <a href="/admin/cart" {{ if eq .Active "cart" }}class="active" {{ end }} style="display:flex;align-items:center;justify-content:space-between;">
                     <span>🛒 Booking Cart</span>
@@ -64,9 +66,6 @@
                     }}>Completed Projects</a></li>
             <li><a href="/admin/export-reports" {{ if eq .Active "export-reports" }}class="active" {{ end }}>Export
                     Reports</a></li>
-            {{ if .CanManagePerms }}
-            <li><a href="/admin/permissions" {{ if eq .Active "permissions" }}class="active" {{ end }}>Manage Permissions</a></li>
-            {{ end }}
             <li>
                 <form action="/logout" method="post" style="margin:0">
                     <button type="submit" class="sidebar-logout-btn">Logout</button>

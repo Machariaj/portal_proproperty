@@ -5,6 +5,8 @@ import (
 	"log"
 	"strings"
 	"time"
+
+	"marketers_portal/vanbooking"
 )
 
 var overdueAlertRecipients = []string{
@@ -23,21 +25,38 @@ func initSchedulerTables() {
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`); err != nil {
 		log.Printf("[scheduler] ERROR creating prop_booking_warnings: %v", err)
 	}
+
+	// Dedupes the buyer-facing day-10..14 SMS reminders (checkClientReminderSMS)
+	// — a separate table from prop_booking_warnings above, which is an
+	// internal staff email at day 12/13, not a buyer SMS; keeping them apart
+	// avoids the two systems colliding on the same (booking, day) key.
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS prop_booking_sms_reminders (
+		id           INT AUTO_INCREMENT PRIMARY KEY,
+		booking_id   INT NOT NULL,
+		days_elapsed INT NOT NULL,
+		sent_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE KEY uk_sms_reminder (booking_id, days_elapsed)
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`); err != nil {
+		log.Printf("[scheduler] ERROR creating prop_booking_sms_reminders: %v", err)
+	}
 }
 
 // startOverdueBookingChecker fires every 30 minutes to:
 //  1. Send warning emails for plots booked exactly 12 or 13 days ago.
-//  2. Auto-switch plots booked >14 days back to 'available' and notify.
+//  2. Send the buyer a daily SMS reminder from day 10 through day 14.
+//  3. Auto-switch plots booked >14 days back to 'available' and notify.
 func startOverdueBookingChecker() {
 	go func() {
 		// Run once immediately on startup, then every 30 minutes.
 		checkWarningBookings()
+		checkClientReminderSMS()
 		checkOverdueBookings()
 
 		ticker := time.NewTicker(30 * time.Minute)
 		defer ticker.Stop()
 		for range ticker.C {
 			checkWarningBookings()
+			checkClientReminderSMS()
 			checkOverdueBookings()
 		}
 	}()
@@ -46,19 +65,20 @@ func startOverdueBookingChecker() {
 // ── shared row types ──────────────────────────────────────────────────────────
 
 type overdueRow struct {
-	BookingID  int
-	PlotID     int
-	EstateID   int
-	PlotNumber string
-	EstateName string
-	BuyerName  string
-	BuyerPhone string
-	AgentName  string
-	AgentPhone string
-	AgentEmail string
-	DateBooked string
-	ExpiryDate string // date_booked + 14 days, formatted "Month DD, YYYY"
-	DaysOver   int
+	BookingID   int
+	PlotID      int
+	EstateID    int
+	PlotNumber  string
+	EstateName  string
+	BuyerName   string
+	BuyerPhone  string
+	AgentName   string
+	AgentPhone  string
+	AgentEmail  string
+	DateBooked  string
+	ExpiryDate  string // date_booked + 14 days, formatted "Month DD, YYYY"
+	DaysOver    int
+	ZohoBooksID string
 }
 
 // ── 12/13-day warning ─────────────────────────────────────────────────────────
@@ -203,6 +223,74 @@ func sendWarningEmail(rows []overdueRow, day int) {
 	}
 }
 
+// ── buyer SMS reminders, day 10 through day 14 ────────────────────────────────
+
+// checkClientReminderSMS sends the buyer a daily SMS reminder from day 10
+// through day 14 (inclusive) after booking, for as long as the booking is
+// still 'active' — i.e. the deposit threshold and/or KYC docs are still
+// incomplete (maybeAdvanceToAccountsReview moves it out of 'active', and out
+// of this query, the moment both are met). Deduped per (booking, day) via
+// prop_booking_sms_reminders so a 30-minute tick never double-sends the same
+// day's reminder. This is separate from checkWarningBookings' day-12/13
+// internal staff email above — that alerts staff, this nudges the buyer.
+func checkClientReminderSMS() {
+	rows, err := db.Query(`
+		SELECT b.id, p.plot_number, e.name, COALESCE(b.buyer_phone,''),
+		       DATEDIFF(NOW(), b.date_booked) AS days_elapsed
+		FROM prop_bookings b
+		JOIN prop_plots p ON p.id = b.plot_id
+		JOIN prop_estates e ON e.id = b.estate_id
+		WHERE p.status = 'booked'
+		  AND b.status = 'active'
+		  AND DATEDIFF(NOW(), b.date_booked) BETWEEN 10 AND 14`)
+	if err != nil {
+		log.Printf("[scheduler] client reminder query error: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	type reminderRow struct {
+		BookingID   int
+		PlotNumber  string
+		EstateName  string
+		BuyerPhone  string
+		DaysElapsed int
+	}
+	var toRemind []reminderRow
+	for rows.Next() {
+		var rr reminderRow
+		if err := rows.Scan(&rr.BookingID, &rr.PlotNumber, &rr.EstateName, &rr.BuyerPhone, &rr.DaysElapsed); err == nil {
+			toRemind = append(toRemind, rr)
+		}
+	}
+
+	for _, rr := range toRemind {
+		if rr.BuyerPhone == "" {
+			log.Printf("[scheduler] no phone for buyer on booking %d, skipping reminder SMS", rr.BookingID)
+			continue
+		}
+		res, err := db.Exec(`INSERT IGNORE INTO prop_booking_sms_reminders (booking_id, days_elapsed) VALUES (?,?)`,
+			rr.BookingID, rr.DaysElapsed)
+		if err != nil {
+			log.Printf("[scheduler] reminder dedupe error booking=%d day=%d: %v", rr.BookingID, rr.DaysElapsed, err)
+			continue
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			continue // already sent today's reminder for this booking
+		}
+
+		daysLeftMsg := fmt.Sprintf("%d day(s) left", 14-rr.DaysElapsed)
+		if rr.DaysElapsed >= 14 {
+			daysLeftMsg = "today is the last day"
+		}
+		msg := fmt.Sprintf(
+			"Reminder: Plot %s at %s — payment/documents still pending. %s to pay the deposit threshold and submit your ID copy, KRA PIN and passport photo, or the plot will be released back to available. - Pro-Property",
+			rr.PlotNumber, rr.EstateName, daysLeftMsg,
+		)
+		go vanbooking.SendSMS(rr.BuyerPhone, msg)
+	}
+}
+
 // ── >14-day auto-release ──────────────────────────────────────────────────────
 
 // checkOverdueBookings finds booked plots older than 14 days, switches them
@@ -214,7 +302,8 @@ func checkOverdueBookings() {
 		       COALESCE(a.phone,''), COALESCE(a.email,''),
 		       DATE_FORMAT(b.date_booked,'%d %b %Y'),
 		       DATE_FORMAT(DATE_ADD(b.date_booked, INTERVAL 14 DAY),'%M %d, %Y'),
-		       DATEDIFF(NOW(), b.date_booked) AS days_over
+		       DATEDIFF(NOW(), b.date_booked) AS days_over,
+		       COALESCE(b.zoho_books_id,'')
 		FROM prop_bookings b
 		JOIN prop_plots   p ON p.id = b.plot_id
 		JOIN prop_estates e ON e.id = b.estate_id
@@ -234,7 +323,7 @@ func checkOverdueBookings() {
 		var r overdueRow
 		if err := rows.Scan(&r.BookingID, &r.PlotID, &r.EstateID, &r.PlotNumber, &r.EstateName,
 			&r.BuyerName, &r.BuyerPhone, &r.AgentName, &r.AgentPhone, &r.AgentEmail,
-			&r.DateBooked, &r.ExpiryDate, &r.DaysOver); err == nil {
+			&r.DateBooked, &r.ExpiryDate, &r.DaysOver, &r.ZohoBooksID); err == nil {
 			overdue = append(overdue, r)
 		}
 	}
@@ -256,6 +345,9 @@ func checkOverdueBookings() {
 		logPlotStatus(r.PlotID, r.PlotNumber, r.EstateName, r.EstateID, "booked", "available", "scheduler", "auto-released after deadline")
 		log.Printf("[scheduler] auto-released plot=%s (booking=%d, %d days booked)",
 			r.PlotNumber, r.BookingID, r.DaysOver)
+		if r.ZohoBooksID != "" {
+			go cancelBooksEstimate(r.ZohoBooksID)
+		}
 		switched = append(switched, r)
 	}
 
@@ -318,6 +410,19 @@ func checkOverdueBookings() {
 			})
 		} else {
 			log.Printf("[scheduler] no phone for agent %q (booking %d), skipping WA", r.AgentName, r.BookingID)
+		}
+
+		// SMS to the buyer: plot released back to available, request refund details.
+		if r.BuyerPhone != "" {
+			msg := fmt.Sprintf(
+				"Dear %s, your booking for Plot %s at %s has expired after 14 days and the plot has been "+
+					"switched back to available for sale. Kindly share your bank account details so we can "+
+					"process a refund of the amount you paid — a cheque will be written. Contact us for assistance. - Pro-Property",
+				r.BuyerName, r.PlotNumber, r.EstateName,
+			)
+			go vanbooking.SendSMS(r.BuyerPhone, msg)
+		} else {
+			log.Printf("[scheduler] no phone for buyer %q (booking %d), skipping release SMS", r.BuyerName, r.BookingID)
 		}
 	}
 }

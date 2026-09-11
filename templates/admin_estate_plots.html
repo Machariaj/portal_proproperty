@@ -151,6 +151,7 @@
 
 <script>
 var modal = document.getElementById('detail-modal');
+var ppIsSystemAdmin = {{ if .IsSystemAdmin }}true{{ else }}false{{ end }};
 
 function openDetail(b) {
     document.getElementById('d-estate').textContent = b.estate;
@@ -177,12 +178,15 @@ function openDetail(b) {
     }
 
     if (b.status === 'booked') {
-        var saBtn = document.createElement('button');
-        saBtn.type = 'button';
-        saBtn.textContent = 'SA Signed';
-        saBtn.style.cssText = 'background:#ef4444;color:#fff;border:none;border-radius:6px;font-size:13px;padding:7px 16px;cursor:pointer;';
-        saBtn.onclick = function() { openSaUpload(b.plotID, b.estateID, b.plot); };
-        acts.appendChild(saBtn);
+        if (ppIsSystemAdmin) {
+            var saBtn = document.createElement('button');
+            saBtn.type = 'button';
+            saBtn.textContent = '⚠ Force SA Signed';
+            saBtn.title = 'Bypasses Accounts + Legal review — use only in an emergency';
+            saBtn.style.cssText = 'background:#ef4444;color:#fff;border:none;border-radius:6px;font-size:12px;padding:7px 16px;cursor:pointer;';
+            saBtn.onclick = function() { openSaUpload(b.plotID, b.estateID, b.plot); };
+            acts.appendChild(saBtn);
+        }
         acts.appendChild(makeForm('Mark Sold',  'sold',      '#16a34a'));
         acts.appendChild(makeForm('← Available','available', '#6b7280'));
     } else if (b.status === 'sa_signed') {
@@ -200,7 +204,7 @@ function openSaUpload(plotId, estateId, plotNumber) {
     closeDetail();
     document.getElementById('saup-plot-id').value   = plotId;
     document.getElementById('saup-plot-label').textContent = plotNumber;
-    document.getElementById('saup-form').action = '/admin/estate/' + estateId + '/plot-status';
+    document.getElementById('saup-form').action = '/admin/force-sa-signed/' + plotId + '?estate_id=' + estateId;
     document.getElementById('saup-file').value = '';
     document.getElementById('saup-installment-page').value = '';
     document.getElementById('saup-modal').style.display = 'flex';
@@ -213,13 +217,13 @@ document.getElementById('saup-modal').addEventListener('click', function(e) {
 });
 </script>
 
-<!-- SA Signed upload modal -->
+<!-- Force SA Signed modal (system_admin-only emergency override) -->
 <div id="saup-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:2000;align-items:center;justify-content:center;">
-    <div style="background:#fff;border-radius:10px;padding:24px;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.2);">
-        <h3 style="margin:0 0 16px;font-size:16px;color:#111;">Mark Plot <span id="saup-plot-label"></span> as SA Signed</h3>
+    <div style="background:#fff;border-radius:10px;padding:24px;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.2);border-top:4px solid #ef4444;">
+        <h3 style="margin:0 0 6px;font-size:16px;color:#111;">⚠ Force Plot <span id="saup-plot-label"></span> to SA Signed</h3>
+        <p style="margin:0 0 16px;font-size:12px;color:#dc2626;font-weight:600;">This bypasses the Accounts + Legal review chain entirely. Use only in an emergency — this action is logged.</p>
         <form id="saup-form" method="POST" enctype="multipart/form-data">
             <input type="hidden" name="plot_id" id="saup-plot-id">
-            <input type="hidden" name="status" value="sa_signed">
             <div style="margin-bottom:16px;">
                 <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;">
                     Sale Agreement <span style="color:#dc2626;">*</span>
@@ -240,7 +244,7 @@ document.getElementById('saup-modal').addEventListener('click', function(e) {
                 <button type="button" onclick="closeSaUpload()"
                         style="background:#f3f4f6;color:#374151;border:1px solid #d1d5db;padding:8px 16px;border-radius:6px;font-size:13px;cursor:pointer;">Cancel</button>
                 <button type="submit"
-                        style="background:#ef4444;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600;">Confirm SA Signed</button>
+                        style="background:#ef4444;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600;">⚠ Force SA Signed</button>
             </div>
         </form>
     </div>

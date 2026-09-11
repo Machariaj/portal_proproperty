@@ -128,7 +128,7 @@
             <tbody>
                 {{ range .Bookings }}
                 {{ if ne .Status "cancelled" }}
-                <tr>
+                <tr id="booking-{{ .ID }}">
                     <td><strong>{{ .AgentName }}</strong></td>
                     <td style="text-align:center;">{{ .Seats }}</td>
                     <td style="text-align:center;">{{ .NumClients }}</td>
@@ -176,7 +176,7 @@
             <thead><tr><th>Van</th><th>Agent</th><th>Destination</th><th>Date</th><th>Status</th><th>Action</th></tr></thead>
             <tbody>
                 {{ range .LegacyBookings }}
-                <tr>
+                <tr id="booking-{{ .ID }}">
                     <td>{{ .PlateNumber }}</td><td>{{ .AgentName }}</td><td>{{ .Destination }}</td><td>{{ .TripDate }}</td>
                     <td>
                         {{ if eq .Status "pending" }}<span class="badge" style="background:#f59e0b;color:#fff;">Pending</span>

@@ -60,7 +60,7 @@
             </thead>
             <tbody>
                 {{ range $i, $b := .Bookings }}
-                <tr>
+                <tr id="booking-{{ $b.BookingID }}">
                     <td>{{ add $i 1 }}</td>
                     <td>{{ $b.BuyerName }}</td>
                     <td>{{ $b.BuyerPhone }}</td>

@@ -1,0 +1,45 @@
+{{ define "content" }}
+<div class="page-header">
+    <div>
+        <h1>Pending Client Signature</h1>
+        <p>Sale agreements drafted and sent out, waiting on the client to sign.</p>
+    </div>
+</div>
+
+{{ if .Error }}
+<div class="alert alert-error">{{ .Error }}</div>
+{{ end }}
+
+<div class="stat-card" style="max-width:220px;margin-bottom:20px;">
+    <span class="stat-label">Awaiting Signature</span>
+    <span class="stat-value">{{ len .Queue }}</span>
+</div>
+
+<div style="background:#fff;border-radius:14px;box-shadow:0 2px 12px rgba(0,0,0,0.06);overflow-x:auto;">
+    <table class="rv-table">
+        <thead>
+            <tr>
+                <th>Buyer</th>
+                <th>Estate / Plot</th>
+                <th>Agent</th>
+                <th>Booked On</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {{ range .Queue }}
+            <tr>
+                <td>{{ .BuyerName }}</td>
+                <td>{{ .EstateName }} — Plot {{ .PlotNumber }}</td>
+                <td>{{ .AgentName }}</td>
+                <td>{{ .DateBooked }}</td>
+                <td><a href="/legal/review/{{ .BookingID }}" class="btn-primary" style="padding:6px 14px;font-size:12.5px;">Review</a></td>
+            </tr>
+            {{ else }}
+            <tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:24px;">Nothing awaiting a client signature.</td></tr>
+            {{ end }}
+        </tbody>
+    </table>
+</div>
+{{ end }}
+{{ template "legal_base" . }}

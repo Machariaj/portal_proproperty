@@ -1,0 +1,130 @@
+{{ define "accounts_base" }}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ block "title" . }}Accounts{{ end }}</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <link rel="stylesheet" href="/static/css/admin.css">
+    <style>
+        :root {
+            --acc-primary: #1d4ed8;
+            --acc-dark:    #1e40af;
+            --acc-sidebar: #1e3a8a;
+            --acc-hover:   #1e40af;
+            --acc-light:   #dbeafe;
+        }
+        .sidebar { background: var(--acc-sidebar) !important; }
+        .sidebar .logo-container h2 { color: #fff; }
+        .sidebar ul li a { color: #93c5fd; }
+        .sidebar ul li a:hover,
+        .sidebar ul li a.active {
+            background: var(--acc-hover) !important;
+            color: #fff !important;
+        }
+        .sidebar-back-link {
+            display: flex; align-items: center; gap: 7px;
+            padding: 8px 12px; border-radius: 8px;
+            font-size: 13px; color: #93c5fd;
+            margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.2);
+            text-decoration: none; transition: background 0.15s;
+        }
+        .sidebar-back-link:hover { background: var(--acc-hover); color: #fff; }
+        .sidebar-module-tag {
+            font-size: 10px; font-weight: 700; letter-spacing: 0.8px;
+            text-transform: uppercase; color: #93c5fd; margin-bottom: 6px;
+            display: block; padding: 0 12px;
+        }
+        .sidebar-logout-btn {
+            width: 100%; text-align: left; background: none;
+            border: 1px solid rgba(255,255,255,0.2); color: #93c5fd;
+            padding: 8px 14px; border-radius: 8px; cursor: pointer;
+            font-size: 13px; transition: background 0.15s;
+        }
+        .sidebar-logout-btn:hover { background: var(--acc-hover); color: #fff; }
+
+        .stat-card {
+            background: #fff; border-radius: 14px; padding: 20px 24px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+            display: flex; flex-direction: column; gap: 4px;
+        }
+        .stat-card .stat-label { font-size: 12px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
+        .stat-card .stat-value { font-size: 24px; font-weight: 800; color: #0f172a; }
+
+        .rv-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+        .rv-table th { background: #f8fafc; color: #64748b; font-weight: 700; font-size: 11px;
+            text-transform: uppercase; letter-spacing: 0.5px; padding: 10px 14px; border-bottom: 2px solid #e2e8f0; }
+        .rv-table td { padding: 11px 14px; border-bottom: 1px solid #f1f5f9; color: #1e293b; vertical-align: middle; }
+        .rv-table tbody tr:hover { background: #fafafa; }
+
+        .btn-primary {
+            background: var(--acc-primary); color: #fff;
+            border: none; padding: 8px 18px; border-radius: 8px;
+            font-size: 13px; font-weight: 600; cursor: pointer;
+            transition: background 0.15s; text-decoration: none; display: inline-block;
+        }
+        .btn-primary:hover { background: var(--acc-dark); color: #fff; }
+        .btn-ghost {
+            background: #f1f5f9; color: #475569;
+            border: none; padding: 7px 14px; border-radius: 8px;
+            font-size: 13px; font-weight: 600; cursor: pointer;
+            transition: background 0.15s; text-decoration: none; display: inline-block;
+        }
+        .btn-ghost:hover { background: #e2e8f0; }
+        .btn-danger {
+            background: #fef2f2; color: #dc2626;
+            border: none; padding: 8px 18px; border-radius: 8px;
+            font-size: 13px; font-weight: 600; cursor: pointer;
+            transition: background 0.15s;
+        }
+        .btn-danger:hover { background: #fee2e2; }
+
+        .alert {
+            padding: 11px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; margin-bottom: 16px;
+        }
+        .alert-error { background: #fee2e2; color: #dc2626; }
+
+        .page-header {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 24px; flex-wrap: wrap; gap: 12px;
+        }
+        .page-header h1 { font-size: 20px; font-weight: 800; color: #0f172a; margin: 0; }
+        .page-header p  { font-size: 13px; color: #64748b; margin: 4px 0 0; }
+
+        .review-section { background:#fff; border-radius:14px; padding:20px 24px; box-shadow:0 2px 12px rgba(0,0,0,0.06); margin-bottom:20px; }
+        .review-section h3 { font-size:14px; font-weight:700; color:#1e293b; margin:0 0 14px; }
+        .review-field { display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #f1f5f9; font-size:13.5px; }
+        .review-field:last-child { border-bottom:none; }
+        .review-field span:first-child { color:#64748b; font-weight:600; }
+        .file-chip { display:inline-flex; align-items:center; gap:6px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:7px; padding:6px 12px; font-size:12.5px; color:#1e40af; text-decoration:none; margin:0 6px 6px 0; }
+        .file-chip:hover { background:#eff6ff; }
+    </style>
+</head>
+<body>
+
+<button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('sidebar--open')">☰ Menu</button>
+
+<div class="sidebar">
+    <div class="logo-container">
+        <img src="/static/img/logo.png" alt="Pro-Property Logo" class="logo" onerror="this.style.display='none'">
+        <h2>Accounts</h2>
+    </div>
+    <a href="/hub" class="sidebar-back-link">&#8592; Back to Hub</a>
+    <span class="sidebar-module-tag">Accounts</span>
+    <ul>
+        <li><a href="/accounts/queue" {{ if eq .Active "queue" }}class="active"{{ end }}>Review Queue</a></li>
+    </ul>
+    <div style="padding:8px 12px; margin-top:auto;">
+        <form action="/logout" method="post" style="margin:0">
+            <button type="submit" class="sidebar-logout-btn">Logout</button>
+        </form>
+    </div>
+</div>
+
+<div class="main">
+    {{ block "content" . }}{{ end }}
+</div>
+
+</body>
+</html>
+{{ end }}

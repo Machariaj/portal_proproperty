@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,37 @@ func atoi(s string, def int) int {
 		return v
 	}
 	return def
+}
+
+// redirectBack sends the user back to wherever they came from (the Referer
+// header) instead of a bare fallback page — so after acting on one booking
+// in a date-filtered list, they land back on that same filtered view rather
+// than losing the filter. Pass anchor (an element id, without "#") to also
+// scroll straight back to that row. extra, if given, is pre-encoded
+// "key=value" pairs merged into the query string either way. Only the
+// Referer's path+query is ever used — never its host — so this can't become
+// an open redirect. See main.go's redirectBack for the fuller rationale.
+func redirectBack(w http.ResponseWriter, r *http.Request, fallbackPath, anchor string, extra ...string) {
+	target := fallbackPath
+	if ref := r.Referer(); ref != "" {
+		if u, err := url.Parse(ref); err == nil && strings.HasPrefix(u.Path, "/") {
+			target = u.Path
+			if u.RawQuery != "" {
+				target += "?" + u.RawQuery
+			}
+		}
+	}
+	for _, kv := range extra {
+		sep := "?"
+		if strings.Contains(target, "?") {
+			sep = "&"
+		}
+		target += sep + kv
+	}
+	if anchor != "" {
+		target += "#" + anchor
+	}
+	http.Redirect(w, r, target, http.StatusFound)
 }
 
 // Package-level deps injected by Init.
@@ -302,9 +334,9 @@ type VanSessionRow struct {
 	PlateNumber string
 	Destination string
 	TripDate    string
-	TripTime    string   // e.g. "08:30"
+	TripTime    string // e.g. "08:30"
 	Purpose     string
-	Estates     string   // comma-separated estate names
+	Estates     string // comma-separated estate names
 	SeatsTaken  int
 	MaxSeats    int
 	Remaining   int      // MaxSeats - SeatsTaken
@@ -415,7 +447,10 @@ func vanBookingHandler(w http.ResponseWriter, r *http.Request, bookTmpl, myBooki
 	dests := loadDests()
 	vans := loadVans()
 
-	type estateOpt struct{ ID int; Name string }
+	type estateOpt struct {
+		ID   int
+		Name string
+	}
 	var estateOpts []estateOpt
 	if erows, err := db.Query(`SELECT id, name FROM prop_estates ORDER BY name`); err == nil {
 		defer erows.Close()
@@ -427,13 +462,13 @@ func vanBookingHandler(w http.ResponseWriter, r *http.Request, bookTmpl, myBooki
 	}
 
 	data := map[string]any{
-		"Active":          "van-new",
-		"AgentName":       agentName,
-		"Destinations":    dests,
-		"Vans":            vans,
-		"Estates":         estateOpts,
-		"UnreadCount":     UnreadNotifs(agentName),
-		"IsFleetManager":  canApprove(agentName),
+		"Active":         "van-new",
+		"AgentName":      agentName,
+		"Destinations":   dests,
+		"Vans":           vans,
+		"Estates":        estateOpts,
+		"UnreadCount":    UnreadNotifs(agentName),
+		"IsFleetManager": canApprove(agentName),
 	}
 
 	if r.Method == http.MethodPost {
@@ -1195,7 +1230,7 @@ func AdminVanBookingActionHandler(w http.ResponseWriter, r *http.Request) {
 		go notifyUser(agentN, msg)
 	}
 
-	http.Redirect(w, r, "/admin/van-bookings?success="+newStatus, http.StatusFound)
+	redirectBack(w, r, "/admin/van-bookings?success="+newStatus, "booking-"+bookingID, "success="+newStatus)
 }
 
 // AdminVansHandler manages the van and destination list.
@@ -1258,7 +1293,10 @@ func AdminVansHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Load all agents for the add-driver dropdown
-	type agentOpt struct{ Name string; Phone string }
+	type agentOpt struct {
+		Name  string
+		Phone string
+	}
 	var agentOpts []agentOpt
 	aRows, _ := db.Query(`SELECT name, COALESCE(phone,'') FROM prop_agents ORDER BY name`)
 	if aRows != nil {
@@ -1882,12 +1920,12 @@ func FleetApprovalHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	renderFn(w, "fleet_approval.html", map[string]any{
-		"Active":          "van-fleet",
-		"AgentName":       name,
-		"Sessions":        sessions,
-		"Success":         r.URL.Query().Get("success"),
-		"IsFleetManager":  true,
-		"UnreadCount":     UnreadNotifs(name),
+		"Active":         "van-fleet",
+		"AgentName":      name,
+		"Sessions":       sessions,
+		"Success":        r.URL.Query().Get("success"),
+		"IsFleetManager": true,
+		"UnreadCount":    UnreadNotifs(name),
 	})
 }
 

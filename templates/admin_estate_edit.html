@@ -28,6 +28,22 @@
         <label for="plot_price">Plot Price (KES) <span style="color:#dc2626;">*</span></label>
         <input type="number" id="plot_price" name="plot_price" min="0" step="0.01" placeholder="e.g. 1850000" value="{{ .PlotPrice }}">
 
+        <label for="deposit_threshold">Deposit Threshold (KES) <span style="color:#dc2626;">*</span></label>
+        <input type="number" id="deposit_threshold" name="deposit_threshold" min="0" step="0.01" required placeholder="e.g. 50000" value="{{ .DepositThreshold }}">
+        <p style="margin:4px 0 0;font-size:12px;color:#6b7280;">Once a buyer's deposit reaches this amount (and all KYC docs are uploaded), the booking moves to Accounts for review.</p>
+
+        <label for="lawyer_id">Assigned Lawyer <span style="color:#dc2626;">*</span></label>
+        <select id="lawyer_id" name="lawyer_id" required>
+            <option value="">Select the lawyer handling sale agreements for this estate</option>
+            {{ $lawyerID := .LawyerID }}
+            {{ range .Lawyers }}
+            <option value="{{ .ID }}" {{ if eq (printf "%d" .ID) $lawyerID }}selected{{ end }}>{{ .Name }}</option>
+            {{ end }}
+        </select>
+        {{ if not .Lawyers }}
+        <p style="margin:4px 0 0;font-size:12px;color:#dc2626;">No Legal-role users exist yet — create one first via Settings (role: Legal), then come back here.</p>
+        {{ end }}
+
         <label for="mutation_image">Upload / Replace Mutation Image (optional)</label>
         {{ if .DisplayImage }}
         <div style="margin-bottom:10px;">

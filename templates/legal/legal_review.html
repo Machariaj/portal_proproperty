@@ -1,0 +1,79 @@
+{{ define "content" }}
+<div class="page-header">
+    <div>
+        <h1>Review — {{ .Info.BuyerName }}</h1>
+        <p>{{ .Info.EstateName }} — Plot {{ .Info.PlotNumber }}</p>
+    </div>
+    <a href="{{ if eq .Info.LegalStage "awaiting_signature" }}/legal/awaiting-signature{{ else }}/legal/queue{{ end }}" class="btn-ghost">← Back</a>
+</div>
+
+{{ if .Error }}
+<div class="alert alert-error">{{ .Error }}</div>
+{{ end }}
+
+<div class="review-section">
+    <h3>Buyer &amp; Agent</h3>
+    <div class="review-field"><span>Buyer Name</span><span>{{ .Info.BuyerName }}</span></div>
+    <div class="review-field"><span>Buyer Phone</span><span>{{ .Info.BuyerPhone }}</span></div>
+    <div class="review-field"><span>Buyer Email</span><span>{{ .Info.BuyerEmail }}</span></div>
+    <div class="review-field"><span>Agent</span><span>{{ .Info.AgentName }} {{ if .Info.AgentPhone }}({{ .Info.AgentPhone }}){{ end }}</span></div>
+    <div class="review-field"><span>Payment Plan</span><span>{{ .Info.PaymentPlan }}</span></div>
+    <div class="review-field"><span>Deposit Paid</span><span>KES {{ fmtAmount (printf "%.2f" .Info.Deposit) }}</span></div>
+    <div class="review-field"><span>Notes at booking</span><span>{{ if .Info.Notes }}{{ .Info.Notes }}{{ else }}—{{ end }}</span></div>
+    <div class="review-field"><span>Accounts' notes</span><span>{{ if .Info.AccountsNotes }}{{ .Info.AccountsNotes }}{{ else }}—{{ end }}</span></div>
+</div>
+
+<div class="review-section">
+    <h3>KYC Documents</h3>
+    <div style="margin-bottom:10px;">
+        <p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#6b7280;">Deposit Reference</p>
+        {{ range .Info.DepositRefFiles }}<a class="file-chip" href="/uploads/{{ . }}" target="_blank">📄 {{ . }}</a>{{ else }}<span style="color:#94a3b8;font-size:13px;">None</span>{{ end }}
+    </div>
+    <div style="margin-bottom:10px;">
+        <p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#6b7280;">ID Photo</p>
+        {{ range .Info.IDPhotoFiles }}<a class="file-chip" href="/uploads/{{ . }}" target="_blank">📄 {{ . }}</a>{{ else }}<span style="color:#94a3b8;font-size:13px;">None</span>{{ end }}
+    </div>
+    <div style="margin-bottom:10px;">
+        <p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#6b7280;">KRA PIN</p>
+        {{ range .Info.KRAFiles }}<a class="file-chip" href="/uploads/{{ . }}" target="_blank">📄 {{ . }}</a>{{ else }}<span style="color:#94a3b8;font-size:13px;">None</span>{{ end }}
+    </div>
+    <div>
+        <p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#6b7280;">Passport Photo</p>
+        {{ range .Info.PassportPhotoFiles }}<a class="file-chip" href="/uploads/{{ . }}" target="_blank">📄 {{ . }}</a>{{ else }}<span style="color:#94a3b8;font-size:13px;">None</span>{{ end }}
+    </div>
+</div>
+
+<div class="review-section">
+    {{ if eq .Info.LegalStage "awaiting_signature" }}
+    <h3>Sale Agreement</h3>
+    <p style="margin:-8px 0 14px;font-size:12.5px;color:#64748b;">Drafted and sent to the client — waiting on their signature. Upload the signed copy once it's back.</p>
+    <form method="POST" action="/legal/review/{{ .Info.BookingID }}/upload-agreement" enctype="multipart/form-data" style="margin-bottom:24px;">
+        <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:6px;">Signed Sale Agreement <span style="color:#dc2626;">*</span></label>
+        <input type="file" name="sale_agreement" accept=".pdf,.jpg,.jpeg,.png" required
+               style="width:100%;font-size:13px;padding:6px;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;margin-bottom:12px;">
+
+        <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:6px;">Installment schedule page (optional)</label>
+        <input type="text" name="installment_page" placeholder="e.g. 5 or 5-6"
+               style="width:100%;font-size:13px;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;margin-bottom:12px;">
+
+        <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:6px;">Notes (optional)</label>
+        <textarea name="notes" rows="2" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;box-sizing:border-box;margin-bottom:10px;"></textarea>
+
+        <button type="submit" class="btn-primary">✅ Upload &amp; Mark SA Signed</button>
+    </form>
+    {{ else }}
+    <h3>Draft Sale Agreement</h3>
+    <p style="margin:-8px 0 14px;font-size:12.5px;color:#64748b;">Once the sale agreement has been drafted and sent to the client, move this booking to Pending Client Signature.</p>
+    <form method="POST" action="/legal/review/{{ .Info.BookingID }}/send-for-signature" style="margin-bottom:24px;" onsubmit="return confirm('Mark as drafted and sent to the client for signature?');">
+        <button type="submit" class="btn-primary">📨 Send for Client Signature</button>
+    </form>
+    {{ end }}
+
+    <form method="POST" action="/legal/review/{{ .Info.BookingID }}/cancel" onsubmit="return confirm('Cancel this booking and release the plot back to available?');">
+        <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:6px;">Reason for cancelling <span style="color:#dc2626;">*</span></label>
+        <textarea name="notes" rows="2" required style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;box-sizing:border-box;margin-bottom:10px;"></textarea>
+        <button type="submit" class="btn-danger">✖ Cancel Booking</button>
+    </form>
+</div>
+{{ end }}
+{{ template "legal_base" . }}

@@ -160,12 +160,18 @@ function goNow() { clearInterval(timer); window.location.href = '/agent/bookings
     <!-- Generate Booking Receipt -->
     <div style="border-top:1px solid #e5e7eb;margin-top:28px;padding-top:24px;">
         <h3 style="font-size:15px;font-weight:700;color:#1e3a5f;margin:0 0 14px;">Generate Booking Confirmation Receipt</h3>
-        <form method="POST" action="/agent/booking-receipt" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
+        <p style="font-size:12px;color:#6b7280;margin:0 0 12px;">This also adds the amount to the buyer's running deposit total — once it reaches the estate's threshold and all KYC docs are uploaded, the booking moves to Accounts for review.</p>
+        <form method="POST" action="/agent/booking-receipt" enctype="multipart/form-data" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
             <input type="hidden" name="booking_id" value="{{ .Info.BookingID }}">
             <div>
                 <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">Amount Received (KES)</label>
                 <input type="number" name="amount" min="0" step="0.01" required placeholder="e.g. 50000"
                        style="padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;width:200px;">
+            </div>
+            <div>
+                <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">Payment Reference (optional)</label>
+                <input type="file" name="payment_reference" accept="image/*,.pdf"
+                       style="padding:6px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
             </div>
             <button type="submit" style="background:#1e3a5f;color:#fff;border:none;padding:9px 20px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">
                 🧾 Generate Receipt

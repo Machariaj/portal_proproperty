@@ -1,0 +1,133 @@
+{{ define "title" }}{{ .Title }} - Pro-Property{{ end }}
+{{ define "content" }}
+<div class="top-bar">
+    <h1>Modules — {{ .UserName }}</h1>
+    <a href="/settings/users#user-{{ .UserID }}" class="edit-btn" style="background:#6b7280;">← Back to Users</a>
+</div>
+
+<p style="margin:-10px 0 18px;font-size:13px;color:#6b7280;">
+    {{ .UserEmail }} &nbsp;·&nbsp; Role: <strong style="text-transform:capitalize;">{{ .UserRole }}</strong>
+</p>
+
+{{ if .SaveOK }}
+<div style="background:#dcfce7;border:1px solid #86efac;color:#166534;padding:10px 16px;border-radius:8px;margin-bottom:16px;font-size:13px;">
+    Modules saved successfully.
+</div>
+{{ end }}
+
+<form method="POST" action="/settings/modules/{{ .UserID }}">
+
+    <div class="card" style="margin-bottom:16px;padding:0;overflow:hidden;">
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+            <thead>
+                <tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0;">
+                    <th style="padding:11px 18px;text-align:left;color:#374151;font-weight:600;width:200px;">Module</th>
+                    <th style="padding:11px 18px;text-align:left;color:#374151;font-weight:600;">Access Level</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{ range .Modules }}
+                <!-- Module row -->
+                <tr style="border-bottom:1px solid #f1f5f9;">
+                    <td style="padding:13px 18px;font-weight:600;color:#0f172a;vertical-align:top;">{{ .Name }}</td>
+                    <td style="padding:13px 18px;">
+                        <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center;">
+                            <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#6b7280;cursor:pointer;">
+                                <input type="radio" name="{{ .Key }}_access" value="none"
+                                       {{ if eq .CurrentAccess "none" }}checked{{ end }}
+                                       style="accent-color:#6b7280;"
+                                       onchange="showFeats('{{ .Key }}','none')">
+                                No Access
+                            </label>
+                            {{ if .SingleGroup }}
+                            <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#1d4ed8;cursor:pointer;">
+                                <input type="radio" name="{{ .Key }}_access" value="{{ .SingleGroup }}"
+                                       {{ if ne .CurrentAccess "none" }}checked{{ end }}
+                                       style="accent-color:#1d4ed8;"
+                                       onchange="showFeats('{{ .Key }}','{{ .SingleGroup }}')">
+                                Access
+                            </label>
+                            {{ else }}
+                            {{ if .HasAdmin }}
+                            <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#1d4ed8;cursor:pointer;">
+                                <input type="radio" name="{{ .Key }}_access" value="admin"
+                                       {{ if eq .CurrentAccess "admin" }}checked{{ end }}
+                                       style="accent-color:#1d4ed8;"
+                                       onchange="showFeats('{{ .Key }}','admin')">
+                                Admin
+                            </label>
+                            {{ end }}
+                            {{ if .HasAgent }}
+                            <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#166534;cursor:pointer;">
+                                <input type="radio" name="{{ .Key }}_access" value="agent"
+                                       {{ if eq .CurrentAccess "agent" }}checked{{ end }}
+                                       style="accent-color:#166534;"
+                                       onchange="showFeats('{{ .Key }}','agent')">
+                                Agent
+                            </label>
+                            {{ end }}
+                            {{ end }}
+                        </div>
+
+                        <!-- Admin features panel -->
+                        {{ if .AdminFeats }}
+                        <div id="fp_admin_{{ .Key }}" style="display:{{ if eq .CurrentAccess "admin" }}block{{ else }}none{{ end }};margin-top:12px;padding:12px 14px;background:#f0f4ff;border-radius:8px;border:1px solid #c7d7f8;">
+                            <p style="margin:0 0 10px;font-size:11px;font-weight:700;color:#1d4ed8;text-transform:uppercase;letter-spacing:.05em;">Admin Features</p>
+                            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px;">
+                                {{ range .AdminFeats }}
+                                <label style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:#fff;border:1px solid #dbeafe;border-radius:6px;cursor:pointer;font-size:12.5px;color:#1e293b;">
+                                    <input type="checkbox" name="feat_{{ .Key }}" value="1"
+                                           {{ if .CanRead }}checked{{ end }}
+                                           style="accent-color:#1d4ed8;width:14px;height:14px;">
+                                    {{ .Label }}
+                                </label>
+                                {{ end }}
+                            </div>
+                        </div>
+                        {{ end }}
+
+                        <!-- Agent features panel -->
+                        {{ if .AgentFeats }}
+                        <div id="fp_agent_{{ .Key }}" style="display:{{ if eq .CurrentAccess "agent" }}block{{ else }}none{{ end }};margin-top:12px;padding:12px 14px;background:#f0fdf4;border-radius:8px;border:1px solid #bbf7d0;">
+                            <p style="margin:0 0 10px;font-size:11px;font-weight:700;color:#166534;text-transform:uppercase;letter-spacing:.05em;">Agent Features</p>
+                            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px;">
+                                {{ range .AgentFeats }}
+                                <label style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:#fff;border:1px solid #bbf7d0;border-radius:6px;cursor:pointer;font-size:12.5px;color:#1e293b;">
+                                    <input type="checkbox" name="feat_{{ .Key }}" value="1"
+                                           {{ if .CanRead }}checked{{ end }}
+                                           style="accent-color:#166534;width:14px;height:14px;">
+                                    {{ .Label }}
+                                </label>
+                                {{ end }}
+                            </div>
+                        </div>
+                        {{ end }}
+                    </td>
+                </tr>
+                {{ end }}
+            </tbody>
+        </table>
+    </div>
+
+<script>
+function showFeats(key, access) {
+    var adminPanel = document.getElementById('fp_admin_' + key);
+    var agentPanel = document.getElementById('fp_agent_' + key);
+    if (adminPanel) adminPanel.style.display = (access === 'admin') ? 'block' : 'none';
+    if (agentPanel) agentPanel.style.display = (access === 'agent') ? 'block' : 'none';
+    // when switching to a group, tick all its features by default
+    if (access !== 'none') {
+        var panel = (access === 'admin') ? adminPanel : agentPanel;
+        if (panel) {
+            panel.querySelectorAll('input[type=checkbox]').forEach(function(cb) {
+                cb.checked = true;
+            });
+        }
+    }
+}
+</script>
+
+    <button type="submit" style="padding:9px 28px;font-size:14px;">💾 Save Modules</button>
+</form>
+{{ end }}
+{{ template "settings_base" . }}

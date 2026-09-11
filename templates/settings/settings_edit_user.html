@@ -2,7 +2,7 @@
 {{ define "content" }}
 <div class="top-bar">
     <h1>Edit User</h1>
-    <a href="/admin/create-user" class="edit-btn" style="background:#6b7280;">← Back to Users</a>
+    <a href="/settings/users#user-{{ .User.ID }}" class="edit-btn" style="background:#6b7280;">← Back to Users</a>
 </div>
 
 <div class="card" style="max-width:560px;">
@@ -36,6 +36,8 @@
         <select id="role" name="role" required>
             <option value="agent" {{ if eq .User.Role "agent" }}selected{{ end }}>Agent</option>
             <option value="admin" {{ if eq .User.Role "admin" }}selected{{ end }}>Admin</option>
+            <option value="accounts" {{ if eq .User.Role "accounts" }}selected{{ end }}>Accounts</option>
+            <option value="legal" {{ if eq .User.Role "legal" }}selected{{ end }}>Legal</option>
         </select>
 
         <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0;">
@@ -44,10 +46,40 @@
         <p style="margin:0 0 12px;font-size:12px;color:#6b7280;">Leave blank to keep the current password.</p>
 
         <label for="new_password">New Password</label>
-        <input type="password" id="new_password" name="new_password" placeholder="At least 6 characters" autocomplete="new-password">
+        <div style="position:relative;">
+            <input type="password" id="new_password" name="new_password" placeholder="At least 6 characters" autocomplete="new-password" style="padding-right:44px;box-sizing:border-box;width:100%;">
+            <button type="button" onclick="togglePasswordVisibility()"
+                    style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:16px;padding:4px 6px;line-height:1;">
+                <span id="pw_toggle_icon">👁</span>
+            </button>
+        </div>
+
+        <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0;">
+
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;background:{{ if .User.Blocked }}#fef2f2{{ else }}#fafafa{{ end }};border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;">
+            <input type="checkbox" name="blocked" value="1" {{ if .User.Blocked }}checked{{ end }} style="width:16px;height:16px;accent-color:#dc2626;">
+            <span>
+                <strong style="display:block;font-size:13.5px;color:#0f172a;">🚫 Block this user</strong>
+                <span style="display:block;font-size:12px;color:#6b7280;margin-top:2px;">A blocked user cannot log in until this is unchecked.</span>
+            </span>
+        </label>
 
         <button type="submit" style="margin-top:16px;">💾 Save Changes</button>
     </form>
 </div>
+
+<script>
+function togglePasswordVisibility() {
+    var input = document.getElementById('new_password');
+    var icon = document.getElementById('pw_toggle_icon');
+    if (input.type === 'password') {
+        input.type = 'text';
+        icon.textContent = '🙈';
+    } else {
+        input.type = 'password';
+        icon.textContent = '👁';
+    }
+}
+</script>
 {{ end }}
-{{ template "admin_base" . }}
+{{ template "settings_base" . }}

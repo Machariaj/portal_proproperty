@@ -1,0 +1,73 @@
+{{ define "settings_base" }}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ block "title" . }}Settings{{ end }}</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <link rel="stylesheet" href="/static/css/admin.css">
+    <style>
+        :root {
+            --set-primary: #334155;
+            --set-dark:    #1e293b;
+            --set-sidebar: #0f172a;
+            --set-hover:   #1e293b;
+        }
+        .sidebar { background: var(--set-sidebar) !important; }
+        .sidebar .logo-container h2 { color: #fff; }
+        .sidebar ul li a { color: #94a3b8; }
+        .sidebar ul li a:hover,
+        .sidebar ul li a.active {
+            background: var(--set-hover) !important;
+            color: #fff !important;
+        }
+        .sidebar-back-link {
+            display: flex; align-items: center; gap: 7px;
+            padding: 8px 12px; border-radius: 8px;
+            font-size: 13px; color: #94a3b8;
+            margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.2);
+            text-decoration: none; transition: background 0.15s;
+        }
+        .sidebar-back-link:hover { background: var(--set-hover); color: #fff; }
+        .sidebar-module-tag {
+            font-size: 10px; font-weight: 700; letter-spacing: 0.8px;
+            text-transform: uppercase; color: #94a3b8; margin-bottom: 6px;
+            display: block; padding: 0 12px;
+        }
+        .sidebar-logout-btn {
+            width: 100%; text-align: left; background: none;
+            border: 1px solid rgba(255,255,255,0.2); color: #94a3b8;
+            padding: 8px 14px; border-radius: 8px; cursor: pointer;
+            font-size: 13px; transition: background 0.15s;
+        }
+        .sidebar-logout-btn:hover { background: var(--set-hover); color: #fff; }
+    </style>
+</head>
+<body>
+
+<button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('sidebar--open')">☰ Menu</button>
+
+<div class="sidebar">
+    <div class="logo-container">
+        <img src="/static/img/logo.png" alt="Pro-Property Logo" class="logo" onerror="this.style.display='none'">
+        <h2>Settings</h2>
+    </div>
+    <a href="/hub" class="sidebar-back-link">&#8592; Back to Hub</a>
+    <span class="sidebar-module-tag">Settings</span>
+    <ul>
+        <li><a href="/settings/users" {{ if eq .Active "users" }}class="active"{{ end }}>Users</a></li>
+    </ul>
+    <div style="padding:8px 12px; margin-top:auto;">
+        <form action="/logout" method="post" style="margin:0">
+            <button type="submit" class="sidebar-logout-btn">Logout</button>
+        </form>
+    </div>
+</div>
+
+<div class="main">
+    {{ block "content" . }}{{ end }}
+</div>
+
+</body>
+</html>
+{{ end }}
