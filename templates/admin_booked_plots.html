@@ -28,6 +28,14 @@
                 {{ range .Lawyers }}<option value="{{ .ID }}" {{ if eq (printf "%d" .ID) $.FLawyer }}selected{{ end }}>{{ .Name }}</option>{{ end }}
             </select>
         </div>
+        <div style="display:flex;flex-direction:column;gap:4px;min-width:190px;">
+            <label style="font-size:12px;color:#6b7280;font-weight:600;">Readiness</label>
+            <select name="readiness" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                <option value="">All Clients</option>
+                <option value="unbaked" {{ if eq .FReadiness "unbaked" }}selected{{ end }}>Unbaked Clients</option>
+                <option value="baked" {{ if eq .FReadiness "baked" }}selected{{ end }}>Fully Baked Clients</option>
+            </select>
+        </div>
         <div style="display:flex;flex-direction:column;gap:4px;">
             <label style="font-size:12px;color:#6b7280;font-weight:600;">Date From</label>
             <input type="date" name="date_from" value="{{ .FFrom }}" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
@@ -37,7 +45,7 @@
             <input type="date" name="date_to" value="{{ .FTo }}" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
         </div>
         <button type="submit" style="padding:7px 18px;font-size:13px;">Filter</button>
-        {{ if or .FAgent .FEstate .FFrom .FTo .FLawyer }}
+        {{ if or .FAgent .FEstate .FFrom .FTo .FLawyer .FReadiness }}
         <a href="/admin/booked-plots" style="padding:7px 14px;font-size:13px;background:#6b7280;color:#fff;border-radius:6px;text-decoration:none;">Clear</a>
         {{ end }}
     </form>
@@ -71,6 +79,7 @@
                     <th>Plot Number</th>
                     <th>Agent</th>
                     <th>Lawyer</th>
+                    <th>Status</th>
                     <th>Date Booked</th>
                     <th>Deadline</th>
                     <th>Action</th>
@@ -86,6 +95,14 @@
                     <td>{{ $b.PlotNumber }}</td>
                     <td>{{ $b.AgentName }}</td>
                     <td>{{ if $b.LawyerName }}{{ $b.LawyerName }}{{ else }}<span style="color:#9ca3af;">—</span>{{ end }}</td>
+                    <td>
+                        {{ if and $b.DocsComplete $b.ThresholdMet }}
+                        <span style="background:#dcfce7;color:#166534;font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap;">✅ Fully Baked</span>
+                        <div style="font-size:10.5px;color:#6b7280;margin-top:3px;white-space:nowrap;">{{ $b.StageLabel }}</div>
+                        {{ else }}
+                        <span style="background:#fef3c7;color:#92400e;font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap;" title="{{ if not $b.DocsComplete }}KYC docs incomplete{{ if not $b.ThresholdMet }} · {{ end }}{{ end }}{{ if not $b.ThresholdMet }}Deposit below threshold{{ end }}">⏳ Unbaked</span>
+                        {{ end }}
+                    </td>
                     <td>{{ $b.DateBooked }}</td>
                     <td>
                         <span style="font-size:12px;{{ if le $b.DaysRemaining 2 }}color:#dc2626;font-weight:600;{{ else if le $b.DaysRemaining 5 }}color:#f59e0b;font-weight:600;{{ else }}color:#16a34a;{{ end }}">

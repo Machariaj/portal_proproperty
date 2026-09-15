@@ -2119,6 +2119,18 @@ func loadFilterOptions() (agents []filterOption, estates []filterOption) {
 	return
 }
 
+// docsCompleteSQL / thresholdMetSQL are the shared boolean expressions
+// defining when a booking is "fully baked" — all 4 KYC docs present, and
+// the deposit paid meets the estate's threshold (or the estate has no
+// threshold set, matching maybeAdvanceToAccountsReview's own definition of
+// "qualifies for Accounts review"). Used in both SELECT and WHERE below, so
+// kept as constants to avoid the two drifting apart.
+const (
+	docsCompleteSQL = `(COALESCE(b.deposit_ref,'')!='' AND COALESCE(b.id_photo,'')!='' AND COALESCE(b.kra,'')!='' AND COALESCE(b.passport_photo,'')!='')`
+	thresholdMetSQL = `(e.deposit_threshold IS NULL OR COALESCE(b.deposit,0) >= e.deposit_threshold)`
+	fullyBakedSQL   = "(" + docsCompleteSQL + " AND " + thresholdMetSQL + ")"
+)
+
 func adminBookedPlotsHandler(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	fAgent := q.Get("agent")
@@ -2126,6 +2138,7 @@ func adminBookedPlotsHandler(w http.ResponseWriter, r *http.Request) {
 	fFrom := q.Get("date_from")
 	fTo := q.Get("date_to")
 	fLawyer := q.Get("lawyer")
+	fReadiness := q.Get("readiness") // "baked", "unbaked", or "" for all
 
 	query := `
 		SELECT b.id, p.id, e.id, b.buyer_name, COALESCE(b.buyer_phone,''), e.name, p.plot_number,
@@ -2135,7 +2148,7 @@ func adminBookedPlotsHandler(w http.ResponseWriter, r *http.Request) {
 			         DATE_FORMAT(DATE_ADD(b.date_booked, INTERVAL 14 DAY),'%d %b %Y')),
 			DATEDIFF(COALESCE(b.booking_deadline, DATE_ADD(b.date_booked, INTERVAL 14 DAY)), NOW()),
 			COALESCE(b.zoho_books_id,''), COALESCE(b.batch_ref,''), COALESCE(lw.name,''),
-			(COALESCE(b.deposit_ref,'')!='' AND COALESCE(b.id_photo,'')!='' AND COALESCE(b.kra,'')!='' AND COALESCE(b.passport_photo,'')!='')
+			` + docsCompleteSQL + `, ` + thresholdMetSQL + `, b.legal_stage
 		FROM prop_bookings b
 		JOIN prop_estates e ON b.estate_id = e.id
 		JOIN prop_plots p ON b.plot_id = p.id
@@ -2168,6 +2181,11 @@ func adminBookedPlotsHandler(w http.ResponseWriter, r *http.Request) {
 		query += " AND e.lawyer_id = ?"
 		args = append(args, fLawyer)
 	}
+	if fReadiness == "baked" {
+		query += " AND " + fullyBakedSQL
+	} else if fReadiness == "unbaked" {
+		query += " AND NOT " + fullyBakedSQL
+	}
 	query += " ORDER BY b.date_booked DESC"
 
 	type bookingRow struct {
@@ -2188,6 +2206,9 @@ func adminBookedPlotsHandler(w http.ResponseWriter, r *http.Request) {
 		BatchRef      string
 		LawyerName    string
 		DocsComplete  bool
+		ThresholdMet  bool
+		LegalStage    string
+		StageLabel    string // human-readable review stage, for "fully baked" rows
 	}
 	rows, err := db.Query(query, args...)
 	if err != nil {
@@ -2199,9 +2220,24 @@ func adminBookedPlotsHandler(w http.ResponseWriter, r *http.Request) {
 	var bookings []bookingRow
 	for rows.Next() {
 		var b bookingRow
-		if err := rows.Scan(&b.BookingID, &b.PlotID, &b.EstateID, &b.BuyerName, &b.BuyerPhone, &b.EstateName, &b.PlotNumber, &b.AgentName, &b.DateBooked, &b.Status, &b.DaysBooked, &b.Deadline, &b.DaysRemaining, &b.ZohoBooksID, &b.BatchRef, &b.LawyerName, &b.DocsComplete); err != nil {
+		if err := rows.Scan(&b.BookingID, &b.PlotID, &b.EstateID, &b.BuyerName, &b.BuyerPhone, &b.EstateName, &b.PlotNumber, &b.AgentName, &b.DateBooked, &b.Status, &b.DaysBooked, &b.Deadline, &b.DaysRemaining, &b.ZohoBooksID, &b.BatchRef, &b.LawyerName, &b.DocsComplete, &b.ThresholdMet, &b.LegalStage); err != nil {
 			log.Printf("booked scan: %v", err)
 			continue
+		}
+		switch {
+		case b.Status == "pending_accounts_review":
+			b.StageLabel = "Accounts Stage"
+		case b.Status == "pending_wakili_review" && b.LegalStage == "awaiting_signature":
+			b.StageLabel = "Legal Stage — Awaiting Signature"
+		case b.Status == "pending_wakili_review":
+			b.StageLabel = "Legal Stage — Drafting"
+		case b.Status == "active":
+			// Qualifies (docs + deposit both check out) but hasn't been swept
+			// into Accounts yet — worth flagging distinctly since it means
+			// maybeAdvanceToAccountsReview hasn't fired for this booking yet.
+			b.StageLabel = "Not Yet Advanced"
+		default:
+			b.StageLabel = b.Status
 		}
 		bookings = append(bookings, b)
 	}
@@ -2221,6 +2257,7 @@ func adminBookedPlotsHandler(w http.ResponseWriter, r *http.Request) {
 		"FFrom":                fFrom,
 		"FTo":                  fTo,
 		"FLawyer":              fLawyer,
+		"FReadiness":           fReadiness,
 		"CanBookedToAvailable": isSA || hasPermission(uid, "admin.booked_to_available", "read"),
 		"CanExtendBooking":     isSA || hasPermission(uid, "admin.extend_booking", "read"),
 		"Success":              r.URL.Query().Get("extended"),
@@ -4200,8 +4237,27 @@ func bookingAttachmentsHandler(w http.ResponseWriter, r *http.Request, tmplName,
 		if pp := r.FormValue("payment_plan"); pp != "" {
 			info.PaymentPlan = pp
 		}
-		db.Exec(`UPDATE prop_bookings SET buyer_name=?, buyer_phone=?, buyer_email=?, payment_plan=?, deposit_ref=?, id_photo=?, kra=?, passport_photo=?, notes=? WHERE id=?`,
-			info.BuyerName, info.BuyerPhone, info.BuyerEmail, info.PaymentPlan, depositRef, idPhoto, kra, passportPhoto, notes, bookingID)
+
+		// Deposit here is a direct edit of the running total (distinct from
+		// "Generate Receipt" below, which only adds an increment) — lets
+		// admin/agent correct or set the figure to what the client has
+		// actually paid. Blank or unparseable input leaves it unchanged
+		// rather than silently zeroing a real balance.
+		oldDeposit := info.Deposit
+		newDeposit := info.Deposit
+		if depositStr := strings.TrimSpace(r.FormValue("deposit")); depositStr != "" {
+			if depVal, perr := strconv.ParseFloat(depositStr, 64); perr == nil && depVal >= 0 {
+				newDeposit = fmt.Sprintf("%.2f", depVal)
+			}
+		}
+		info.Deposit = newDeposit
+
+		db.Exec(`UPDATE prop_bookings SET buyer_name=?, buyer_phone=?, buyer_email=?, payment_plan=?, deposit=?, deposit_ref=?, id_photo=?, kra=?, passport_photo=?, notes=? WHERE id=?`,
+			info.BuyerName, info.BuyerPhone, info.BuyerEmail, info.PaymentPlan, newDeposit, depositRef, idPhoto, kra, passportPhoto, notes, bookingID)
+		if newDeposit != oldDeposit {
+			logBooking("DEPOSIT_UPDATED", info.AgentName, info.BuyerName, info.PlotNumber+" — "+info.EstateName,
+				fmt.Sprintf("deposit changed from KES %s to KES %s by %s", oldDeposit, newDeposit, getAgentName(r)))
+		}
 
 		// Push buyer info update to Zoho Books if a Books record exists
 		if info.ZohoBooksID != "" {
