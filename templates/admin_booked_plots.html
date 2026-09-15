@@ -53,6 +53,11 @@
     Zoho Books retry triggered. The estimate will be created in the background.
 </div>
 {{ end }}
+{{ if .Error }}
+<div style="background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;padding:10px 16px;border-radius:8px;margin-bottom:16px;font-size:13px;font-weight:600;">
+    ⚠ {{ .Error }}
+</div>
+{{ end }}
 
 <div class="card">
     <div class="table-responsive">
@@ -111,6 +116,11 @@
                         <button type="button" style="background:#ef4444;font-size:11px;padding:5px 10px;white-space:nowrap;border:none;border-radius:6px;color:#fff;cursor:pointer;"
                                 title="Bypasses Accounts + Legal review — use only in an emergency"
                                 onclick="openSaModal('{{ $b.PlotID }}','{{ $b.EstateID }}','{{ $b.PlotNumber }}')">⚠ Force SA Signed</button>
+                        {{ end }}
+                        {{ if and $.IsSystemAdmin $b.DocsComplete (or (eq $b.Status "active") (eq $b.Status "pending_accounts_review")) }}
+                        <button type="button" style="background:#7c3aed;font-size:11px;padding:5px 10px;white-space:nowrap;border:none;border-radius:6px;color:#fff;cursor:pointer;"
+                                title="Skip Accounts verification and push straight to Legal — for buyers exempt from the deposit threshold by policy (all KYC docs already uploaded)"
+                                onclick="openSkipModal('{{ $b.BookingID }}','{{ $b.PlotNumber }}')">⏩ Skip to Legal</button>
                         {{ end }}
                         {{ if $.CanBookedToAvailable }}
                         <form method="POST" action="/admin/estate/{{ $b.EstateID }}/plot-status" style="margin:0;">
@@ -182,6 +192,28 @@
         </form>
     </div>
 </div>
+<!-- Skip Accounts modal (system_admin-only override — KYC docs already confirmed complete) -->
+<div id="skipModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;">
+    <div style="background:#fff;border-radius:10px;padding:24px;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.2);border-top:4px solid #7c3aed;">
+        <h3 style="margin:0 0 6px;font-size:16px;color:#111;">⏩ Skip Accounts for Plot <span id="skipPlotLabel"></span></h3>
+        <p style="margin:0 0 16px;font-size:12px;color:#7c3aed;font-weight:600;">Pushes this booking straight to Legal, waiving the deposit-threshold check (KYC docs are already confirmed complete). Use only for buyers exempt by policy — this action is logged and the reason is shown to Legal.</p>
+        <form id="skipForm" method="POST">
+            <div style="margin-bottom:16px;">
+                <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;">
+                    Reason <span style="color:#dc2626;">*</span>
+                </label>
+                <textarea name="reason" rows="3" required placeholder="e.g. Institutional buyer — payment terms agreed separately with management"
+                          style="width:100%;font-size:13px;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;"></textarea>
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button type="button" onclick="closeSkipModal()"
+                        style="background:#f3f4f6;color:#374151;border:1px solid #d1d5db;padding:8px 16px;border-radius:6px;font-size:13px;cursor:pointer;">Cancel</button>
+                <button type="submit"
+                        style="background:#7c3aed;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600;">⏩ Push to Legal</button>
+            </div>
+        </form>
+    </div>
+</div>
 <script>
 function openSaModal(plotId, estateId, plotNumber) {
     document.getElementById('saPlotId').value = plotId;
@@ -196,6 +228,19 @@ function closeSaModal() {
 }
 document.getElementById('saModal').addEventListener('click', function(e) {
     if (e.target === this) closeSaModal();
+});
+function openSkipModal(bookingId, plotNumber) {
+    document.getElementById('skipPlotLabel').textContent = plotNumber;
+    document.getElementById('skipForm').action = '/admin/skip-accounts/' + bookingId;
+    document.getElementById('skipForm').reset();
+    var modal = document.getElementById('skipModal');
+    modal.style.display = 'flex';
+}
+function closeSkipModal() {
+    document.getElementById('skipModal').style.display = 'none';
+}
+document.getElementById('skipModal').addEventListener('click', function(e) {
+    if (e.target === this) closeSkipModal();
 });
 function toggleExtend(id) {
     document.querySelectorAll('[id^="ext_"]').forEach(function(el) {

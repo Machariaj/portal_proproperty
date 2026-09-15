@@ -261,11 +261,13 @@ func processBookingIntegrations(b bookingInfo) {
 	// Zoho Books always runs — devMode only blocks email/SMS.
 	go createBooksRecordForBooking(b)
 
-	// Buyer-facing "thank you for booking" SMS fires on every booking,
-	// regardless of whether docs/deposit are already complete — it's the
-	// start of the 14-day KYC/deposit clock, not a completion notice.
-	// vanbooking.SendSMS self-gates on devMode, safe to call unconditionally.
+	// Booking-confirmation SMS (buyer and/or agent, per Settings ->
+	// Notifications) fires on every booking, regardless of whether docs/
+	// deposit are already complete — it's the start of the 14-day KYC/
+	// deposit clock, not a completion notice. vanbooking.SendSMS self-gates
+	// on devMode, safe to call unconditionally.
 	go sendBuyerBookingConfirmationSMS(b)
+	go sendAgentBookingConfirmationSMS(b)
 
 	if devMode {
 		log.Printf("[devMode] notifications skipped for %s — email and SMS disabled", b.BuyerName)
@@ -311,27 +313,56 @@ func processBookingIntegrations(b bookingInfo) {
 // 10-14 follow-ups) and checkOverdueBookings' release notice (scheduler.go)
 // for the rest of this SMS sequence.
 func sendBuyerBookingConfirmationSMS(b bookingInfo) {
-	if b.BuyerPhone == "" {
+	if b.BuyerPhone == "" || !notifyBuyerEnabled() {
 		return
 	}
 	plotStr := strings.Join(b.PlotNumbers, ", ")
-
-	thresholdMsg := "the set deposit threshold"
-	if len(b.PlotIDs) > 0 {
-		var threshold sql.NullFloat64
-		db.QueryRow(`SELECT e.deposit_threshold FROM prop_plots p JOIN prop_estates e ON e.id=p.estate_id WHERE p.id=?`,
-			b.PlotIDs[0]).Scan(&threshold)
-		if threshold.Valid && threshold.Float64 > 0 {
-			thresholdMsg = fmt.Sprintf("the deposit threshold of KES %.0f", threshold.Float64)
-		}
-	}
-
 	msg := fmt.Sprintf(
 		"Thank you for booking Plot %s at %s. You have 14 days from today to pay %s and share your ID copy, KRA PIN and passport-size photo (soft copy). "+
 			"If either is not done within 14 days, the plot will be released back to available. - Pro-Property",
-		plotStr, b.EstateName, thresholdMsg,
+		plotStr, b.EstateName, depositThresholdMsg(b),
 	)
 	vanbooking.SendSMS(b.BuyerPhone, msg)
+}
+
+// sendAgentBookingConfirmationSMS sends the booking agent the same
+// booking-confirmation information as the buyer's SMS — which client, plot,
+// estate, the 14-day deadline, and the deposit threshold — so they can
+// follow up with their client. Needs its own phone lookup since bookingInfo
+// only carries the agent's name, not their phone.
+func sendAgentBookingConfirmationSMS(b bookingInfo) {
+	if b.AgentName == "" || !notifyAgentEnabled() {
+		return
+	}
+	var agentPhone string
+	db.QueryRow(`SELECT COALESCE(phone,'') FROM prop_agents WHERE name=? LIMIT 1`, b.AgentName).Scan(&agentPhone)
+	if agentPhone == "" {
+		return
+	}
+	plotStr := strings.Join(b.PlotNumbers, ", ")
+	msg := fmt.Sprintf(
+		"Booking confirmed: %s booked Plot %s at %s. They have 14 days from today to pay %s and submit ID copy, KRA PIN and passport-size photo, "+
+			"or the plot will be released back to available. - Pro-Property",
+		b.BuyerName, plotStr, b.EstateName, depositThresholdMsg(b),
+	)
+	vanbooking.SendSMS(agentPhone, msg)
+}
+
+// depositThresholdMsg returns a human-readable phrase for the estate's
+// deposit threshold ("the deposit threshold of KES 50000"), falling back to
+// a generic phrase if the estate has none configured. Shared by the buyer
+// and agent booking-confirmation SMS above.
+func depositThresholdMsg(b bookingInfo) string {
+	if len(b.PlotIDs) == 0 {
+		return "the set deposit threshold"
+	}
+	var threshold sql.NullFloat64
+	db.QueryRow(`SELECT e.deposit_threshold FROM prop_plots p JOIN prop_estates e ON e.id=p.estate_id WHERE p.id=?`,
+		b.PlotIDs[0]).Scan(&threshold)
+	if threshold.Valid && threshold.Float64 > 0 {
+		return fmt.Sprintf("the deposit threshold of KES %.0f", threshold.Float64)
+	}
+	return "the set deposit threshold"
 }
 
 // sendPendingDocsAlert notifies bookingPendingRecipients that a booking was made

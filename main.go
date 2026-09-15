@@ -172,6 +172,7 @@ func main() {
 	initPermissionTables()
 	init2FATables()
 	initSchedulerTables()
+	initAppSettingsTables()
 	initPaymentPlanTables()
 	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN booking_deadline DATE DEFAULT NULL`)
 	db.Exec(`ALTER TABLE prop_estates ADD COLUMN plot_price DECIMAL(15,2) DEFAULT NULL`)
@@ -315,9 +316,10 @@ func main() {
 		"legal_review.html":    mustParse("templates/legal/legal_base.html", "templates/legal/legal_review.html"),
 		"legal_completed.html": mustParse("templates/legal/legal_base.html", "templates/legal/legal_completed.html"),
 		// Settings pages (system_admin only)
-		"settings_users.html":     mustParse("templates/settings/settings_base.html", "templates/settings/settings_users.html"),
-		"settings_edit_user.html": mustParse("templates/settings/settings_base.html", "templates/settings/settings_edit_user.html"),
-		"settings_modules.html":   mustParse("templates/settings/settings_base.html", "templates/settings/settings_modules.html"),
+		"settings_users.html":         mustParse("templates/settings/settings_base.html", "templates/settings/settings_users.html"),
+		"settings_edit_user.html":     mustParse("templates/settings/settings_base.html", "templates/settings/settings_edit_user.html"),
+		"settings_modules.html":       mustParse("templates/settings/settings_base.html", "templates/settings/settings_modules.html"),
+		"settings_notifications.html": mustParse("templates/settings/settings_base.html", "templates/settings/settings_notifications.html"),
 	}
 
 	mux := http.NewServeMux()
@@ -338,6 +340,7 @@ func main() {
 	mux.Handle("/admin/mark-sold/", authMiddleware(requireRole(roleAdmin, requirePerm("admin.signed_to_sold", "read", http.HandlerFunc(adminMarkSoldHandler)))))
 	// System-admin-only emergency override — bypasses Accounts + Legal review entirely.
 	mux.Handle("/admin/force-sa-signed/", authMiddleware(requireRole(roleSystemAdmin, http.HandlerFunc(adminForceSASignedHandler))))
+	mux.Handle("/admin/skip-accounts/", authMiddleware(requireRole(roleSystemAdmin, http.HandlerFunc(adminSkipAccountsHandler))))
 	mux.Handle("/admin/booking-extend/", authMiddleware(requireRole(roleAdmin, requirePerm("admin.extend_booking", "read", http.HandlerFunc(extendBookingHandler)))))
 	mux.Handle("/admin/booking-retry-zoho/", authMiddleware(requireRole(roleAdmin, http.HandlerFunc(adminRetryZohoHandler))))
 	mux.Handle("/admin/signed-booking-retry-zoho/", authMiddleware(requireRole(roleAdmin, http.HandlerFunc(adminRetryZohoSignedHandler))))
@@ -417,6 +420,7 @@ func main() {
 	mux.Handle("/settings/users", authMiddleware(requireRole(roleSystemAdmin, http.HandlerFunc(settingsUsersHandler))))
 	mux.Handle("/settings/edit-user/", authMiddleware(requireRole(roleSystemAdmin, http.HandlerFunc(settingsEditUserHandler))))
 	mux.Handle("/settings/modules/", authMiddleware(requireRole(roleSystemAdmin, http.HandlerFunc(settingsModulesHandler))))
+	mux.Handle("/settings/notifications", authMiddleware(requireRole(roleSystemAdmin, http.HandlerFunc(settingsNotificationsHandler))))
 	mux.Handle("/", http.HandlerFunc(rootHandler))
 
 	fs := http.FileServer(http.Dir("static"))
@@ -1604,6 +1608,69 @@ func adminForceSASignedHandler(w http.ResponseWriter, r *http.Request) {
 	redirectBack(w, r, "/admin/estate/"+estateID+"/plots?status=sa_signed", "")
 }
 
+// adminSkipAccountsHandler is a system_admin-only override for buyers who,
+// by policy, are exempt from the deposit-threshold check that normally gates
+// entry into Accounts review (e.g. an institutional buyer on a separately
+// agreed payment arrangement). Pushes the booking straight into Legal's
+// queue (pending_wakili_review, stage "drafting"), skipping Accounts
+// entirely — but still requires all 4 KYC docs to already be uploaded
+// (re-checked here server-side, never just trusted from the UI) since the
+// exemption is for the payment threshold only, not identity verification.
+// Requires a reason, stored in accounts_notes so Legal can see why this
+// booking arrived without going through Accounts — the same field/UI
+// surface Accounts' own notes normally use.
+func adminSkipAccountsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/admin/booked-plots", http.StatusFound)
+		return
+	}
+	bookingID := pathSegment("/admin/skip-accounts/", r.URL.Path)
+	r.ParseForm()
+	reason := strings.TrimSpace(r.FormValue("reason"))
+	if reason == "" {
+		redirectBack(w, r, "/admin/booked-plots", "booking-"+bookingID, "err=A+reason+is+required")
+		return
+	}
+	reviewer := getAgentName(r)
+
+	var plotNumber, estateName string
+	var depositRef, idPhoto, kra, passportPhoto string
+	if err := db.QueryRow(`SELECT p.plot_number, e.name,
+		COALESCE(b.deposit_ref,''), COALESCE(b.id_photo,''), COALESCE(b.kra,''), COALESCE(b.passport_photo,'')
+		FROM prop_bookings b
+		JOIN prop_plots p ON p.id=b.plot_id
+		JOIN prop_estates e ON e.id=b.estate_id
+		WHERE b.id=? AND b.status IN ('active','pending_accounts_review')`, bookingID).
+		Scan(&plotNumber, &estateName, &depositRef, &idPhoto, &kra, &passportPhoto); err != nil {
+		redirectBack(w, r, "/admin/booked-plots", "", "err=Booking+not+found+or+already+past+Accounts")
+		return
+	}
+
+	if !hasAllAttachments(bookingInfo{DepositRef: depositRef, IDPhoto: idPhoto, KRA: kra, PassportPhoto: passportPhoto}) {
+		redirectBack(w, r, "/admin/booked-plots", "booking-"+bookingID, "err=All+4+KYC+documents+must+be+uploaded+first")
+		return
+	}
+
+	res, err := db.Exec(`UPDATE prop_bookings SET status='pending_wakili_review', legal_stage='drafting',
+		accounts_notes=?, accounts_reviewed_by=?, accounts_reviewed_at=NOW()
+		WHERE id=? AND status IN ('active','pending_accounts_review')`,
+		"SYSTEM ADMIN OVERRIDE (deposit threshold waived — KYC docs confirmed complete): "+reason, reviewer, bookingID)
+	if err != nil {
+		log.Printf("admin skip-accounts: %v", err)
+		redirectBack(w, r, "/admin/booked-plots", "", "err=Database+error")
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		redirectBack(w, r, "/admin/booked-plots", "", "err=Booking+already+reviewed")
+		return
+	}
+
+	logBooking("SYSADMIN_SKIP_ACCOUNTS", reviewer, "", plotNumber+" — "+estateName,
+		"bypassed Accounts deposit-threshold check (KYC docs confirmed complete), pushed straight to Legal: "+reason)
+
+	redirectBack(w, r, "/admin/booked-plots", "booking-"+bookingID)
+}
+
 func adminMarkSoldHandler(w http.ResponseWriter, r *http.Request) {
 	plotID := strings.TrimPrefix(r.URL.Path, "/admin/mark-sold/")
 	plotID = strings.TrimSuffix(plotID, "/")
@@ -2067,7 +2134,8 @@ func adminBookedPlotsHandler(w http.ResponseWriter, r *http.Request) {
 			COALESCE(DATE_FORMAT(b.booking_deadline,'%d %b %Y'),
 			         DATE_FORMAT(DATE_ADD(b.date_booked, INTERVAL 14 DAY),'%d %b %Y')),
 			DATEDIFF(COALESCE(b.booking_deadline, DATE_ADD(b.date_booked, INTERVAL 14 DAY)), NOW()),
-			COALESCE(b.zoho_books_id,''), COALESCE(b.batch_ref,''), COALESCE(lw.name,'')
+			COALESCE(b.zoho_books_id,''), COALESCE(b.batch_ref,''), COALESCE(lw.name,''),
+			(COALESCE(b.deposit_ref,'')!='' AND COALESCE(b.id_photo,'')!='' AND COALESCE(b.kra,'')!='' AND COALESCE(b.passport_photo,'')!='')
 		FROM prop_bookings b
 		JOIN prop_estates e ON b.estate_id = e.id
 		JOIN prop_plots p ON b.plot_id = p.id
@@ -2119,6 +2187,7 @@ func adminBookedPlotsHandler(w http.ResponseWriter, r *http.Request) {
 		ZohoBooksID   string
 		BatchRef      string
 		LawyerName    string
+		DocsComplete  bool
 	}
 	rows, err := db.Query(query, args...)
 	if err != nil {
@@ -2130,7 +2199,7 @@ func adminBookedPlotsHandler(w http.ResponseWriter, r *http.Request) {
 	var bookings []bookingRow
 	for rows.Next() {
 		var b bookingRow
-		if err := rows.Scan(&b.BookingID, &b.PlotID, &b.EstateID, &b.BuyerName, &b.BuyerPhone, &b.EstateName, &b.PlotNumber, &b.AgentName, &b.DateBooked, &b.Status, &b.DaysBooked, &b.Deadline, &b.DaysRemaining, &b.ZohoBooksID, &b.BatchRef, &b.LawyerName); err != nil {
+		if err := rows.Scan(&b.BookingID, &b.PlotID, &b.EstateID, &b.BuyerName, &b.BuyerPhone, &b.EstateName, &b.PlotNumber, &b.AgentName, &b.DateBooked, &b.Status, &b.DaysBooked, &b.Deadline, &b.DaysRemaining, &b.ZohoBooksID, &b.BatchRef, &b.LawyerName, &b.DocsComplete); err != nil {
 			log.Printf("booked scan: %v", err)
 			continue
 		}
@@ -2146,6 +2215,7 @@ func adminBookedPlotsHandler(w http.ResponseWriter, r *http.Request) {
 		"Agents":               agents,
 		"Estates":              estates,
 		"Lawyers":              loadLawyers(),
+		"Error":                r.URL.Query().Get("err"),
 		"FAgent":               fAgent,
 		"FEstate":              fEstate,
 		"FFrom":                fFrom,
@@ -2514,7 +2584,8 @@ func adminPlotsOverviewSearchHandler(w http.ResponseWriter, r *http.Request) {
 			case "signed":
 				rows.Scan(&pe.ID, &pe.PlotNumber, &pe.EstateName, &pe.AgentName, &pe.BuyerName,
 					&pe.BuyerPhone, &pe.BuyerEmail, &pe.DateBooked,
-					&pe.DepositRef, &pe.IDPhoto, &pe.KRA, &pe.Passport, &pe.SaleAgree)
+					&pe.DepositRef, &pe.IDPhoto, &pe.KRA, &pe.Passport, &pe.SaleAgree,
+					&pe.LetterConsent, &pe.TransferForms, &pe.TitleDeed)
 			case "sold":
 				rows.Scan(&pe.ID, &pe.PlotNumber, &pe.EstateName, &pe.AgentName, &pe.BuyerName,
 					&pe.BuyerPhone, &pe.BuyerEmail, &pe.DateBooked,
@@ -2539,10 +2610,12 @@ func adminPlotsOverviewSearchHandler(w http.ResponseWriter, r *http.Request) {
 				       DATE_FORMAT(b.date_signed,'%d %b %Y'),
 				       COALESCE(b.deposit_ref,''), COALESCE(b.id_photo,''),
 				       COALESCE(b.kra,''), COALESCE(b.passport_photo,''),
-				       COALESCE(b.sale_agreement,'')
+				       COALESCE(b.sale_agreement,''),
+				       COALESCE(dl.consent_file,''), COALESCE(dl.transfer_file,''), COALESCE(dl.title_file,'')
 				FROM prop_bookings b
 				JOIN prop_plots p ON p.id = b.plot_id
 				JOIN prop_estates e ON e.id = p.estate_id
+				LEFT JOIN prop_payment_plan_deals dl ON dl.estate = e.name AND TRIM(dl.plot) = p.plot_number AND dl.sold_at IS NULL
 				WHERE b.status = 'sa_signed'
 				  AND (e.name LIKE ? OR p.plot_number LIKE ? OR b.agent_name LIKE ? OR b.buyer_name LIKE ?)
 				ORDER BY (b.deposit_ref IS NOT NULL AND b.deposit_ref != '') DESC, b.date_signed DESC
@@ -2555,10 +2628,12 @@ func adminPlotsOverviewSearchHandler(w http.ResponseWriter, r *http.Request) {
 				       DATE_FORMAT(b.date_signed,'%d %b %Y'),
 				       COALESCE(b.deposit_ref,''), COALESCE(b.id_photo,''),
 				       COALESCE(b.kra,''), COALESCE(b.passport_photo,''),
-				       COALESCE(b.sale_agreement,'')
+				       COALESCE(b.sale_agreement,''),
+				       COALESCE(dl.consent_file,''), COALESCE(dl.transfer_file,''), COALESCE(dl.title_file,'')
 				FROM prop_bookings b
 				JOIN prop_plots p ON p.id = b.plot_id
 				JOIN prop_estates e ON e.id = p.estate_id
+				LEFT JOIN prop_payment_plan_deals dl ON dl.estate = e.name AND TRIM(dl.plot) = p.plot_number AND dl.sold_at IS NULL
 				WHERE b.status = 'sa_signed'
 				ORDER BY (b.deposit_ref IS NOT NULL AND b.deposit_ref != '') DESC, b.date_signed DESC
 				LIMIT 100`)

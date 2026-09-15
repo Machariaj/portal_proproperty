@@ -51,7 +51,7 @@
             {{ if .Info.LetterOfConsentFiles }}
             <div style="border:1px solid #bfdbfe;border-radius:7px;background:#eff6ff;padding:8px 10px;margin-bottom:10px;display:flex;flex-wrap:wrap;gap:6px;">
                 {{ range .Info.LetterOfConsentFiles }}
-                <a href="/uploads/{{ . }}" target="_blank" style="font-size:11px;color:#2563eb;text-decoration:none;background:#fff;border:1px solid #bfdbfe;padding:2px 8px;border-radius:5px;display:inline-flex;align-items:center;gap:4px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ . }}">📄 {{ . }}</a>
+                <a href="/uploads/{{ . }}" target="_blank" style="font-size:11px;color:#2563eb;text-decoration:none;background:#fff;border:1px solid #bfdbfe;padding:2px 8px;border-radius:5px;display:inline-flex;align-items:center;gap:4px;max-width:100%;min-width:0;box-sizing:border-box;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ . }}">📄 {{ . }}</a>
                 {{ end }}
             </div>
             {{ end }}
@@ -81,7 +81,7 @@
             {{ if .Info.TransferFormsFiles }}
             <div style="border:1px solid #bfdbfe;border-radius:7px;background:#eff6ff;padding:8px 10px;margin-bottom:10px;display:flex;flex-wrap:wrap;gap:6px;">
                 {{ range .Info.TransferFormsFiles }}
-                <a href="/uploads/{{ . }}" target="_blank" style="font-size:11px;color:#2563eb;text-decoration:none;background:#fff;border:1px solid #bfdbfe;padding:2px 8px;border-radius:5px;display:inline-flex;align-items:center;gap:4px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ . }}">📄 {{ . }}</a>
+                <a href="/uploads/{{ . }}" target="_blank" style="font-size:11px;color:#2563eb;text-decoration:none;background:#fff;border:1px solid #bfdbfe;padding:2px 8px;border-radius:5px;display:inline-flex;align-items:center;gap:4px;max-width:100%;min-width:0;box-sizing:border-box;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ . }}">📄 {{ . }}</a>
                 {{ end }}
             </div>
             {{ end }}
@@ -111,7 +111,7 @@
             {{ if .Info.TitleDeedFiles }}
             <div style="border:1px solid #bfdbfe;border-radius:7px;background:#eff6ff;padding:8px 10px;margin-bottom:10px;display:flex;flex-wrap:wrap;gap:6px;">
                 {{ range .Info.TitleDeedFiles }}
-                <a href="/uploads/{{ . }}" target="_blank" style="font-size:11px;color:#2563eb;text-decoration:none;background:#fff;border:1px solid #bfdbfe;padding:2px 8px;border-radius:5px;display:inline-flex;align-items:center;gap:4px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ . }}">📄 {{ . }}</a>
+                <a href="/uploads/{{ . }}" target="_blank" style="font-size:11px;color:#2563eb;text-decoration:none;background:#fff;border:1px solid #bfdbfe;padding:2px 8px;border-radius:5px;display:inline-flex;align-items:center;gap:4px;max-width:100%;min-width:0;box-sizing:border-box;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ . }}">📄 {{ . }}</a>
                 {{ end }}
             </div>
             {{ end }}

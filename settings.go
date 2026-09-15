@@ -22,6 +22,81 @@ func settingsRootHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/settings/users", http.StatusFound)
 }
 
+// ── App settings (generic key/value store) ──────────────────────────────────
+// A small, general-purpose config table for site-wide switches that don't
+// belong to any one user or module — e.g. Notifications below. Add more
+// settings here over time rather than growing new single-purpose tables.
+
+func initAppSettingsTables() {
+	db.Exec(`CREATE TABLE IF NOT EXISTS prop_app_settings (
+		setting_key   VARCHAR(100) NOT NULL PRIMARY KEY,
+		setting_value VARCHAR(255) NOT NULL,
+		updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`)
+	// Who gets the booking-confirmation + day 10-14 reminder SMS: "buyer",
+	// "agent", or "both". Defaults to "both".
+	db.Exec(`INSERT IGNORE INTO prop_app_settings (setting_key, setting_value) VALUES ('notify_target', 'both')`)
+}
+
+func getAppSetting(key, fallback string) string {
+	var v string
+	if err := db.QueryRow(`SELECT setting_value FROM prop_app_settings WHERE setting_key=?`, key).Scan(&v); err != nil {
+		return fallback
+	}
+	return v
+}
+
+func setAppSetting(key, value string) error {
+	_, err := db.Exec(`INSERT INTO prop_app_settings (setting_key, setting_value) VALUES (?,?)
+		ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)`, key, value)
+	return err
+}
+
+// notifyTarget returns the configured audience for booking SMS — "buyer",
+// "agent", or "both" — falling back to "both" for anything unrecognized
+// (including a not-yet-set/blank value).
+func notifyTarget() string {
+	switch v := getAppSetting("notify_target", "both"); v {
+	case "buyer", "agent":
+		return v
+	default:
+		return "both"
+	}
+}
+
+// notifyBuyerEnabled/notifyAgentEnabled report whether the booking
+// confirmation SMS and day 10-14 reminders (sendBuyerBookingConfirmationSMS/
+// sendAgentBookingConfirmationSMS in integrations.go, checkClientReminderSMS
+// in scheduler.go) should go to that audience. Deliberately does NOT gate
+// the day-14 auto-release/refund notice in checkOverdueBookings — that's
+// tied to the buyer's money, not a notification preference, so it always
+// fires regardless of this setting.
+func notifyBuyerEnabled() bool { t := notifyTarget(); return t == "buyer" || t == "both" }
+func notifyAgentEnabled() bool { t := notifyTarget(); return t == "agent" || t == "both" }
+
+func settingsNotificationsHandler(w http.ResponseWriter, r *http.Request) {
+	var formSuccess string
+	if r.Method == http.MethodPost {
+		r.ParseForm()
+		value := r.FormValue("notify_target")
+		if value != "buyer" && value != "agent" && value != "both" {
+			value = "both"
+		}
+		if err := setAppSetting("notify_target", value); err != nil {
+			log.Printf("settings notifications save: %v", err)
+		} else {
+			formSuccess = "Saved."
+		}
+	}
+
+	renderSettings(w, r, "settings_notifications.html", map[string]any{
+		"Title":       "Settings — Notifications",
+		"Active":      "notifications",
+		"Target":      notifyTarget(),
+		"FormSuccess": formSuccess,
+	})
+}
+
 type settingsUserRow struct {
 	ID      int
 	Name    string

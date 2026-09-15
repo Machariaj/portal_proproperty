@@ -223,23 +223,33 @@ func sendWarningEmail(rows []overdueRow, day int) {
 	}
 }
 
-// ── buyer SMS reminders, day 10 through day 14 ────────────────────────────────
+// ── buyer/agent SMS reminders, day 10 through day 14 ──────────────────────────
 
-// checkClientReminderSMS sends the buyer a daily SMS reminder from day 10
-// through day 14 (inclusive) after booking, for as long as the booking is
-// still 'active' — i.e. the deposit threshold and/or KYC docs are still
-// incomplete (maybeAdvanceToAccountsReview moves it out of 'active', and out
-// of this query, the moment both are met). Deduped per (booking, day) via
-// prop_booking_sms_reminders so a 30-minute tick never double-sends the same
-// day's reminder. This is separate from checkWarningBookings' day-12/13
-// internal staff email above — that alerts staff, this nudges the buyer.
+// checkClientReminderSMS sends a daily SMS reminder from day 10 through day
+// 14 (inclusive) after booking, to whichever audience Settings ->
+// Notifications is set to (buyer, agent, or both), for as long as the
+// booking is still 'active' — i.e. the deposit threshold and/or KYC docs
+// are still incomplete (maybeAdvanceToAccountsReview moves it out of
+// 'active', and out of this query, the moment both are met). Deduped per
+// (booking, day) via prop_booking_sms_reminders — shared across both
+// audiences, so a 30-minute tick never double-sends the same day's
+// reminder even if the setting changes mid-day. This is separate from
+// checkWarningBookings' day-12/13 internal staff email above — that alerts
+// staff, this nudges the buyer/agent.
 func checkClientReminderSMS() {
+	notifyBuyer := notifyBuyerEnabled()
+	notifyAgent := notifyAgentEnabled()
+	if !notifyBuyer && !notifyAgent {
+		return
+	}
 	rows, err := db.Query(`
 		SELECT b.id, p.plot_number, e.name, COALESCE(b.buyer_phone,''),
+		       COALESCE(b.agent_name,''), COALESCE(a.phone,''),
 		       DATEDIFF(NOW(), b.date_booked) AS days_elapsed
 		FROM prop_bookings b
 		JOIN prop_plots p ON p.id = b.plot_id
 		JOIN prop_estates e ON e.id = b.estate_id
+		LEFT JOIN prop_agents a ON a.name = b.agent_name
 		WHERE p.status = 'booked'
 		  AND b.status = 'active'
 		  AND DATEDIFF(NOW(), b.date_booked) BETWEEN 10 AND 14`)
@@ -254,21 +264,20 @@ func checkClientReminderSMS() {
 		PlotNumber  string
 		EstateName  string
 		BuyerPhone  string
+		AgentName   string
+		AgentPhone  string
 		DaysElapsed int
 	}
 	var toRemind []reminderRow
 	for rows.Next() {
 		var rr reminderRow
-		if err := rows.Scan(&rr.BookingID, &rr.PlotNumber, &rr.EstateName, &rr.BuyerPhone, &rr.DaysElapsed); err == nil {
+		if err := rows.Scan(&rr.BookingID, &rr.PlotNumber, &rr.EstateName, &rr.BuyerPhone,
+			&rr.AgentName, &rr.AgentPhone, &rr.DaysElapsed); err == nil {
 			toRemind = append(toRemind, rr)
 		}
 	}
 
 	for _, rr := range toRemind {
-		if rr.BuyerPhone == "" {
-			log.Printf("[scheduler] no phone for buyer on booking %d, skipping reminder SMS", rr.BookingID)
-			continue
-		}
 		res, err := db.Exec(`INSERT IGNORE INTO prop_booking_sms_reminders (booking_id, days_elapsed) VALUES (?,?)`,
 			rr.BookingID, rr.DaysElapsed)
 		if err != nil {
@@ -283,11 +292,29 @@ func checkClientReminderSMS() {
 		if rr.DaysElapsed >= 14 {
 			daysLeftMsg = "today is the last day"
 		}
-		msg := fmt.Sprintf(
-			"Reminder: Plot %s at %s — payment/documents still pending. %s to pay the deposit threshold and submit your ID copy, KRA PIN and passport photo, or the plot will be released back to available. - Pro-Property",
-			rr.PlotNumber, rr.EstateName, daysLeftMsg,
-		)
-		go vanbooking.SendSMS(rr.BuyerPhone, msg)
+
+		if notifyBuyer {
+			if rr.BuyerPhone == "" {
+				log.Printf("[scheduler] no phone for buyer on booking %d, skipping reminder SMS", rr.BookingID)
+			} else {
+				msg := fmt.Sprintf(
+					"Reminder: Plot %s at %s — payment/documents still pending. %s to pay the deposit threshold and submit your ID copy, KRA PIN and passport photo, or the plot will be released back to available. - Pro-Property",
+					rr.PlotNumber, rr.EstateName, daysLeftMsg,
+				)
+				go vanbooking.SendSMS(rr.BuyerPhone, msg)
+			}
+		}
+		if notifyAgent {
+			if rr.AgentPhone == "" {
+				log.Printf("[scheduler] no phone for agent %q on booking %d, skipping reminder SMS", rr.AgentName, rr.BookingID)
+			} else {
+				msg := fmt.Sprintf(
+					"Reminder: Your client's booking for Plot %s at %s still needs payment/documents. %s before the plot is released back to available. - Pro-Property",
+					rr.PlotNumber, rr.EstateName, daysLeftMsg,
+				)
+				go vanbooking.SendSMS(rr.AgentPhone, msg)
+			}
+		}
 	}
 }
 

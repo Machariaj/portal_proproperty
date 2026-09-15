@@ -309,8 +309,13 @@ function truncName(name) {
     return name.slice(0, 11) + '…' + name.slice(-9);
 }
 
-function docSection(label, raw, field) {
-    var addBtn = '<label class="ov-doc-add-btn" data-field="' + esc(field) + '">+ Add<input type="file" style="display:none;" accept="image/*,.pdf"></label>';
+// readOnly=true skips the "+ Add" and "✕ Remove" affordances — used for
+// documents that live on (and must be managed from) the Conveyancing page,
+// so Plots Overview shows them for visibility without offering a second,
+// unguarded path to edit them (the Conveyancing page enforces upload order
+// and 100%-paid gating that a direct add/delete here would bypass).
+function docSection(label, raw, field, readOnly) {
+    var addBtn = readOnly ? '' : '<label class="ov-doc-add-btn" data-field="' + esc(field) + '">+ Add<input type="file" style="display:none;" accept="image/*,.pdf"></label>';
     var html = '<div class="ov-doc-field">' +
         '<div class="ov-doc-field-header">' +
             '<span class="ov-doc-label">' + esc(label) + '</span>' +
@@ -325,12 +330,13 @@ function docSection(label, raw, field) {
             files.map(function(f) {
                 var name = f.split(/[\\/]/).pop();
                 var url = '/uploads/' + encodeURIComponent(f);
+                var delBtn = readOnly ? '' : '<button type="button" class="ov-doc-del" data-field="' + esc(field) + '" data-filename="' + esc(f) + '" title="Remove">✕</button>';
                 return '<span class="ov-doc-chip">' +
                     '<a class="ov-doc-chip-link" href="' + url + '" target="_blank" title="' + esc(name) + '">' +
                         '📄 <span class="ov-doc-chip-name">' + esc(truncName(name)) + '</span>' +
                     '</a>' +
                     '<a class="ov-doc-chip-dl" href="' + url + '" download="' + esc(name) + '" title="Download">⬇</a>' +
-                    '<button type="button" class="ov-doc-del" data-field="' + esc(field) + '" data-filename="' + esc(f) + '" title="Remove">✕</button>' +
+                    delBtn +
                     '</span>';
             }).join('') +
         '</div>';
@@ -356,6 +362,19 @@ function renderDetail(p) {
         kyc += '<div class="ov-section"><h4>Sale Agreement</h4><div class="ov-doc-list">' +
             docSection('Sale Agreement', p.SaleAgree, 'sale_agreement') +
             '</div></div>';
+
+        // Conveyancing docs uploaded so far via the Payment Plans /
+        // Conveyancing page — view-only here (they're managed on that page,
+        // which enforces the upload order + 100%-paid gating). Only shown
+        // once conveyancing has actually started, so a freshly-signed plot
+        // doesn't show three redundant "Not uploaded" rows.
+        if (p.LetterConsent || p.TransferForms || p.TitleDeed) {
+            kyc += '<div class="ov-section"><h4>Transfer Documents <span style="font-weight:400;font-size:11px;color:#94a3b8;">(via Conveyancing)</span></h4><div class="ov-doc-list">' +
+                docSection('Approved Letter of Consent', p.LetterConsent, 'letter_of_consent', true) +
+                docSection('Signed Transfer Forms', p.TransferForms, 'transfer_forms', true) +
+                docSection('Title Deed', p.TitleDeed, 'title_deed', true) +
+                '</div></div>';
+        }
     }
     if (currentTab === 'sold') {
         kyc += '<div class="ov-section"><h4>Transfer Documents</h4><div class="ov-doc-list">' +
@@ -515,7 +534,7 @@ loadData('');
 </script>
 
 <!-- Edit buyer name modal -->
-<div id="ov-edit-name-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:9998;align-items:center;justify-content:center;">
+<div id="ov-edit-name-modal" style="display:none;position:fixed;inset:0;backSelect a user below to grant or revoke read/write access to portal features. System Admin always has full access and is not listed here.ground:rgba(0,0,0,0.4);z-index:9998;align-items:center;justify-content:center;">
     <div style="background:#fff;border-radius:10px;padding:24px;max-width:380px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.18);">
         <h3 style="margin:0 0 16px;font-size:15px;color:#1e3a5f;">Edit Buyer Name</h3>
         <p style="font-size:12px;color:#6b7280;margin:0 0 12px;">This updates only in this system — no Zoho sync.</p>
