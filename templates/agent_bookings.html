@@ -42,7 +42,7 @@
             </thead>
             <tbody>
                 {{ range .Bookings }}
-                <tr>
+                <tr id="booking-{{ .BookingID }}">
                     <td>{{ .BuyerName }}</td>
                     <td>{{ .BuyerPhone }}</td>
                     <td>{{ .BuyerEmail }}</td>

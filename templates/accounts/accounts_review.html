@@ -4,7 +4,7 @@
         <h1>Review — {{ .Info.BuyerName }}</h1>
         <p>{{ .Info.EstateName }} — Plot {{ .Info.PlotNumber }}</p>
     </div>
-    <a href="/accounts/queue" class="btn-ghost">← Back to Queue</a>
+    <a href="/accounts/queue#booking-{{ .Info.BookingID }}" class="btn-ghost">← Back to Queue</a>
 </div>
 
 {{ if .Error }}

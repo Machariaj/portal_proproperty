@@ -102,7 +102,7 @@
             </thead>
             <tbody>
                 {{ range $i, $r := .Rows }}
-                <tr>
+                <tr id="deal-{{ $r.DealID }}">
                     <td>{{ add $i 1 }}</td>
                     <td>{{ $r.DealName }}</td>
                     <td>{{ $r.Phone }}</td>

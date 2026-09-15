@@ -28,7 +28,7 @@
         </thead>
         <tbody>
             {{ range .Queue }}
-            <tr>
+            <tr id="booking-{{ .BookingID }}">
                 <td>{{ .BuyerName }}</td>
                 <td>{{ .EstateName }} — Plot {{ .PlotNumber }}</td>
                 <td>{{ .AgentName }}</td>

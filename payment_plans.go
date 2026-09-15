@@ -879,6 +879,8 @@ func paymentPlanDealPage(w http.ResponseWriter, r *http.Request, dealID string) 
 	if _, okv := ppListViews[from]; okv {
 		backURL = "/admin/payment-plans/" + from
 	}
+	// Anchored so "Back to list" lands on this deal's row instead of the top.
+	backURL += "#deal-" + dealID
 
 	pid, _, ename, pnum, pstatus, matched := resolveDealPlot(row.Estate, row.Plot)
 	log.Printf("[payment-plans] deal page %s (%q) stage=%q pct=%d docs[c=%t t=%t d=%t] matched_plot=%t id=%d status=%q",

@@ -4,7 +4,7 @@
         <h1>Review — {{ .Info.BuyerName }}</h1>
         <p>{{ .Info.EstateName }} — Plot {{ .Info.PlotNumber }}</p>
     </div>
-    <a href="{{ if eq .Info.LegalStage "awaiting_signature" }}/legal/awaiting-signature{{ else }}/legal/queue{{ end }}" class="btn-ghost">← Back</a>
+    <a href="{{ if eq .Info.LegalStage "awaiting_signature" }}/legal/awaiting-signature{{ else }}/legal/queue{{ end }}#booking-{{ .Info.BookingID }}" class="btn-ghost">← Back</a>
 </div>
 
 {{ if .Error }}

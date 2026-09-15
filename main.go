@@ -341,6 +341,7 @@ func main() {
 	// System-admin-only emergency override — bypasses Accounts + Legal review entirely.
 	mux.Handle("/admin/force-sa-signed/", authMiddleware(requireRole(roleSystemAdmin, http.HandlerFunc(adminForceSASignedHandler))))
 	mux.Handle("/admin/skip-accounts/", authMiddleware(requireRole(roleSystemAdmin, http.HandlerFunc(adminSkipAccountsHandler))))
+	mux.Handle("/admin/recheck-accounts/", authMiddleware(requireRole(roleAdmin, http.HandlerFunc(adminRecheckAccountsHandler))))
 	mux.Handle("/admin/booking-extend/", authMiddleware(requireRole(roleAdmin, requirePerm("admin.extend_booking", "read", http.HandlerFunc(extendBookingHandler)))))
 	mux.Handle("/admin/booking-retry-zoho/", authMiddleware(requireRole(roleAdmin, http.HandlerFunc(adminRetryZohoHandler))))
 	mux.Handle("/admin/signed-booking-retry-zoho/", authMiddleware(requireRole(roleAdmin, http.HandlerFunc(adminRetryZohoSignedHandler))))
@@ -1671,6 +1672,38 @@ func adminSkipAccountsHandler(w http.ResponseWriter, r *http.Request) {
 	redirectBack(w, r, "/admin/booked-plots", "booking-"+bookingID)
 }
 
+// adminRecheckAccountsHandler lets any admin manually trigger
+// maybeAdvanceToAccountsReview for one booking right away, instead of
+// waiting for the next 30-minute scheduler tick (sweepQualifiedBookings in
+// scheduler.go covers the same check automatically) — for a booking showing
+// "Not Yet Advanced" on Booked Plots. Not a bypass of any kind: it's the
+// exact same qualification check every other trigger point already runs,
+// just invoked on demand, so it's safe to expose to any admin (not just
+// system_admin) and is a no-op if the booking doesn't actually qualify.
+func adminRecheckAccountsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/admin/booked-plots", http.StatusFound)
+		return
+	}
+	bookingIDStr := pathSegment("/admin/recheck-accounts/", r.URL.Path)
+	bookingID, err := strconv.Atoi(bookingIDStr)
+	if err != nil {
+		redirectBack(w, r, "/admin/booked-plots", "", "err=Invalid+booking")
+		return
+	}
+	advanced, err := maybeAdvanceToAccountsReview(bookingID)
+	if err != nil {
+		log.Printf("admin recheck-accounts: %v", err)
+		redirectBack(w, r, "/admin/booked-plots", "booking-"+bookingIDStr, "err=Database+error")
+		return
+	}
+	if advanced {
+		redirectBack(w, r, "/admin/booked-plots", "booking-"+bookingIDStr, "recheck=advanced")
+		return
+	}
+	redirectBack(w, r, "/admin/booked-plots", "booking-"+bookingIDStr, "err=Still+does+not+qualify+-+check+docs+and+deposit+threshold")
+}
+
 func adminMarkSoldHandler(w http.ResponseWriter, r *http.Request) {
 	plotID := strings.TrimPrefix(r.URL.Path, "/admin/mark-sold/")
 	plotID = strings.TrimSuffix(plotID, "/")
@@ -2262,6 +2295,7 @@ func adminBookedPlotsHandler(w http.ResponseWriter, r *http.Request) {
 		"CanExtendBooking":     isSA || hasPermission(uid, "admin.extend_booking", "read"),
 		"Success":              r.URL.Query().Get("extended"),
 		"ZohoRetry":            r.URL.Query().Get("zoho_retry"),
+		"Recheck":              r.URL.Query().Get("recheck"),
 	})
 }
 
@@ -4327,10 +4361,12 @@ func bookingAttachmentsHandler(w http.ResponseWriter, r *http.Request, tmplName,
 	}
 
 	data := map[string]any{
-		"Title":         "Upload Documents — " + info.BuyerName,
-		"Active":        "booked-plots",
-		"Info":          info,
-		"BackURL":       backURL,
+		"Title":  "Upload Documents — " + info.BuyerName,
+		"Active": "booked-plots",
+		"Info":   info,
+		// Anchored so "← Back" lands back on this exact row instead of the
+		// top of the list — same pattern as the row-action redirects.
+		"BackURL":       fmt.Sprintf("%s#booking-%d", backURL, info.BookingID),
 		"SaveOK":        r.URL.Query().Get("uploaded") == "1",
 		"Receipts":      receipts,
 		"ReceiptPrefix": receiptPrefix,

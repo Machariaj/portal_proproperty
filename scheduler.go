@@ -45,12 +45,15 @@ func initSchedulerTables() {
 //  1. Send warning emails for plots booked exactly 12 or 13 days ago.
 //  2. Send the buyer a daily SMS reminder from day 10 through day 14.
 //  3. Auto-switch plots booked >14 days back to 'available' and notify.
+//  4. Sweep 'active' bookings that now qualify for Accounts but never got
+//     swept — see sweepQualifiedBookings.
 func startOverdueBookingChecker() {
 	go func() {
 		// Run once immediately on startup, then every 30 minutes.
 		checkWarningBookings()
 		checkClientReminderSMS()
 		checkOverdueBookings()
+		sweepQualifiedBookings()
 
 		ticker := time.NewTicker(30 * time.Minute)
 		defer ticker.Stop()
@@ -58,8 +61,51 @@ func startOverdueBookingChecker() {
 			checkWarningBookings()
 			checkClientReminderSMS()
 			checkOverdueBookings()
+			sweepQualifiedBookings()
 		}
 	}()
+}
+
+// ── catch-up sweep for bookings stuck at 'active' ─────────────────────────────
+
+// sweepQualifiedBookings is a safety net: maybeAdvanceToAccountsReview only
+// ever fires from specific event triggers (booking creation, doc upload,
+// deposit top-up/edit). If a booking's docs+deposit became sufficient any
+// other way — imported data, a direct DB edit, or any future path that
+// changes them without going through those exact handlers — it would sit at
+// 'active' forever, fully qualified but never actually advanced to Accounts.
+// This re-checks every 'active' booking on each tick and advances any that
+// now qualify. maybeAdvanceToAccountsReview is itself idempotent/safe to
+// call redundantly, so this is cheap for the common case (nothing to do).
+func sweepQualifiedBookings() {
+	rows, err := db.Query(`SELECT id FROM prop_bookings WHERE status = 'active'`)
+	if err != nil {
+		log.Printf("[scheduler] qualified-sweep query error: %v", err)
+		return
+	}
+	var ids []int
+	for rows.Next() {
+		var id int
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+
+	var advancedCount int
+	for _, id := range ids {
+		advanced, err := maybeAdvanceToAccountsReview(id)
+		if err != nil {
+			log.Printf("[scheduler] qualified-sweep booking %d: %v", id, err)
+			continue
+		}
+		if advanced {
+			advancedCount++
+		}
+	}
+	if advancedCount > 0 {
+		log.Printf("[scheduler] qualified-sweep: advanced %d booking(s) to Accounts that were stuck at active", advancedCount)
+	}
 }
 
 // ── shared row types ──────────────────────────────────────────────────────────
