@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -305,24 +306,77 @@ func processBookingIntegrations(b bookingInfo) {
 }
 
 // sendBuyerBookingConfirmationSMS sends the buyer the initial "thank you for
-// booking" SMS: which plot(s)/estate, the 14-day window to pay the estate's
-// deposit threshold and submit KYC docs (ID copy, KRA PIN, passport photo),
-// and that the plot reverts to available if either isn't met in time. Fired
-// once per booking from processBookingIntegrations regardless of docs/
-// deposit completeness at booking time — see checkClientReminderSMS (day
-// 10-14 follow-ups) and checkOverdueBookings' release notice (scheduler.go)
-// for the rest of this SMS sequence.
+// booking" SMS: which plot(s)/estate, the 14-day window to pay the
+// outstanding balance against the estate's deposit threshold and submit KYC
+// docs (ID copy, KRA PIN, passport photo) to their agent, and that the plot
+// reverts to available if either isn't met in time. Only mentions whichever
+// of the two (balance, docs) is actually still outstanding at booking time —
+// a rebooking or an agent who captured an initial deposit/docs on the spot
+// may already have one or both covered. Fired once per booking from
+// processBookingIntegrations regardless of completeness — see
+// checkClientReminderSMS (day 10-14 follow-ups) and checkOverdueBookings'
+// release notice (scheduler.go) for the rest of this SMS sequence.
 func sendBuyerBookingConfirmationSMS(b bookingInfo) {
 	if b.BuyerPhone == "" || !notifyBuyerEnabled() {
 		return
 	}
+	vanbooking.SendSMS(b.BuyerPhone, buildBuyerBookingConfirmationSMS(b))
+}
+
+// buildBuyerBookingConfirmationSMS builds the message text for
+// sendBuyerBookingConfirmationSMS, split out so the wording can be unit
+// tested without actually sending an SMS.
+func buildBuyerBookingConfirmationSMS(b bookingInfo) string {
 	plotStr := strings.Join(b.PlotNumbers, ", ")
-	msg := fmt.Sprintf(
-		"Thank you for booking Plot %s at %s. You have 14 days from today to pay %s and share your ID copy, KRA PIN and passport-size photo (soft copy). "+
-			"If either is not done within 14 days, the plot will be released back to available. - Pro-Property",
-		plotStr, b.EstateName, depositThresholdMsg(b),
-	)
-	vanbooking.SendSMS(b.BuyerPhone, msg)
+	balanceMsg, balanceOwed := depositBalanceMsg(b)
+	docsOwed := !hasAllAttachments(b)
+
+	var body string
+	switch {
+	case balanceOwed && docsOwed:
+		body = fmt.Sprintf(
+			"You have 14 days from today to pay %s and share your ID copy, KRA PIN and passport-size photo (soft copy) with %s. "+
+				"If either is not done within 14 days, the plot will be released back to available.",
+			balanceMsg, b.AgentName)
+	case balanceOwed:
+		body = fmt.Sprintf(
+			"You have 14 days from today to pay %s. If this is not done within 14 days, the plot will be released back to available.",
+			balanceMsg)
+	case docsOwed:
+		body = fmt.Sprintf(
+			"You have 14 days from today to share your ID copy, KRA PIN and passport-size photo (soft copy) with %s. "+
+				"If this is not done within 14 days, the plot will be released back to available.",
+			b.AgentName)
+	default:
+		body = "Your deposit and KYC documents are already on file — thank you!"
+	}
+
+	return fmt.Sprintf("Dear %s, Thank you for booking Plot %s at %s. %s - Pro-Property",
+		b.BuyerName, plotStr, b.EstateName, body)
+}
+
+// depositBalanceMsg returns the phrase for the buyer SMS's "pay X" clause —
+// the estate's deposit_threshold minus what's already recorded as paid on
+// this booking (b.Deposit) — and whether any balance is actually owed. When
+// the estate has no threshold configured we can't compute a real balance, so
+// fall back to the pre-threshold generic phrase and assume payment is still
+// needed (matches the old, pre-balance behavior for those estates).
+func depositBalanceMsg(b bookingInfo) (msg string, owed bool) {
+	if len(b.PlotIDs) == 0 {
+		return "the set deposit threshold", true
+	}
+	var threshold sql.NullFloat64
+	db.QueryRow(`SELECT e.deposit_threshold FROM prop_plots p JOIN prop_estates e ON e.id=p.estate_id WHERE p.id=?`,
+		b.PlotIDs[0]).Scan(&threshold)
+	if !threshold.Valid || threshold.Float64 <= 0 {
+		return "the set deposit threshold", true
+	}
+	paid, _ := strconv.ParseFloat(b.Deposit, 64)
+	balance := threshold.Float64 - paid
+	if balance <= 0 {
+		return "", false
+	}
+	return fmt.Sprintf("the balance of KES %.0f", balance), true
 }
 
 // sendAgentBookingConfirmationSMS sends the booking agent the same
