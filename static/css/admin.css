@@ -422,3 +422,49 @@ tr:target {
   0%   { background: #fef9c3; }
   100% { background: transparent; }
 }
+
+/* ── Attachment viewer modal (static/js/file-viewer.js) ──
+   View an uploaded attachment in an overlay with one obvious way to
+   dismiss it (Close button, click outside, or Escape) instead of relying
+   on closing a new browser tab -- plus a separate, always-available
+   Download action. */
+.fv-modal {
+  display: none; position: fixed; inset: 0; background: rgba(15,23,42,0.75);
+  z-index: 10000; align-items: center; justify-content: center; padding: 20px;
+}
+.fv-modal.open { display: flex; }
+.fv-modal-box {
+  background: #fff; border-radius: 10px; width: 900px; max-width: 92vw; max-height: 92vh;
+  display: flex; flex-direction: column; overflow: hidden;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.35);
+}
+.fv-modal-header {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 16px; border-bottom: 1px solid #e5e7eb; flex-shrink: 0;
+}
+.fv-modal-title {
+  font-size: 13px; font-weight: 600; color: #1e293b;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+}
+.fv-modal-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.fv-modal-close {
+  background: #ef4444; color: #fff; border: none; padding: 7px 16px;
+  border-radius: 6px; font-size: 13px; font-weight: 700; cursor: pointer;
+}
+.fv-modal-close:hover { background: #dc2626; }
+.fv-modal-download {
+  background: #2563eb; color: #fff; border: none; padding: 7px 14px;
+  border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer;
+  text-decoration: none; display: inline-flex; align-items: center;
+}
+.fv-modal-download:hover { background: #1d4ed8; }
+.fv-modal-body {
+  flex: 1; overflow: auto; background: #f8fafc;
+  display: flex; align-items: center; justify-content: center; min-height: 300px;
+}
+.fv-modal-body img { max-width: 100%; max-height: 80vh; object-fit: contain; }
+.fv-modal-body iframe { width: 100%; height: 80vh; border: none; }
+@media (max-width: 520px) {
+  .fv-modal-title { font-size: 12px; }
+  .fv-modal-download, .fv-modal-close { padding: 6px 10px; font-size: 12px; }
+}

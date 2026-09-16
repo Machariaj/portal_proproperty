@@ -332,7 +332,7 @@ function docSection(label, raw, field, readOnly) {
                 var url = '/uploads/' + encodeURIComponent(f);
                 var delBtn = readOnly ? '' : '<button type="button" class="ov-doc-del" data-field="' + esc(field) + '" data-filename="' + esc(f) + '" title="Remove">✕</button>';
                 return '<span class="ov-doc-chip">' +
-                    '<a class="ov-doc-chip-link" href="' + url + '" target="_blank" title="' + esc(name) + '">' +
+                    '<a class="ov-doc-chip-link" href="#" onclick="openFileViewer(\'' + url + '\',\'' + jsEsc(name) + '\');return false;" title="View ' + esc(name) + '">' +
                         '📄 <span class="ov-doc-chip-name">' + esc(truncName(name)) + '</span>' +
                     '</a>' +
                     '<a class="ov-doc-chip-dl" href="' + url + '" download="' + esc(name) + '" title="Download">⬇</a>' +
@@ -411,6 +411,10 @@ function esc(s) {
     return String(s)
         .replace(/&/g,'&amp;').replace(/</g,'&lt;')
         .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function jsEsc(s) {
+    return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
 }
 
 function deleteAttachment(field, filename) {

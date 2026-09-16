@@ -84,7 +84,7 @@
                 </label>
                 {{ if .Info.DepositRefFiles }}
                 <div style="margin:4px 0 6px;display:flex;flex-direction:column;gap:3px;">
-                    {{ range .Info.DepositRefFiles }}<a href="/uploads/{{ . }}" target="_blank" style="font-size:11px;color:#2563eb;text-decoration:none;background:#eff6ff;padding:2px 7px;border-radius:4px;display:block;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="{{ . }}">📄 {{ . }}</a>{{ end }}
+                    {{ range .Info.DepositRefFiles }}<div style="display:flex;align-items:center;gap:4px;min-width:0;margin-bottom:2px;"><a href="#" onclick="openFileViewer('/uploads/{{ . }}','{{ . }}');return false;" style="font-size:11px;color:#2563eb;text-decoration:none;background:#eff6ff;padding:2px 7px;border-radius:4px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="View {{ . }}">📄 {{ . }}</a><a href="/uploads/{{ . }}" download style="font-size:11px;color:#2563eb;text-decoration:none;background:#eff6ff;padding:2px 6px;border-radius:4px;flex-shrink:0;" title="Download {{ . }}">⬇</a></div>{{ end }}
                 </div>
                 {{ end }}
                 <input type="file" id="fi-deposit_ref" name="deposit_ref" accept="image/*,.pdf" multiple style="display:none;">
@@ -98,7 +98,7 @@
                 </label>
                 {{ if .Info.IDPhotoFiles }}
                 <div style="margin:4px 0 6px;display:flex;flex-direction:column;gap:3px;">
-                    {{ range .Info.IDPhotoFiles }}<a href="/uploads/{{ . }}" target="_blank" style="font-size:11px;color:#2563eb;text-decoration:none;background:#eff6ff;padding:2px 7px;border-radius:4px;display:block;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="{{ . }}">📄 {{ . }}</a>{{ end }}
+                    {{ range .Info.IDPhotoFiles }}<div style="display:flex;align-items:center;gap:4px;min-width:0;margin-bottom:2px;"><a href="#" onclick="openFileViewer('/uploads/{{ . }}','{{ . }}');return false;" style="font-size:11px;color:#2563eb;text-decoration:none;background:#eff6ff;padding:2px 7px;border-radius:4px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="View {{ . }}">📄 {{ . }}</a><a href="/uploads/{{ . }}" download style="font-size:11px;color:#2563eb;text-decoration:none;background:#eff6ff;padding:2px 6px;border-radius:4px;flex-shrink:0;" title="Download {{ . }}">⬇</a></div>{{ end }}
                 </div>
                 {{ end }}
                 <input type="file" id="fi-id_photo" name="id_photo" accept="image/*,.pdf" multiple style="display:none;">
@@ -112,7 +112,7 @@
                 </label>
                 {{ if .Info.KRAFiles }}
                 <div style="margin:4px 0 6px;display:flex;flex-direction:column;gap:3px;">
-                    {{ range .Info.KRAFiles }}<a href="/uploads/{{ . }}" target="_blank" style="font-size:11px;color:#2563eb;text-decoration:none;background:#eff6ff;padding:2px 7px;border-radius:4px;display:block;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="{{ . }}">📄 {{ . }}</a>{{ end }}
+                    {{ range .Info.KRAFiles }}<div style="display:flex;align-items:center;gap:4px;min-width:0;margin-bottom:2px;"><a href="#" onclick="openFileViewer('/uploads/{{ . }}','{{ . }}');return false;" style="font-size:11px;color:#2563eb;text-decoration:none;background:#eff6ff;padding:2px 7px;border-radius:4px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="View {{ . }}">📄 {{ . }}</a><a href="/uploads/{{ . }}" download style="font-size:11px;color:#2563eb;text-decoration:none;background:#eff6ff;padding:2px 6px;border-radius:4px;flex-shrink:0;" title="Download {{ . }}">⬇</a></div>{{ end }}
                 </div>
                 {{ end }}
                 <input type="file" id="fi-kra" name="kra" accept="image/*,.pdf" multiple style="display:none;">
@@ -126,7 +126,7 @@
                 </label>
                 {{ if .Info.PassportPhotoFiles }}
                 <div style="margin:4px 0 6px;display:flex;flex-direction:column;gap:3px;">
-                    {{ range .Info.PassportPhotoFiles }}<a href="/uploads/{{ . }}" target="_blank" style="font-size:11px;color:#2563eb;text-decoration:none;background:#eff6ff;padding:2px 7px;border-radius:4px;display:block;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="{{ . }}">📄 {{ . }}</a>{{ end }}
+                    {{ range .Info.PassportPhotoFiles }}<div style="display:flex;align-items:center;gap:4px;min-width:0;margin-bottom:2px;"><a href="#" onclick="openFileViewer('/uploads/{{ . }}','{{ . }}');return false;" style="font-size:11px;color:#2563eb;text-decoration:none;background:#eff6ff;padding:2px 7px;border-radius:4px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="View {{ . }}">📄 {{ . }}</a><a href="/uploads/{{ . }}" download style="font-size:11px;color:#2563eb;text-decoration:none;background:#eff6ff;padding:2px 6px;border-radius:4px;flex-shrink:0;" title="Download {{ . }}">⬇</a></div>{{ end }}
                 </div>
                 {{ end }}
                 <input type="file" id="fi-passport_photo" name="passport_photo" accept="image/*,.pdf" multiple style="display:none;">
