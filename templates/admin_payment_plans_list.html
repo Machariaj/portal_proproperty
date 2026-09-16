@@ -118,15 +118,15 @@
                     <td>
                         <div class="pp-doc">
                             <span class="pp-doc-lbl">{{ if $r.ConsentFiles }}&#10003;{{ else }}&#9675;{{ end }} Consent</span>
-                            {{ if $r.ConsentFiles }}<span class="pp-chips">{{ range $r.ConsentFiles }}<a href="#" onclick="openFileViewer('/uploads/{{ . }}','{{ . }}');return false;" class="pp-chip" title="View {{ . }}">&#128196;</a><a href="/uploads/{{ . }}" download class="pp-chip" title="Download {{ . }}">&#11015;</a>{{ end }}</span>{{ end }}
+                            {{ if $r.ConsentFiles }}<span class="pp-chips">{{ range $r.ConsentFiles }}<span class="pp-chip" style="cursor:default;">&#128196;</span><button type="button" class="pp-chip" style="border:none;cursor:pointer;" onclick="openFileMenu(event,'/uploads/{{ . }}','{{ . }}')" title="Options">&#8942;</button>{{ end }}</span>{{ end }}
                         </div>
                         <div class="pp-doc">
                             <span class="pp-doc-lbl">{{ if $r.TransferFiles }}&#10003;{{ else }}&#9675;{{ end }} Transfer Forms</span>
-                            {{ if $r.TransferFiles }}<span class="pp-chips">{{ range $r.TransferFiles }}<a href="#" onclick="openFileViewer('/uploads/{{ . }}','{{ . }}');return false;" class="pp-chip" title="View {{ . }}">&#128196;</a><a href="/uploads/{{ . }}" download class="pp-chip" title="Download {{ . }}">&#11015;</a>{{ end }}</span>{{ end }}
+                            {{ if $r.TransferFiles }}<span class="pp-chips">{{ range $r.TransferFiles }}<span class="pp-chip" style="cursor:default;">&#128196;</span><button type="button" class="pp-chip" style="border:none;cursor:pointer;" onclick="openFileMenu(event,'/uploads/{{ . }}','{{ . }}')" title="Options">&#8942;</button>{{ end }}</span>{{ end }}
                         </div>
                         <div class="pp-doc">
                             <span class="pp-doc-lbl">{{ if $r.TitleFiles }}&#10003;{{ else }}&#9675;{{ end }} Title Deed</span>
-                            {{ if $r.TitleFiles }}<span class="pp-chips">{{ range $r.TitleFiles }}<a href="#" onclick="openFileViewer('/uploads/{{ . }}','{{ . }}');return false;" class="pp-chip" title="View {{ . }}">&#128196;</a><a href="/uploads/{{ . }}" download class="pp-chip" title="Download {{ . }}">&#11015;</a>{{ end }}</span>{{ end }}
+                            {{ if $r.TitleFiles }}<span class="pp-chips">{{ range $r.TitleFiles }}<span class="pp-chip" style="cursor:default;">&#128196;</span><button type="button" class="pp-chip" style="border:none;cursor:pointer;" onclick="openFileMenu(event,'/uploads/{{ . }}','{{ . }}')" title="Options">&#8942;</button>{{ end }}</span>{{ end }}
                         </div>
                         <a href="/admin/payment-plans/deal/{{ $r.DealID }}?from={{ $.View }}"
                            style="display:inline-block;margin-top:4px;font-size:12px;font-weight:600;background:#1e3a5f;color:#fff;padding:5px 12px;border-radius:5px;text-decoration:none;">

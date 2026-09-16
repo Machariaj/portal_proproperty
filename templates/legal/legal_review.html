@@ -28,19 +28,19 @@
     <h3>KYC Documents</h3>
     <div style="margin-bottom:10px;">
         <p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#6b7280;">Deposit Reference</p>
-        {{ range .Info.DepositRefFiles }}<a class="file-chip" href="#" onclick="openFileViewer('/uploads/{{ . }}','{{ . }}');return false;" title="View {{ . }}">👁 {{ . }}</a><a class="file-chip" href="/uploads/{{ . }}" download title="Download {{ . }}">⬇</a>{{ else }}<span style="color:#94a3b8;font-size:13px;">None</span>{{ end }}
+        {{ range .Info.DepositRefFiles }}<span class="file-chip" style="cursor:default;">📄 {{ . }}</span><button type="button" class="fv-dots-btn" onclick="openFileMenu(event,'/uploads/{{ . }}','{{ . }}')" title="Options">⋮</button>{{ else }}<span style="color:#94a3b8;font-size:13px;">None</span>{{ end }}
     </div>
     <div style="margin-bottom:10px;">
         <p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#6b7280;">ID Photo</p>
-        {{ range .Info.IDPhotoFiles }}<a class="file-chip" href="#" onclick="openFileViewer('/uploads/{{ . }}','{{ . }}');return false;" title="View {{ . }}">👁 {{ . }}</a><a class="file-chip" href="/uploads/{{ . }}" download title="Download {{ . }}">⬇</a>{{ else }}<span style="color:#94a3b8;font-size:13px;">None</span>{{ end }}
+        {{ range .Info.IDPhotoFiles }}<span class="file-chip" style="cursor:default;">📄 {{ . }}</span><button type="button" class="fv-dots-btn" onclick="openFileMenu(event,'/uploads/{{ . }}','{{ . }}')" title="Options">⋮</button>{{ else }}<span style="color:#94a3b8;font-size:13px;">None</span>{{ end }}
     </div>
     <div style="margin-bottom:10px;">
         <p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#6b7280;">KRA PIN</p>
-        {{ range .Info.KRAFiles }}<a class="file-chip" href="#" onclick="openFileViewer('/uploads/{{ . }}','{{ . }}');return false;" title="View {{ . }}">👁 {{ . }}</a><a class="file-chip" href="/uploads/{{ . }}" download title="Download {{ . }}">⬇</a>{{ else }}<span style="color:#94a3b8;font-size:13px;">None</span>{{ end }}
+        {{ range .Info.KRAFiles }}<span class="file-chip" style="cursor:default;">📄 {{ . }}</span><button type="button" class="fv-dots-btn" onclick="openFileMenu(event,'/uploads/{{ . }}','{{ . }}')" title="Options">⋮</button>{{ else }}<span style="color:#94a3b8;font-size:13px;">None</span>{{ end }}
     </div>
     <div>
         <p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#6b7280;">Passport Photo</p>
-        {{ range .Info.PassportPhotoFiles }}<a class="file-chip" href="#" onclick="openFileViewer('/uploads/{{ . }}','{{ . }}');return false;" title="View {{ . }}">👁 {{ . }}</a><a class="file-chip" href="/uploads/{{ . }}" download title="Download {{ . }}">⬇</a>{{ else }}<span style="color:#94a3b8;font-size:13px;">None</span>{{ end }}
+        {{ range .Info.PassportPhotoFiles }}<span class="file-chip" style="cursor:default;">📄 {{ . }}</span><button type="button" class="fv-dots-btn" onclick="openFileMenu(event,'/uploads/{{ . }}','{{ . }}')" title="Options">⋮</button>{{ else }}<span style="color:#94a3b8;font-size:13px;">None</span>{{ end }}
     </div>
 </div>
 

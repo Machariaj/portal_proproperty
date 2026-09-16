@@ -75,7 +75,7 @@
     <div class="ppd-card {{ if .D.ConsentFile }}done{{ end }}">
         <div class="ppd-h">{{ if .D.ConsentFile }}&#10003;{{ else }}&#9312;{{ end }} Approved Letter of Consent</div>
         {{ if .D.ConsentFiles }}
-        <div class="ppd-chips">{{ range .D.ConsentFiles }}<a href="#" onclick="openFileViewer('/uploads/{{ . }}','{{ . }}');return false;" class="ppd-chip" title="View {{ . }}">&#128196; {{ . }}</a><a href="/uploads/{{ . }}" download class="ppd-chip" title="Download {{ . }}">&#11015;</a>{{ end }}</div>
+        <div class="ppd-chips">{{ range .D.ConsentFiles }}<span class="ppd-chip" style="cursor:default;">&#128196; {{ . }}</span><button type="button" class="ppd-chip" style="border:none;cursor:pointer;" onclick="openFileMenu(event,'/uploads/{{ . }}','{{ . }}')" title="Options">&#8942;</button>{{ end }}</div>
         {{ if .D.ConsentBy }}<div class="ppd-meta">Uploaded by {{ .D.ConsentBy }} &middot; {{ .D.ConsentAt }}</div>{{ end }}
         {{ end }}
         {{ if .CanConvey }}
@@ -91,7 +91,7 @@
     <div class="ppd-card {{ if .D.TransferFile }}done{{ end }}">
         <div class="ppd-h">{{ if .D.TransferFile }}&#10003;{{ else }}&#9313;{{ end }} Signed Transfer Forms</div>
         {{ if .D.TransferFiles }}
-        <div class="ppd-chips">{{ range .D.TransferFiles }}<a href="#" onclick="openFileViewer('/uploads/{{ . }}','{{ . }}');return false;" class="ppd-chip" title="View {{ . }}">&#128196; {{ . }}</a><a href="/uploads/{{ . }}" download class="ppd-chip" title="Download {{ . }}">&#11015;</a>{{ end }}</div>
+        <div class="ppd-chips">{{ range .D.TransferFiles }}<span class="ppd-chip" style="cursor:default;">&#128196; {{ . }}</span><button type="button" class="ppd-chip" style="border:none;cursor:pointer;" onclick="openFileMenu(event,'/uploads/{{ . }}','{{ . }}')" title="Options">&#8942;</button>{{ end }}</div>
         {{ if .D.TransferBy }}<div class="ppd-meta">Uploaded by {{ .D.TransferBy }} &middot; {{ .D.TransferAt }}</div>{{ end }}
         {{ end }}
         {{ if .CanConvey }}
@@ -111,7 +111,7 @@
     <div class="ppd-card {{ if .D.TitleFile }}done{{ end }}">
         <div class="ppd-h">{{ if .D.TitleFile }}&#10003;{{ else }}&#9314;{{ end }} Title Deed</div>
         {{ if .D.TitleFiles }}
-        <div class="ppd-chips">{{ range .D.TitleFiles }}<a href="#" onclick="openFileViewer('/uploads/{{ . }}','{{ . }}');return false;" class="ppd-chip" title="View {{ . }}">&#128196; {{ . }}</a><a href="/uploads/{{ . }}" download class="ppd-chip" title="Download {{ . }}">&#11015;</a>{{ end }}</div>
+        <div class="ppd-chips">{{ range .D.TitleFiles }}<span class="ppd-chip" style="cursor:default;">&#128196; {{ . }}</span><button type="button" class="ppd-chip" style="border:none;cursor:pointer;" onclick="openFileMenu(event,'/uploads/{{ . }}','{{ . }}')" title="Options">&#8942;</button>{{ end }}</div>
         {{ if .D.TitleBy }}<div class="ppd-meta">Uploaded by {{ .D.TitleBy }} &middot; {{ .D.TitleAt }}</div>{{ end }}
         {{ end }}
         {{ if .CanConvey }}

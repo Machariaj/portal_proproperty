@@ -332,10 +332,10 @@ function docSection(label, raw, field, readOnly) {
                 var url = '/uploads/' + encodeURIComponent(f);
                 var delBtn = readOnly ? '' : '<button type="button" class="ov-doc-del" data-field="' + esc(field) + '" data-filename="' + esc(f) + '" title="Remove">✕</button>';
                 return '<span class="ov-doc-chip">' +
-                    '<a class="ov-doc-chip-link" href="#" onclick="openFileViewer(\'' + url + '\',\'' + jsEsc(name) + '\');return false;" title="View ' + esc(name) + '">' +
+                    '<span class="ov-doc-chip-link" style="cursor:default;" title="' + esc(name) + '">' +
                         '📄 <span class="ov-doc-chip-name">' + esc(truncName(name)) + '</span>' +
-                    '</a>' +
-                    '<a class="ov-doc-chip-dl" href="' + url + '" download="' + esc(name) + '" title="Download">⬇</a>' +
+                    '</span>' +
+                    '<button type="button" class="ov-doc-chip-dl" onclick="openFileMenu(event,\'' + url + '\',\'' + jsEsc(name) + '\')" title="Options">&#8942;</button>' +
                     delBtn +
                     '</span>';
             }).join('') +
