@@ -36,6 +36,7 @@
                     <th>Notes</th>
                     <th>Plot</th>
                     <th>Estate</th>
+                    <th>Status</th>
                     <th>Date Booked</th>
                     <th>Actions</th>
                 </tr>
@@ -49,6 +50,15 @@
                     <td>{{ .Notes }}</td>
                     <td><strong>{{ .PlotNumber }}</strong></td>
                     <td>{{ .EstateName }}</td>
+                    <td>
+                        {{ if eq .StageLabel "Active" }}
+                        <span style="background:#f1f5f9;color:#475569;font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap;">{{ .StageLabel }}</span>
+                        {{ else if eq .StageLabel "Accounts Stage" }}
+                        <span style="background:#dbeafe;color:#1e40af;font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap;">{{ .StageLabel }}</span>
+                        {{ else }}
+                        <span style="background:#ede9fe;color:#5b21b6;font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap;">{{ .StageLabel }}</span>
+                        {{ end }}
+                    </td>
                     <td>{{ .DateBooked }}</td>
                     <td style="white-space:nowrap;display:flex;gap:6px;flex-wrap:wrap;">
                         <a href="/agent/booking/{{ .BookingID }}/attachments"
@@ -68,7 +78,7 @@
         </table>
     </div>
     {{ else }}
-    <p style="color:#6b7280;text-align:center;padding:2rem 0;">No active bookings found.</p>
+    <p style="color:#6b7280;text-align:center;padding:2rem 0;">No bookings found.</p>
     {{ end }}
 </div>
 {{ end }}

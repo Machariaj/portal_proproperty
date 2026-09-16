@@ -2164,6 +2164,26 @@ const (
 	fullyBakedSQL   = "(" + docsCompleteSQL + " AND " + thresholdMetSQL + ")"
 )
 
+// bookingStageLabel names a booking's review stage once it's past 'active'
+// — "Accounts Stage", "Legal Stage — Drafting", or "Legal Stage — Awaiting
+// Signature" — shared between the admin Booked Plots page and the agent's
+// My Bookings page so the two never describe the same status differently.
+// Returns "" for 'active' or anything else, since what that should say
+// depends on the caller's own context (admin distinguishes "not yet swept"
+// from plain "active"; agent just shows "Active").
+func bookingStageLabel(status, legalStage string) string {
+	switch {
+	case status == "pending_accounts_review":
+		return "Accounts Stage"
+	case status == "pending_wakili_review" && legalStage == "awaiting_signature":
+		return "Legal Stage — Awaiting Signature"
+	case status == "pending_wakili_review":
+		return "Legal Stage — Drafting"
+	default:
+		return ""
+	}
+}
+
 func adminBookedPlotsHandler(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	fAgent := q.Get("agent")
@@ -2257,19 +2277,14 @@ func adminBookedPlotsHandler(w http.ResponseWriter, r *http.Request) {
 			log.Printf("booked scan: %v", err)
 			continue
 		}
-		switch {
-		case b.Status == "pending_accounts_review":
-			b.StageLabel = "Accounts Stage"
-		case b.Status == "pending_wakili_review" && b.LegalStage == "awaiting_signature":
-			b.StageLabel = "Legal Stage — Awaiting Signature"
-		case b.Status == "pending_wakili_review":
-			b.StageLabel = "Legal Stage — Drafting"
-		case b.Status == "active":
+		if b.Status == "active" {
 			// Qualifies (docs + deposit both check out) but hasn't been swept
 			// into Accounts yet — worth flagging distinctly since it means
 			// maybeAdvanceToAccountsReview hasn't fired for this booking yet.
 			b.StageLabel = "Not Yet Advanced"
-		default:
+		} else if label := bookingStageLabel(b.Status, b.LegalStage); label != "" {
+			b.StageLabel = label
+		} else {
 			b.StageLabel = b.Status
 		}
 		bookings = append(bookings, b)
@@ -2646,6 +2661,7 @@ func adminPlotsOverviewSearchHandler(w http.ResponseWriter, r *http.Request) {
 	queryAndScan := func(query string, args ...any) {
 		rows, err := db.Query(query, args...)
 		if err != nil {
+			log.Printf("plots-overview query error (tab=%s): %v", tab, err)
 			return
 		}
 		defer rows.Close()
@@ -2678,7 +2694,7 @@ func adminPlotsOverviewSearchHandler(w http.ResponseWriter, r *http.Request) {
 				SELECT b.id, p.plot_number, e.name,
 				       COALESCE(b.agent_name,''), COALESCE(b.buyer_name,''),
 				       COALESCE(b.buyer_phone,''), COALESCE(b.buyer_email,''),
-				       DATE_FORMAT(b.date_signed,'%d %b %Y'),
+				       COALESCE(DATE_FORMAT(b.date_signed,'%d %b %Y'),''),
 				       COALESCE(b.deposit_ref,''), COALESCE(b.id_photo,''),
 				       COALESCE(b.kra,''), COALESCE(b.passport_photo,''),
 				       COALESCE(b.sale_agreement,''),
@@ -2696,7 +2712,7 @@ func adminPlotsOverviewSearchHandler(w http.ResponseWriter, r *http.Request) {
 				SELECT b.id, p.plot_number, e.name,
 				       COALESCE(b.agent_name,''), COALESCE(b.buyer_name,''),
 				       COALESCE(b.buyer_phone,''), COALESCE(b.buyer_email,''),
-				       DATE_FORMAT(b.date_signed,'%d %b %Y'),
+				       COALESCE(DATE_FORMAT(b.date_signed,'%d %b %Y'),''),
 				       COALESCE(b.deposit_ref,''), COALESCE(b.id_photo,''),
 				       COALESCE(b.kra,''), COALESCE(b.passport_photo,''),
 				       COALESCE(b.sale_agreement,''),
@@ -2715,7 +2731,7 @@ func adminPlotsOverviewSearchHandler(w http.ResponseWriter, r *http.Request) {
 				SELECT s.id, p.plot_number, e.name,
 				       COALESCE(s.agent_name,''), COALESCE(s.buyer_name,''),
 				       COALESCE(s.buyer_phone,''), COALESCE(s.buyer_email,''),
-				       DATE_FORMAT(s.date_sold,'%d %b %Y'),
+				       COALESCE(DATE_FORMAT(s.date_sold,'%d %b %Y'),''),
 				       COALESCE(s.deposit_doc,''), COALESCE(s.id_doc,''),
 				       COALESCE(s.kra_doc,''), COALESCE(s.passport_photo,''),
 				       COALESCE(s.letter_of_consent,''), COALESCE(s.transfer_forms,''),
@@ -2730,7 +2746,7 @@ func adminPlotsOverviewSearchHandler(w http.ResponseWriter, r *http.Request) {
 				SELECT s.id, p.plot_number, e.name,
 				       COALESCE(s.agent_name,''), COALESCE(s.buyer_name,''),
 				       COALESCE(s.buyer_phone,''), COALESCE(s.buyer_email,''),
-				       DATE_FORMAT(s.date_sold,'%d %b %Y'),
+				       COALESCE(DATE_FORMAT(s.date_sold,'%d %b %Y'),''),
 				       COALESCE(s.deposit_doc,''), COALESCE(s.id_doc,''),
 				       COALESCE(s.kra_doc,''), COALESCE(s.passport_photo,''),
 				       COALESCE(s.letter_of_consent,''), COALESCE(s.transfer_forms,''),
@@ -4094,13 +4110,20 @@ func agentBookingsHandler(w http.ResponseWriter, r *http.Request) {
 		Notes      string
 		DateBooked string
 		BatchRef   string
+		Status     string
+		LegalStage string
+		StageLabel string
 	}
 
-	query := `SELECT b.id, p.id, p.plot_number, e.name, b.buyer_name, COALESCE(b.buyer_phone,''), COALESCE(b.buyer_email,''), COALESCE(b.notes,''), DATE_FORMAT(b.date_booked,'%d %b %Y'), COALESCE(b.batch_ref,'')
+	// Includes pending_accounts_review/pending_wakili_review too (not just
+	// 'active') — otherwise a booking vanishes from the agent's view the
+	// moment it advances to Accounts or Legal, with no way for them to see
+	// where their own client's booking actually is until it's fully sold.
+	query := `SELECT b.id, p.id, p.plot_number, e.name, b.buyer_name, COALESCE(b.buyer_phone,''), COALESCE(b.buyer_email,''), COALESCE(b.notes,''), DATE_FORMAT(b.date_booked,'%d %b %Y'), COALESCE(b.batch_ref,''), b.status, b.legal_stage
 		FROM prop_bookings b
 		JOIN prop_plots p ON p.id=b.plot_id
 		JOIN prop_estates e ON e.id=p.estate_id
-		WHERE b.status='active' AND b.agent_name=?`
+		WHERE b.status IN ('active','pending_accounts_review','pending_wakili_review') AND b.agent_name=?`
 	args := []any{agentName}
 
 	if estateFilter != "" && estateFilter != "0" {
@@ -4123,7 +4146,12 @@ func agentBookingsHandler(w http.ResponseWriter, r *http.Request) {
 	var bookings []bookingRow
 	for rows.Next() {
 		var b bookingRow
-		if rows.Scan(&b.BookingID, &b.PlotID, &b.PlotNumber, &b.EstateName, &b.BuyerName, &b.BuyerPhone, &b.BuyerEmail, &b.Notes, &b.DateBooked, &b.BatchRef) == nil {
+		if rows.Scan(&b.BookingID, &b.PlotID, &b.PlotNumber, &b.EstateName, &b.BuyerName, &b.BuyerPhone, &b.BuyerEmail, &b.Notes, &b.DateBooked, &b.BatchRef, &b.Status, &b.LegalStage) == nil {
+			if label := bookingStageLabel(b.Status, b.LegalStage); label != "" {
+				b.StageLabel = label
+			} else {
+				b.StageLabel = "Active"
+			}
 			bookings = append(bookings, b)
 		}
 	}
