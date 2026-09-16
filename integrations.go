@@ -312,7 +312,9 @@ func processBookingIntegrations(b bookingInfo) {
 // reverts to available if either isn't met in time. Only mentions whichever
 // of the two (balance, docs) is actually still outstanding at booking time —
 // a rebooking or an agent who captured an initial deposit/docs on the spot
-// may already have one or both covered. Fired once per booking from
+// may already have one or both covered. Skipped entirely if the estate has
+// no deposit_threshold configured — the 14-day payment/release premise
+// doesn't apply without one. Fired once per booking from
 // processBookingIntegrations regardless of completeness — see
 // checkClientReminderSMS (day 10-14 follow-ups) and checkOverdueBookings'
 // release notice (scheduler.go) for the rest of this SMS sequence.
@@ -320,15 +322,23 @@ func sendBuyerBookingConfirmationSMS(b bookingInfo) {
 	if b.BuyerPhone == "" || !notifyBuyerEnabled() {
 		return
 	}
-	vanbooking.SendSMS(b.BuyerPhone, buildBuyerBookingConfirmationSMS(b))
+	msg, ok := buildBuyerBookingConfirmationSMS(b)
+	if !ok {
+		return
+	}
+	vanbooking.SendSMS(b.BuyerPhone, msg)
 }
 
 // buildBuyerBookingConfirmationSMS builds the message text for
 // sendBuyerBookingConfirmationSMS, split out so the wording can be unit
-// tested without actually sending an SMS.
-func buildBuyerBookingConfirmationSMS(b bookingInfo) string {
+// tested without actually sending an SMS. ok is false when the estate has no
+// deposit_threshold configured, meaning no SMS should be sent at all.
+func buildBuyerBookingConfirmationSMS(b bookingInfo) (msg string, ok bool) {
+	balanceMsg, balanceOwed, configured := depositBalanceMsg(b)
+	if !configured {
+		return "", false
+	}
 	plotStr := strings.Join(b.PlotNumbers, ", ")
-	balanceMsg, balanceOwed := depositBalanceMsg(b)
 	docsOwed := !hasAllAttachments(b)
 
 	var body string
@@ -352,31 +362,32 @@ func buildBuyerBookingConfirmationSMS(b bookingInfo) string {
 	}
 
 	return fmt.Sprintf("Dear %s, Thank you for booking Plot %s at %s. %s - Pro-Property",
-		b.BuyerName, plotStr, b.EstateName, body)
+		b.BuyerName, plotStr, b.EstateName, body), true
 }
 
 // depositBalanceMsg returns the phrase for the buyer SMS's "pay X" clause —
 // the estate's deposit_threshold minus what's already recorded as paid on
-// this booking (b.Deposit) — and whether any balance is actually owed. When
-// the estate has no threshold configured we can't compute a real balance, so
-// fall back to the pre-threshold generic phrase and assume payment is still
-// needed (matches the old, pre-balance behavior for those estates).
-func depositBalanceMsg(b bookingInfo) (msg string, owed bool) {
+// this booking (b.Deposit) — whether any balance is actually owed, and
+// whether the estate has a threshold configured at all. configured is false
+// (and msg/owed meaningless) when there's no plot to look up or the estate
+// has no deposit_threshold set — callers should skip sending in that case
+// rather than reference a vague, unconfigured amount.
+func depositBalanceMsg(b bookingInfo) (msg string, owed bool, configured bool) {
 	if len(b.PlotIDs) == 0 {
-		return "the set deposit threshold", true
+		return "", false, false
 	}
 	var threshold sql.NullFloat64
 	db.QueryRow(`SELECT e.deposit_threshold FROM prop_plots p JOIN prop_estates e ON e.id=p.estate_id WHERE p.id=?`,
 		b.PlotIDs[0]).Scan(&threshold)
 	if !threshold.Valid || threshold.Float64 <= 0 {
-		return "the set deposit threshold", true
+		return "", false, false
 	}
 	paid, _ := strconv.ParseFloat(b.Deposit, 64)
 	balance := threshold.Float64 - paid
 	if balance <= 0 {
-		return "", false
+		return "", false, true
 	}
-	return fmt.Sprintf("the balance of KES %.0f", balance), true
+	return fmt.Sprintf("the balance of KES %.0f", balance), true, true
 }
 
 // sendAgentBookingConfirmationSMS sends the booking agent the same
