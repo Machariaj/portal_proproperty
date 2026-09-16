@@ -17,6 +17,7 @@
     <div class="review-field"><span>Buyer Phone</span><span>{{ .Info.BuyerPhone }}</span></div>
     <div class="review-field"><span>Buyer Email</span><span>{{ .Info.BuyerEmail }}</span></div>
     <div class="review-field"><span>Agent</span><span>{{ .Info.AgentName }} {{ if .Info.AgentPhone }}({{ .Info.AgentPhone }}){{ end }}</span></div>
+    <div class="review-field"><span>Assigned Lawyer</span><span>{{ if .Info.LawyerName }}{{ .Info.LawyerName }}{{ else }}—{{ end }}</span></div>
     <div class="review-field"><span>Payment Plan</span><span>{{ .Info.PaymentPlan }}</span></div>
     <div class="review-field"><span>Deposit Paid</span><span>KES {{ fmtAmount (printf "%.2f" .Info.Deposit) }}</span></div>
     <div class="review-field"><span>Notes at booking</span><span>{{ if .Info.Notes }}{{ .Info.Notes }}{{ else }}—{{ end }}</span></div>
@@ -44,6 +45,7 @@
 </div>
 
 <div class="review-section">
+    {{ if .CanAct }}
     {{ if eq .Info.LegalStage "awaiting_signature" }}
     <h3>Sale Agreement</h3>
     <p style="margin:-8px 0 14px;font-size:12.5px;color:#64748b;">Drafted and sent to the client — waiting on their signature. Upload the signed copy once it's back.</p>
@@ -74,6 +76,17 @@
         <textarea name="notes" rows="2" required style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;box-sizing:border-box;margin-bottom:10px;"></textarea>
         <button type="submit" class="btn-danger">✖ Cancel Booking</button>
     </form>
+    {{ else }}
+    <h3>Status</h3>
+    <p style="font-size:13px;color:#64748b;">
+        {{ if eq .Info.LegalStage "awaiting_signature" }}
+        Sale agreement drafted and sent to the client — awaiting their signature.
+        {{ else }}
+        Sale agreement is being drafted by the assigned lawyer.
+        {{ end }}
+    </p>
+    <p style="font-size:12px;color:#94a3b8;margin-top:10px;">Read-only view — actions here are limited to the estate's assigned lawyer.</p>
+    {{ end }}
 </div>
 {{ end }}
 {{ template "legal_base" . }}

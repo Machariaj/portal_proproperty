@@ -6,14 +6,38 @@
     </div>
 </div>
 
-<form method="GET" action="/legal/completed" style="display:flex;align-items:flex-end;gap:10px;margin-bottom:20px;">
-    <div>
-        <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:6px;">Filter by month</label>
+<form method="GET" action="/legal/completed" style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px;margin-bottom:20px;background:#fff;border-radius:14px;box-shadow:0 2px 12px rgba(0,0,0,0.06);padding:16px 20px;">
+    <div style="display:flex;flex-direction:column;gap:4px;">
+        <label style="font-size:12px;font-weight:600;color:#374151;">Filter by month</label>
         <input type="month" name="month" value="{{ .Month }}"
-               style="padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;">
+               style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;min-width:180px;">
+        <label style="font-size:12px;color:#6b7280;font-weight:600;">Estate</label>
+        <select name="estate" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+            <option value="">All Estates</option>
+            {{ range .Estates }}<option value="{{ .ID }}" {{ if eq (printf "%d" .ID) $.FEstate }}selected{{ end }}>{{ .Name }}</option>{{ end }}
+        </select>
+    </div>
+    {{ if .ShowLawyerFilter }}
+    <div style="display:flex;flex-direction:column;gap:4px;min-width:180px;">
+        <label style="font-size:12px;color:#6b7280;font-weight:600;">Lawyer</label>
+        <select name="lawyer" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+            <option value="">All Lawyers</option>
+            {{ range .Lawyers }}<option value="{{ .ID }}" {{ if eq (printf "%d" .ID) $.FLawyer }}selected{{ end }}>{{ .Name }}</option>{{ end }}
+        </select>
+    </div>
+    {{ end }}
+    <div style="display:flex;flex-direction:column;gap:4px;">
+        <label style="font-size:12px;color:#6b7280;font-weight:600;">Date From</label>
+        <input type="date" name="date_from" value="{{ .FFrom }}" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+        <label style="font-size:12px;color:#6b7280;font-weight:600;">Date To</label>
+        <input type="date" name="date_to" value="{{ .FTo }}" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
     </div>
     <button type="submit" class="btn-primary">Filter</button>
-    {{ if .Month }}<a href="/legal/completed" class="btn-ghost">Clear</a>{{ end }}
+    {{ if or .Month .FEstate .FLawyer .FFrom .FTo }}<a href="/legal/completed" class="btn-ghost">Clear</a>{{ end }}
 </form>
 
 <div class="stat-card" style="max-width:220px;margin-bottom:20px;">
@@ -28,6 +52,7 @@
                 <th>Buyer</th>
                 <th>Estate / Plot</th>
                 <th>Agent</th>
+                <th>Lawyer</th>
                 <th>Date Signed</th>
                 <th>Plot Status</th>
             </tr>
@@ -38,11 +63,12 @@
                 <td>{{ .BuyerName }}</td>
                 <td>{{ .EstateName }} — Plot {{ .PlotNumber }}</td>
                 <td>{{ .AgentName }}</td>
+                <td>{{ if .LawyerName }}{{ .LawyerName }}{{ else }}<span style="color:#9ca3af;">—</span>{{ end }}</td>
                 <td>{{ .DateSigned }}</td>
                 <td>{{ .PlotStatus }}</td>
             </tr>
             {{ else }}
-            <tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:24px;">No records found{{ if .Month }} for {{ .Month }}{{ end }}.</td></tr>
+            <tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:24px;">No records found{{ if .Month }} for {{ .Month }}{{ end }}.</td></tr>
             {{ end }}
         </tbody>
     </table>

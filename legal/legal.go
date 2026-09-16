@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"maps"
 	"net/http"
 	"strings"
 )
@@ -18,23 +19,28 @@ var (
 	getAgentFn        func(r *http.Request) string
 	getUserIDFn       func(r *http.Request) string
 	isSystemAdminFn   func(r *http.Request) bool
+	getRoleFn         func(r *http.Request) string
 	saveUploadedFiles func(r *http.Request, fieldName string) string
 	processSAIntegr   func(plotID int, plotNumber, estateName string)
 	cancelBooks       func(estimateID string)
 	sendOutcome       func(outcome, plotNumber, estateName, buyerName, buyerPhone, agentName, notes string) error
 )
 
-// Init wires this package to the host app's shared dependencies. Each
-// estate has exactly one assigned lawyer (prop_estates.lawyer_id, a
-// Legal-role prop_agents.id) — getUserIDFn identifies which one is logged
-// in, so every list/action here is scoped to that lawyer's own estates
-// unless isSystemAdminFn(r) is true (system_admin sees everything).
+// Init wires this package to the host app's shared dependencies. Two roles
+// can reach /legal/* (agents track their own bookings' stage from their own
+// My Bookings page instead — see bookingStageLabel in main.go):
+//   - legal:  the assigned lawyer on an estate (prop_estates.lawyer_id) —
+//     full access to that estate's bookings, can act on them.
+//   - admin:  every booking, every estate — read-only oversight of what's
+//     pending and at what stage, with the assigned lawyer shown per row.
+//   - system_admin: everything, full access, same as legal.
 func Init(
 	d *sql.DB,
 	render func(http.ResponseWriter, string, any),
 	agentFn func(*http.Request) string,
 	getUserID func(*http.Request) string,
 	isSystemAdmin func(*http.Request) bool,
+	getRole func(*http.Request) string,
 	saveFiles func(r *http.Request, fieldName string) string,
 	processSignedIntegrations func(plotID int, plotNumber, estateName string),
 	cancelBooksEstimate func(estimateID string),
@@ -45,24 +51,31 @@ func Init(
 	getAgentFn = agentFn
 	getUserIDFn = getUserID
 	isSystemAdminFn = isSystemAdmin
+	getRoleFn = getRole
 	saveUploadedFiles = saveFiles
 	processSAIntegr = processSignedIntegrations
 	cancelBooks = cancelBooksEstimate
 	sendOutcome = sendOutcomeEmail
 }
 
-// scopeToLawyer appends an estate-ownership filter to query/args unless the
-// caller is system_admin. Returns the (possibly unchanged) query and args.
-func scopeToLawyer(r *http.Request, query string, args []any) (string, []any) {
-	if isSystemAdminFn(r) {
-		return query, args
+// scopeQuery narrows a queue query to what the current viewer is allowed to
+// see: a lawyer sees only their assigned estates' bookings; admin/
+// system_admin see everything (admin is read-only oversight — see
+// isAssignedLawyer's use as the action gate below).
+func scopeQuery(r *http.Request, query string, args []any) (string, []any) {
+	if getRoleFn(r) == "legal" {
+		return query + ` AND e.lawyer_id = ?`, append(args, getUserIDFn(r))
 	}
-	return query + ` AND e.lawyer_id = ?`, append(args, getUserIDFn(r))
+	return query, args // admin, system_admin
 }
 
 // isAssignedLawyer reports whether the current user may act on a booking on
 // the given estate — either they're system_admin, or the estate's
-// lawyer_id matches their own user ID.
+// lawyer_id matches their own user ID. This is also, deliberately, the
+// action gate for the three mutating handlers below: an admin or agent's
+// own ID never matches an estate's lawyer_id, so they're naturally blocked
+// from acting even though they can now reach these routes — no separate
+// "canAct" check needed.
 func isAssignedLawyer(r *http.Request, estateID int) bool {
 	if isSystemAdminFn(r) {
 		return true
@@ -74,8 +87,118 @@ func isAssignedLawyer(r *http.Request, estateID int) bool {
 	return lawyerID == getUserIDFn(r)
 }
 
+// canView reports whether the current viewer may see a booking on the given
+// estate — the assigned lawyer, system_admin, or any admin (full oversight).
+func canView(r *http.Request, estateID int) bool {
+	switch getRoleFn(r) {
+	case "system_admin", "admin":
+		return true
+	case "legal":
+		return isAssignedLawyer(r, estateID)
+	default:
+		return false
+	}
+}
+
 func renderLegal(w http.ResponseWriter, name string, data map[string]any) {
 	renderFn(w, name, data)
+}
+
+// filterOption is a simple {ID, Name} pair for the filter-bar dropdowns.
+type filterOption struct {
+	ID   int
+	Name string
+}
+
+// loadFilterEstates returns the estates selectable in the Estate filter —
+// only the viewer's own assigned estates for a lawyer (matching what
+// scopeQuery already restricts them to; showing every estate in the
+// dropdown would just let them pick one that always returns nothing),
+// every estate for admin/system_admin.
+func loadFilterEstates(r *http.Request) []filterOption {
+	query := `SELECT id, name FROM prop_estates`
+	var args []any
+	if getRoleFn(r) == "legal" {
+		query += ` WHERE lawyer_id = ?`
+		args = append(args, getUserIDFn(r))
+	}
+	query += ` ORDER BY name`
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []filterOption
+	for rows.Next() {
+		var o filterOption
+		if rows.Scan(&o.ID, &o.Name) == nil {
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
+// loadFilterLawyers returns every Legal-role user, for the admin-only
+// Lawyer filter dropdown — a lawyer viewing their own queue never needs to
+// filter by lawyer, since it's always just them.
+func loadFilterLawyers() []filterOption {
+	rows, err := db.Query(`SELECT id, name FROM prop_agents WHERE role='legal' ORDER BY name`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []filterOption
+	for rows.Next() {
+		var o filterOption
+		if rows.Scan(&o.ID, &o.Name) == nil {
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
+// applyListFilters appends the shared Estate/Lawyer/date-range filters (read
+// from the request's query string) to a list query. dateCol is the column
+// to range-filter on — "b.date_booked" for the two queues, "b.date_signed"
+// for Completed. The lawyer filter is applied regardless of viewer role:
+// for a lawyer it's redundant with scopeQuery's own restriction and fails
+// safe to zero rows if mismatched (never broadens what they can see), so
+// there's no need to special-case it away — only the UI hides the dropdown
+// for non-admins.
+func applyListFilters(r *http.Request, dateCol, query string, args []any) (string, []any) {
+	q := r.URL.Query()
+	if fEstate := q.Get("estate"); fEstate != "" {
+		query += ` AND e.id = ?`
+		args = append(args, fEstate)
+	}
+	if fLawyer := q.Get("lawyer"); fLawyer != "" {
+		query += ` AND e.lawyer_id = ?`
+		args = append(args, fLawyer)
+	}
+	if fFrom := q.Get("date_from"); fFrom != "" {
+		query += ` AND DATE(` + dateCol + `) >= ?`
+		args = append(args, fFrom)
+	}
+	if fTo := q.Get("date_to"); fTo != "" {
+		query += ` AND DATE(` + dateCol + `) <= ?`
+		args = append(args, fTo)
+	}
+	return query, args
+}
+
+// filterRenderData returns the common filter-bar fields every list template
+// needs — current selections plus the dropdown options.
+func filterRenderData(r *http.Request) map[string]any {
+	q := r.URL.Query()
+	return map[string]any{
+		"Estates":          loadFilterEstates(r),
+		"Lawyers":          loadFilterLawyers(),
+		"ShowLawyerFilter": getRoleFn(r) == "admin" || getRoleFn(r) == "system_admin",
+		"FEstate":          q.Get("estate"),
+		"FLawyer":          q.Get("lawyer"),
+		"FFrom":            q.Get("date_from"),
+		"FTo":              q.Get("date_to"),
+	}
 }
 
 func splitFiles(s string) []string {
@@ -101,7 +224,9 @@ func bookingIDFromPath(prefix, p string) string {
 }
 
 // Router handles all /legal/* requests. Access is gated by role at the mux
-// level in main.go (requireRole(roleLegal, ...)).
+// level in main.go (requireLegalAccess — legal, admin, agent, system_admin);
+// what each of those actually gets to see/do is scoped inside this package
+// (scopeQuery, canView, isAssignedLawyer).
 func Router(w http.ResponseWriter, r *http.Request) {
 	p := r.URL.Path
 	switch {
@@ -133,6 +258,7 @@ type queueRow struct {
 	EstateName string
 	PlotNumber string
 	DateBooked string
+	LawyerName string
 }
 
 // queueHandler lists stage 1: bookings Legal has just received from
@@ -140,12 +266,14 @@ type queueRow struct {
 func queueHandler(w http.ResponseWriter, r *http.Request) {
 	query := `
 		SELECT b.id, b.buyer_name, COALESCE(b.agent_name,''), e.name, p.plot_number,
-		       DATE_FORMAT(b.date_booked,'%d %b %Y')
+		       DATE_FORMAT(b.date_booked,'%d %b %Y'), COALESCE(lw.name,'')
 		FROM prop_bookings b
 		JOIN prop_plots p ON p.id = b.plot_id
 		JOIN prop_estates e ON e.id = b.estate_id
+		LEFT JOIN prop_agents lw ON lw.id = e.lawyer_id
 		WHERE b.status = 'pending_wakili_review' AND b.legal_stage = 'drafting'`
-	query, args := scopeToLawyer(r, query, nil)
+	query, args := scopeQuery(r, query, nil)
+	query, args = applyListFilters(r, "b.date_booked", query, args)
 	query += ` ORDER BY b.date_booked ASC`
 
 	rows, err := db.Query(query, args...)
@@ -159,17 +287,19 @@ func queueHandler(w http.ResponseWriter, r *http.Request) {
 	var queue []queueRow
 	for rows.Next() {
 		var q queueRow
-		if err := rows.Scan(&q.BookingID, &q.BuyerName, &q.AgentName, &q.EstateName, &q.PlotNumber, &q.DateBooked); err == nil {
+		if err := rows.Scan(&q.BookingID, &q.BuyerName, &q.AgentName, &q.EstateName, &q.PlotNumber, &q.DateBooked, &q.LawyerName); err == nil {
 			queue = append(queue, q)
 		}
 	}
 
-	renderLegal(w, "legal_queue.html", map[string]any{
+	data := map[string]any{
 		"Title":  "Legal — Pending Drafting Sale Agreement",
 		"Active": "queue",
 		"Queue":  queue,
 		"Error":  r.URL.Query().Get("err"),
-	})
+	}
+	maps.Copy(data, filterRenderData(r))
+	renderLegal(w, "legal_queue.html", data)
 }
 
 // awaitingSignatureHandler lists stage 2: bookings whose sale agreement has
@@ -177,12 +307,14 @@ func queueHandler(w http.ResponseWriter, r *http.Request) {
 func awaitingSignatureHandler(w http.ResponseWriter, r *http.Request) {
 	query := `
 		SELECT b.id, b.buyer_name, COALESCE(b.agent_name,''), e.name, p.plot_number,
-		       DATE_FORMAT(b.date_booked,'%d %b %Y')
+		       DATE_FORMAT(b.date_booked,'%d %b %Y'), COALESCE(lw.name,'')
 		FROM prop_bookings b
 		JOIN prop_plots p ON p.id = b.plot_id
 		JOIN prop_estates e ON e.id = b.estate_id
+		LEFT JOIN prop_agents lw ON lw.id = e.lawyer_id
 		WHERE b.status = 'pending_wakili_review' AND b.legal_stage = 'awaiting_signature'`
-	query, args := scopeToLawyer(r, query, nil)
+	query, args := scopeQuery(r, query, nil)
+	query, args = applyListFilters(r, "b.date_booked", query, args)
 	query += ` ORDER BY b.date_booked ASC`
 
 	rows, err := db.Query(query, args...)
@@ -196,17 +328,19 @@ func awaitingSignatureHandler(w http.ResponseWriter, r *http.Request) {
 	var queue []queueRow
 	for rows.Next() {
 		var q queueRow
-		if err := rows.Scan(&q.BookingID, &q.BuyerName, &q.AgentName, &q.EstateName, &q.PlotNumber, &q.DateBooked); err == nil {
+		if err := rows.Scan(&q.BookingID, &q.BuyerName, &q.AgentName, &q.EstateName, &q.PlotNumber, &q.DateBooked, &q.LawyerName); err == nil {
 			queue = append(queue, q)
 		}
 	}
 
-	renderLegal(w, "legal_awaiting.html", map[string]any{
+	data := map[string]any{
 		"Title":  "Legal — Pending Client Signature",
 		"Active": "awaiting",
 		"Queue":  queue,
 		"Error":  r.URL.Query().Get("err"),
-	})
+	}
+	maps.Copy(data, filterRenderData(r))
+	renderLegal(w, "legal_awaiting.html", data)
 }
 
 type completedRow struct {
@@ -217,6 +351,7 @@ type completedRow struct {
 	PlotNumber string
 	DateSigned string
 	PlotStatus string
+	LawyerName string
 }
 
 // completedHandler lists every booking whose sale agreement is done —
@@ -228,17 +363,19 @@ func completedHandler(w http.ResponseWriter, r *http.Request) {
 
 	query := `
 		SELECT b.id, b.buyer_name, COALESCE(b.agent_name,''), e.name, p.plot_number,
-		       COALESCE(DATE_FORMAT(b.date_signed,'%d %b %Y'), ''), p.status
+		       COALESCE(DATE_FORMAT(b.date_signed,'%d %b %Y'), ''), p.status, COALESCE(lw.name,'')
 		FROM prop_bookings b
 		JOIN prop_plots p ON p.id = b.plot_id
 		JOIN prop_estates e ON e.id = b.estate_id
+		LEFT JOIN prop_agents lw ON lw.id = e.lawyer_id
 		WHERE b.status IN ('sa_signed','completed')`
 	var args []any
 	if month != "" {
 		query += ` AND DATE_FORMAT(b.date_signed,'%Y-%m') = ?`
 		args = append(args, month)
 	}
-	query, args = scopeToLawyer(r, query, args)
+	query, args = scopeQuery(r, query, args)
+	query, args = applyListFilters(r, "b.date_signed", query, args)
 	query += ` ORDER BY b.date_signed DESC`
 
 	rows, err := db.Query(query, args...)
@@ -252,18 +389,20 @@ func completedHandler(w http.ResponseWriter, r *http.Request) {
 	var list []completedRow
 	for rows.Next() {
 		var c completedRow
-		if err := rows.Scan(&c.BookingID, &c.BuyerName, &c.AgentName, &c.EstateName, &c.PlotNumber, &c.DateSigned, &c.PlotStatus); err == nil {
+		if err := rows.Scan(&c.BookingID, &c.BuyerName, &c.AgentName, &c.EstateName, &c.PlotNumber, &c.DateSigned, &c.PlotStatus, &c.LawyerName); err == nil {
 			list = append(list, c)
 		}
 	}
 
-	renderLegal(w, "legal_completed.html", map[string]any{
+	data := map[string]any{
 		"Title":  "Legal — Completed Sale Agreement",
 		"Active": "completed",
 		"List":   list,
 		"Total":  len(list),
 		"Month":  month,
-	})
+	}
+	maps.Copy(data, filterRenderData(r))
+	renderLegal(w, "legal_completed.html", data)
 }
 
 type reviewDetail struct {
@@ -283,6 +422,7 @@ type reviewDetail struct {
 	Notes              string
 	AccountsNotes      string
 	LegalStage         string
+	LawyerName         string
 	DepositRefFiles    []string
 	IDPhotoFiles       []string
 	KRAFiles           []string
@@ -297,18 +437,19 @@ func loadReviewDetail(bookingID string) (reviewDetail, error) {
 		       COALESCE(b.agent_name,''), COALESCE(a.phone,''), COALESCE(a.email,''),
 		       e.id, e.name, b.plot_id, p.plot_number,
 		       COALESCE(b.deposit,0), COALESCE(b.payment_plan,''),
-		       COALESCE(b.notes,''), COALESCE(b.accounts_notes,''), b.legal_stage,
+		       COALESCE(b.notes,''), COALESCE(b.accounts_notes,''), b.legal_stage, COALESCE(lw.name,''),
 		       COALESCE(b.deposit_ref,''), COALESCE(b.id_photo,''), COALESCE(b.kra,''), COALESCE(b.passport_photo,'')
 		FROM prop_bookings b
 		JOIN prop_plots p ON p.id = b.plot_id
 		JOIN prop_estates e ON e.id = b.estate_id
 		LEFT JOIN prop_agents a ON a.name = b.agent_name
+		LEFT JOIN prop_agents lw ON lw.id = e.lawyer_id
 		WHERE b.id = ?`, bookingID).
 		Scan(&d.BookingID, &d.BuyerName, &d.BuyerPhone, &d.BuyerEmail,
 			&d.AgentName, &d.AgentPhone, &d.AgentEmail,
 			&d.EstateID, &d.EstateName, &d.PlotID, &d.PlotNumber,
 			&d.Deposit, &d.PaymentPlan,
-			&d.Notes, &d.AccountsNotes, &d.LegalStage, &depositRef, &idPhoto, &kra, &passportPhoto)
+			&d.Notes, &d.AccountsNotes, &d.LegalStage, &d.LawyerName, &depositRef, &idPhoto, &kra, &passportPhoto)
 	if err != nil {
 		return d, err
 	}
@@ -326,8 +467,8 @@ func reviewDetailHandler(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if !isAssignedLawyer(r, detail.EstateID) {
-		http.Error(w, "Access denied — this estate is not assigned to you.", http.StatusForbidden)
+	if !canView(r, detail.EstateID) {
+		http.Error(w, "Access denied — you don't have visibility into this booking.", http.StatusForbidden)
 		return
 	}
 	active := "queue"
@@ -339,6 +480,11 @@ func reviewDetailHandler(w http.ResponseWriter, r *http.Request) {
 		"Active": active,
 		"Info":   detail,
 		"Error":  r.URL.Query().Get("err"),
+		// Admin/agent get read-only visibility — the action forms below are
+		// hidden for them, not just blocked server-side (isAssignedLawyer
+		// already rejects the POST regardless, but showing a button that
+		// would just 403 on click is bad UX).
+		"CanAct": isAssignedLawyer(r, detail.EstateID),
 	})
 }
 

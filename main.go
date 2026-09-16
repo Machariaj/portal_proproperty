@@ -168,6 +168,7 @@ func main() {
 	accounts.Init(db, render, getAgentName, cancelBooksEstimate, sendReviewOutcomeEmail)
 	legal.Init(db, render, getAgentName, getUserID,
 		func(r *http.Request) bool { return getRole(r) == roleSystemAdmin },
+		getRole,
 		saveUploadedFiles, processSignedIntegrations, cancelBooksEstimate, sendReviewOutcomeEmail)
 	initPermissionTables()
 	init2FATables()
@@ -571,12 +572,17 @@ func requireAccountsAccess(next http.Handler) http.Handler {
 	})
 }
 
-// canAccessLegal reports whether the current user may use the Legal module:
-// role "legal" or system_admin (always), or any user explicitly granted
-// legal.access via the Modules page.
+// canAccessLegal reports whether the current user may use the Legal module.
+// role "legal" and system_admin get full access (see isAssignedLawyer);
+// "admin" gets blanket read-only oversight — every booking at every stage,
+// across every estate, with the assigned lawyer shown per row (see
+// scopeQuery/canView in legal/legal.go). Agents track their own bookings'
+// stage from their own My Bookings page instead (bookingStageLabel below),
+// not through this module. Anyone else needs an individual legal.access
+// grant via the Modules page.
 func canAccessLegal(r *http.Request) bool {
-	role := getRole(r)
-	if role == roleSystemAdmin || role == roleLegal {
+	switch getRole(r) {
+	case roleSystemAdmin, roleLegal, roleAdmin:
 		return true
 	}
 	return hasPermission(getUserID(r), "legal.access", "read")
@@ -4115,15 +4121,15 @@ func agentBookingsHandler(w http.ResponseWriter, r *http.Request) {
 		StageLabel string
 	}
 
-	// Includes pending_accounts_review/pending_wakili_review too (not just
-	// 'active') — otherwise a booking vanishes from the agent's view the
-	// moment it advances to Accounts or Legal, with no way for them to see
-	// where their own client's booking actually is until it's fully sold.
+	// Covers the full pipeline (active -> Accounts -> Legal -> SA Signed) so
+	// a booking never vanishes from the agent's own view partway through --
+	// only cancelled/expired (dead ends) and completed/sold (shown on My
+	// Sales instead) are left out.
 	query := `SELECT b.id, p.id, p.plot_number, e.name, b.buyer_name, COALESCE(b.buyer_phone,''), COALESCE(b.buyer_email,''), COALESCE(b.notes,''), DATE_FORMAT(b.date_booked,'%d %b %Y'), COALESCE(b.batch_ref,''), b.status, b.legal_stage
 		FROM prop_bookings b
 		JOIN prop_plots p ON p.id=b.plot_id
 		JOIN prop_estates e ON e.id=p.estate_id
-		WHERE b.status IN ('active','pending_accounts_review','pending_wakili_review') AND b.agent_name=?`
+		WHERE b.status IN ('active','pending_accounts_review','pending_wakili_review','sa_signed') AND b.agent_name=?`
 	args := []any{agentName}
 
 	if estateFilter != "" && estateFilter != "0" {
@@ -4147,7 +4153,9 @@ func agentBookingsHandler(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var b bookingRow
 		if rows.Scan(&b.BookingID, &b.PlotID, &b.PlotNumber, &b.EstateName, &b.BuyerName, &b.BuyerPhone, &b.BuyerEmail, &b.Notes, &b.DateBooked, &b.BatchRef, &b.Status, &b.LegalStage) == nil {
-			if label := bookingStageLabel(b.Status, b.LegalStage); label != "" {
+			if b.Status == "sa_signed" {
+				b.StageLabel = "SA Signed"
+			} else if label := bookingStageLabel(b.Status, b.LegalStage); label != "" {
 				b.StageLabel = label
 			} else {
 				b.StageLabel = "Active"
