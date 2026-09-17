@@ -84,7 +84,7 @@
                 </label>
                 {{ if .Info.DepositRefFiles }}
                 <div style="margin:4px 0 6px;display:flex;flex-direction:column;gap:3px;">
-                    {{ range .Info.DepositRefFiles }}<div style="display:flex;align-items:center;gap:4px;min-width:0;margin-bottom:2px;"><span style="font-size:11px;color:#1e293b;background:#eff6ff;padding:2px 7px;border-radius:4px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="{{ . }}">📄 {{ . }}</span><button type="button" class="fv-dots-btn" onclick="openFileMenu(event,'/uploads/{{ . }}','{{ . }}')" title="Options">⋮</button></div>{{ end }}
+                    {{ range .Info.DepositRefFiles }}<div style="display:flex;align-items:center;gap:4px;min-width:0;margin-bottom:2px;"><span style="font-size:11px;color:#1e293b;background:#eff6ff;padding:2px 7px;border-radius:4px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="{{ . }}">📄 {{ . }}</span><button type="button" class="fv-dots-btn" onclick="openFileMenu(event,'/uploads/{{ . }}','{{ . }}')" title="Options">⋮</button><button type="button" onclick="removeUploadedFile('deposit_ref','{{ . }}',this)" style="background:#fee2e2;color:#b91c1c;border:none;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0;" title="Remove">✕</button></div>{{ end }}
                 </div>
                 {{ end }}
                 <input type="file" id="fi-deposit_ref" name="deposit_ref" accept="image/*,.pdf" multiple style="display:none;">
@@ -98,7 +98,7 @@
                 </label>
                 {{ if .Info.IDPhotoFiles }}
                 <div style="margin:4px 0 6px;display:flex;flex-direction:column;gap:3px;">
-                    {{ range .Info.IDPhotoFiles }}<div style="display:flex;align-items:center;gap:4px;min-width:0;margin-bottom:2px;"><span style="font-size:11px;color:#1e293b;background:#eff6ff;padding:2px 7px;border-radius:4px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="{{ . }}">📄 {{ . }}</span><button type="button" class="fv-dots-btn" onclick="openFileMenu(event,'/uploads/{{ . }}','{{ . }}')" title="Options">⋮</button></div>{{ end }}
+                    {{ range .Info.IDPhotoFiles }}<div style="display:flex;align-items:center;gap:4px;min-width:0;margin-bottom:2px;"><span style="font-size:11px;color:#1e293b;background:#eff6ff;padding:2px 7px;border-radius:4px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="{{ . }}">📄 {{ . }}</span><button type="button" class="fv-dots-btn" onclick="openFileMenu(event,'/uploads/{{ . }}','{{ . }}')" title="Options">⋮</button><button type="button" onclick="removeUploadedFile('id_photo','{{ . }}',this)" style="background:#fee2e2;color:#b91c1c;border:none;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0;" title="Remove">✕</button></div>{{ end }}
                 </div>
                 {{ end }}
                 <input type="file" id="fi-id_photo" name="id_photo" accept="image/*,.pdf" multiple style="display:none;">
@@ -112,7 +112,7 @@
                 </label>
                 {{ if .Info.KRAFiles }}
                 <div style="margin:4px 0 6px;display:flex;flex-direction:column;gap:3px;">
-                    {{ range .Info.KRAFiles }}<div style="display:flex;align-items:center;gap:4px;min-width:0;margin-bottom:2px;"><span style="font-size:11px;color:#1e293b;background:#eff6ff;padding:2px 7px;border-radius:4px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="{{ . }}">📄 {{ . }}</span><button type="button" class="fv-dots-btn" onclick="openFileMenu(event,'/uploads/{{ . }}','{{ . }}')" title="Options">⋮</button></div>{{ end }}
+                    {{ range .Info.KRAFiles }}<div style="display:flex;align-items:center;gap:4px;min-width:0;margin-bottom:2px;"><span style="font-size:11px;color:#1e293b;background:#eff6ff;padding:2px 7px;border-radius:4px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="{{ . }}">📄 {{ . }}</span><button type="button" class="fv-dots-btn" onclick="openFileMenu(event,'/uploads/{{ . }}','{{ . }}')" title="Options">⋮</button><button type="button" onclick="removeUploadedFile('kra','{{ . }}',this)" style="background:#fee2e2;color:#b91c1c;border:none;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0;" title="Remove">✕</button></div>{{ end }}
                 </div>
                 {{ end }}
                 <input type="file" id="fi-kra" name="kra" accept="image/*,.pdf" multiple style="display:none;">
@@ -126,7 +126,7 @@
                 </label>
                 {{ if .Info.PassportPhotoFiles }}
                 <div style="margin:4px 0 6px;display:flex;flex-direction:column;gap:3px;">
-                    {{ range .Info.PassportPhotoFiles }}<div style="display:flex;align-items:center;gap:4px;min-width:0;margin-bottom:2px;"><span style="font-size:11px;color:#1e293b;background:#eff6ff;padding:2px 7px;border-radius:4px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="{{ . }}">📄 {{ . }}</span><button type="button" class="fv-dots-btn" onclick="openFileMenu(event,'/uploads/{{ . }}','{{ . }}')" title="Options">⋮</button></div>{{ end }}
+                    {{ range .Info.PassportPhotoFiles }}<div style="display:flex;align-items:center;gap:4px;min-width:0;margin-bottom:2px;"><span style="font-size:11px;color:#1e293b;background:#eff6ff;padding:2px 7px;border-radius:4px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="{{ . }}">📄 {{ . }}</span><button type="button" class="fv-dots-btn" onclick="openFileMenu(event,'/uploads/{{ . }}','{{ . }}')" title="Options">⋮</button><button type="button" onclick="removeUploadedFile('passport_photo','{{ . }}',this)" style="background:#fee2e2;color:#b91c1c;border:none;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0;" title="Remove">✕</button></div>{{ end }}
                 </div>
                 {{ end }}
                 <input type="file" id="fi-passport_photo" name="passport_photo" accept="image/*,.pdf" multiple style="display:none;">
@@ -224,6 +224,21 @@
         btn.textContent = 'Uploading...';
         btn.style.background = '#94a3b8';
     });
+
+    window.removeUploadedFile = function(field, filename, btn) {
+        if (!confirm('Remove this file? This cannot be undone.')) return;
+        var row = btn.closest('div');
+        var fd = new FormData();
+        fd.append('field', field);
+        fd.append('filename', filename);
+        fetch('/admin/booking-delete-attachment/{{ .Info.BookingID }}', { method: 'POST', body: fd })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data.ok) { row.remove(); }
+                else { alert('Could not remove file: ' + (data.error || 'unknown error')); }
+            })
+            .catch(function () { alert('Network error — please try again.'); });
+    };
 })();
 </script>
 </div>

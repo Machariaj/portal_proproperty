@@ -357,6 +357,8 @@ func main() {
 	mux.Handle("/admin/booking-extend/", authMiddleware(requireRole(roleAdmin, requirePerm("admin.extend_booking", "read", http.HandlerFunc(extendBookingHandler)))))
 	mux.Handle("/admin/booking-retry-zoho/", authMiddleware(requireRole(roleAdmin, http.HandlerFunc(adminRetryZohoHandler))))
 	mux.Handle("/admin/signed-booking-retry-zoho/", authMiddleware(requireRole(roleAdmin, http.HandlerFunc(adminRetryZohoSignedHandler))))
+	mux.Handle("/admin/booking-delete-attachment/", authMiddleware(requireRole(roleAdmin, requirePerm("admin.booked_plots", "write", http.HandlerFunc(bookingAttachmentDeleteHandler)))))
+	mux.Handle("/agent/booking-delete-attachment/", authMiddleware(requireRole(roleAgent, requirePerm("agent.bookings", "write", http.HandlerFunc(bookingAttachmentDeleteHandler)))))
 	mux.Handle("/agent/booking/", authMiddleware(requireRole(roleAgent, requirePerm("agent.bookings", "write", http.HandlerFunc(agentBookingAttachmentsHandler)))))
 	mux.Handle("/admin/booking-receipt", authMiddleware(requireRole(roleAdmin, http.HandlerFunc(adminBookingReceiptHandler))))
 	mux.Handle("/admin/booking-receipt/", authMiddleware(requireRole(roleAdmin, http.HandlerFunc(adminBookingReceiptViewHandler))))
@@ -4554,6 +4556,75 @@ func bookingAttachmentsHandler(w http.ResponseWriter, r *http.Request, tmplName,
 	} else {
 		renderAgent(w, r, tmplName, data)
 	}
+}
+
+// bookingAttachmentDeleteHandler removes a single filename from one of a
+// booking's KYC document fields (deposit_ref, id_photo, kra, passport_photo)
+// and deletes the file from disk — lets admin or agent correct a wrongly-
+// uploaded document from the booking-attachments page instead of it staying
+// stuck alongside the correct one forever. Shared by both
+// /admin/booking-delete-attachment/{id} and
+// /agent/booking-delete-attachment/{id}; reuses docFieldColumn's existing
+// field whitelist (the same one Plots Overview's delete-attachment endpoint
+// uses) via the "booked" tab, which maps to prop_bookings' four KYC columns.
+func bookingAttachmentDeleteHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var bookingID string
+	switch {
+	case strings.HasPrefix(r.URL.Path, "/admin/booking-delete-attachment/"):
+		bookingID = pathSegment("/admin/booking-delete-attachment/", r.URL.Path)
+	case strings.HasPrefix(r.URL.Path, "/agent/booking-delete-attachment/"):
+		bookingID = pathSegment("/agent/booking-delete-attachment/", r.URL.Path)
+	}
+	r.ParseForm()
+	field := r.FormValue("field")
+	filename := strings.TrimSpace(r.FormValue("filename"))
+
+	_, column, ok := docFieldColumn("booked", field)
+	if !ok || bookingID == "" || filename == "" {
+		json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "invalid request"})
+		return
+	}
+
+	var current string
+	if err := db.QueryRow(fmt.Sprintf("SELECT COALESCE(%s,'') FROM prop_bookings WHERE id=?", column), bookingID).Scan(&current); err != nil {
+		json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "booking not found"})
+		return
+	}
+
+	var remaining []string
+	found := false
+	for _, f := range strings.Split(current, ",") {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		if f == filename {
+			found = true
+			continue
+		}
+		remaining = append(remaining, f)
+	}
+	if !found {
+		json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "file not found on this booking"})
+		return
+	}
+
+	if _, err := db.Exec(fmt.Sprintf("UPDATE prop_bookings SET %s=? WHERE id=?", column), strings.Join(remaining, ","), bookingID); err != nil {
+		log.Printf("booking attachment delete: update failed: %v", err)
+		json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "database update failed"})
+		return
+	}
+	if err := os.Remove(filepath.Join(uploadsDir, filename)); err != nil && !os.IsNotExist(err) {
+		log.Printf("booking attachment delete: file remove warning for %s: %v", filename, err)
+	}
+	logBooking("ATTACHMENT_REMOVED", getAgentName(r), "", fmt.Sprintf("booking %s", bookingID), fmt.Sprintf("removed %s from %s", filename, field))
+
+	json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }
 
 func adminBookingAttachmentsHandler(w http.ResponseWriter, r *http.Request) {
