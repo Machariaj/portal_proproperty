@@ -2742,11 +2742,17 @@ func adminPlotsOverviewSearchHandler(w http.ResponseWriter, r *http.Request) {
 					GROUP BY plot_id
 				) latest ON latest.plot_id = p.id
 				LEFT JOIN prop_bookings b ON b.id = latest.latest_id
-				LEFT JOIN prop_payment_plan_deals dl ON dl.estate = e.name AND TRIM(dl.plot) = p.plot_number AND dl.sold_at IS NULL
+				LEFT JOIN (
+					SELECT * FROM (
+						SELECT d.*, ROW_NUMBER() OVER (
+							PARTITION BY estate, plot ORDER BY last_synced_at DESC, deal_id DESC
+						) AS rn
+						FROM prop_payment_plan_deals d WHERE sold_at IS NULL
+					) ranked WHERE rn = 1
+				) dl ON dl.estate = e.name AND TRIM(dl.plot) = p.plot_number
 				WHERE p.status = 'sa_signed'
 				  AND (e.name LIKE ? OR p.plot_number LIKE ? OR COALESCE(b.agent_name,'') LIKE ? OR COALESCE(b.buyer_name,'') LIKE ?)
-				ORDER BY (b.deposit_ref IS NOT NULL AND b.deposit_ref != '') DESC, b.date_signed DESC
-				LIMIT 100`, q, q, q, q)
+				ORDER BY (b.deposit_ref IS NOT NULL AND b.deposit_ref != '') DESC, b.date_signed DESC`, q, q, q, q)
 		} else {
 			queryAndScan(`
 				SELECT COALESCE(b.id,0), p.plot_number, e.name,
@@ -2765,10 +2771,16 @@ func adminPlotsOverviewSearchHandler(w http.ResponseWriter, r *http.Request) {
 					GROUP BY plot_id
 				) latest ON latest.plot_id = p.id
 				LEFT JOIN prop_bookings b ON b.id = latest.latest_id
-				LEFT JOIN prop_payment_plan_deals dl ON dl.estate = e.name AND TRIM(dl.plot) = p.plot_number AND dl.sold_at IS NULL
+				LEFT JOIN (
+					SELECT * FROM (
+						SELECT d.*, ROW_NUMBER() OVER (
+							PARTITION BY estate, plot ORDER BY last_synced_at DESC, deal_id DESC
+						) AS rn
+						FROM prop_payment_plan_deals d WHERE sold_at IS NULL
+					) ranked WHERE rn = 1
+				) dl ON dl.estate = e.name AND TRIM(dl.plot) = p.plot_number
 				WHERE p.status = 'sa_signed'
-				ORDER BY (b.deposit_ref IS NOT NULL AND b.deposit_ref != '') DESC, b.date_signed DESC
-				LIMIT 100`)
+				ORDER BY (b.deposit_ref IS NOT NULL AND b.deposit_ref != '') DESC, b.date_signed DESC`)
 		}
 	case "sold":
 		if hasSearch {
@@ -2785,7 +2797,7 @@ func adminPlotsOverviewSearchHandler(w http.ResponseWriter, r *http.Request) {
 				JOIN prop_plots p ON p.id = s.plot_id
 				JOIN prop_estates e ON e.id = s.estate_id
 				WHERE (e.name LIKE ? OR p.plot_number LIKE ? OR s.agent_name LIKE ? OR s.buyer_name LIKE ?)
-				ORDER BY s.date_sold DESC LIMIT 100`, q, q, q, q)
+				ORDER BY s.date_sold DESC`, q, q, q, q)
 		} else {
 			queryAndScan(`
 				SELECT s.id, p.plot_number, e.name,
@@ -2799,7 +2811,7 @@ func adminPlotsOverviewSearchHandler(w http.ResponseWriter, r *http.Request) {
 				FROM prop_sales s
 				JOIN prop_plots p ON p.id = s.plot_id
 				JOIN prop_estates e ON e.id = s.estate_id
-				ORDER BY s.date_sold DESC LIMIT 100`)
+				ORDER BY s.date_sold DESC`)
 		}
 	default: // booked
 		// Filters on p.status (the plot's actual current status) rather
@@ -2834,8 +2846,7 @@ func adminPlotsOverviewSearchHandler(w http.ResponseWriter, r *http.Request) {
 				LEFT JOIN prop_bookings b ON b.id = latest.latest_id
 				WHERE p.status = 'booked'
 				  AND (e.name LIKE ? OR p.plot_number LIKE ? OR COALESCE(b.agent_name,'') LIKE ? OR COALESCE(b.buyer_name,'') LIKE ?)
-				ORDER BY (b.deposit_ref IS NOT NULL AND b.deposit_ref != '') DESC, b.date_booked DESC
-				LIMIT 100`, q, q, q, q)
+				ORDER BY (b.deposit_ref IS NOT NULL AND b.deposit_ref != '') DESC, b.date_booked DESC`, q, q, q, q)
 		} else {
 			queryAndScan(`
 				SELECT COALESCE(b.id,0), p.plot_number, e.name,
@@ -2853,8 +2864,7 @@ func adminPlotsOverviewSearchHandler(w http.ResponseWriter, r *http.Request) {
 				) latest ON latest.plot_id = p.id
 				LEFT JOIN prop_bookings b ON b.id = latest.latest_id
 				WHERE p.status = 'booked'
-				ORDER BY (b.deposit_ref IS NOT NULL AND b.deposit_ref != '') DESC, b.date_booked DESC
-				LIMIT 100`)
+				ORDER BY (b.deposit_ref IS NOT NULL AND b.deposit_ref != '') DESC, b.date_booked DESC`)
 		}
 	}
 
