@@ -4262,12 +4262,24 @@ func agentSignedPlotsHandler(w http.ResponseWriter, r *http.Request) {
 		DateSigned string
 	}
 
+	// Filters on p.status (the plot's actual current status) rather than
+	// b.status='sa_signed' alone, joined to only the latest non-cancelled/
+	// expired booking per plot — same fix as Plots Overview's booked/signed
+	// tabs: a stale, superseded prop_bookings row left stuck at sa_signed
+	// from an earlier pass on the same plot must not show here once the
+	// plot itself has moved on (e.g. to sold).
 	query := `SELECT b.id, p.plot_number, e.name, b.buyer_name, COALESCE(b.buyer_phone,''), COALESCE(b.buyer_email,''),
 			COALESCE(b.deposit,0), COALESCE(DATE_FORMAT(b.date_signed,'%d %b %Y'),'')
 		FROM prop_bookings b
 		JOIN prop_plots p ON p.id=b.plot_id
 		JOIN prop_estates e ON e.id=p.estate_id
-		WHERE b.status='sa_signed' AND b.agent_name=?`
+		JOIN (
+			SELECT plot_id, MAX(id) AS latest_id
+			FROM prop_bookings
+			WHERE status NOT IN ('cancelled','expired')
+			GROUP BY plot_id
+		) latest ON b.id = latest.latest_id
+		WHERE p.status='sa_signed' AND b.agent_name=?`
 	args := []any{agentName}
 
 	if estateFilter != "" && estateFilter != "0" {
