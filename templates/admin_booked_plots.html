@@ -124,7 +124,7 @@
                         </div>
                     </td>
                     <td style="display:flex;gap:6px;flex-wrap:wrap;">
-                        {{ if eq $b.ZohoBooksID "" }}
+                        {{ if and (eq $b.ZohoBooksID "") (ne $b.Status "active") (ne $b.Status "pending_accounts_review") }}
                         <form method="POST" action="/admin/booking-retry-zoho/{{ $b.BookingID }}" style="margin:0;">
                             <button type="submit" style="background:#f59e0b;color:#fff;font-size:12px;padding:5px 10px;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;"
                                     onclick="return confirm('Retry Zoho Books creation for {{ $b.BuyerName }}?')">↺ Retry Zoho</button>

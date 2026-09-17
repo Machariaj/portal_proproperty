@@ -255,13 +255,14 @@ func sendReviewOutcomeEmail(outcome, plotNumber, estateName, buyerName, buyerPho
 }
 
 // processBookingIntegrations runs booking-time integrations asynchronously.
-// Zoho Books estimate is created here (at booking time) so a unique reference ID
-// is available when the plot later moves to SA Signed.
+// Zoho Books estimate creation does NOT happen here — per policy, a plot
+// shouldn't get a Books record just for being booked. It's deferred until
+// Accounts actually approves the booking (accounts.approveHandler) or a
+// system_admin explicitly skips Accounts and pushes it straight to Legal
+// (adminSkipAccountsHandler) — see createBooksRecordForBookingID, called
+// from both of those.
 // Zoho CRM fires at SA Signed (see processSignedIntegrations).
 func processBookingIntegrations(b bookingInfo) {
-	// Zoho Books always runs — devMode only blocks email/SMS.
-	go createBooksRecordForBooking(b)
-
 	// Booking-confirmation SMS (buyer and/or agent, per Settings ->
 	// Notifications) fires on every booking, regardless of whether docs/
 	// deposit are already complete — it's the start of the 14-day KYC/
@@ -1033,8 +1034,15 @@ func createBooksRecordForBooking(b bookingInfo) {
 	}
 	for i, pid := range b.PlotIDs {
 		var existing string
+		// Matches whichever booking row is currently "live" for this plot —
+		// not just 'active': this now also runs at Accounts-approval and
+		// system_admin skip-to-legal time, by which point the row's status
+		// is already 'pending_wakili_review'. A plot can only have one
+		// non-cancelled/expired row at a time (rebooking requires the prior
+		// one to reach a terminal status first), so this still identifies
+		// exactly the row this call is for.
 		db.QueryRow(
-			`SELECT COALESCE(zoho_books_id,'') FROM prop_bookings WHERE plot_id=? AND status='active' ORDER BY id DESC LIMIT 1`,
+			`SELECT COALESCE(zoho_books_id,'') FROM prop_bookings WHERE plot_id=? AND status NOT IN ('cancelled','expired') ORDER BY id DESC LIMIT 1`,
 			pid,
 		).Scan(&existing)
 		if existing != "" {
@@ -1067,7 +1075,7 @@ func createBooksRecordForBooking(b bookingInfo) {
 				log.Printf("[zoho-books] refresh estimate %s for plot %d failed: %v", prior.ZohoBooksID, pid, err)
 			}
 			db.Exec(
-				`UPDATE prop_bookings SET zoho_books_id=? WHERE plot_id=? AND status='active' AND zoho_books_id IS NULL`,
+				`UPDATE prop_bookings SET zoho_books_id=? WHERE plot_id=? AND status NOT IN ('cancelled','expired') AND zoho_books_id IS NULL`,
 				prior.ZohoBooksID, pid,
 			)
 			log.Printf("[zoho-books] reused estimate %s for plot %d (%s) — confirmed rebook", prior.ZohoBooksID, pid, plotNum)
@@ -1080,7 +1088,7 @@ func createBooksRecordForBooking(b bookingInfo) {
 			continue
 		}
 		db.Exec(
-			`UPDATE prop_bookings SET zoho_books_id=? WHERE plot_id=? AND status='active' AND zoho_books_id IS NULL`,
+			`UPDATE prop_bookings SET zoho_books_id=? WHERE plot_id=? AND status NOT IN ('cancelled','expired') AND zoho_books_id IS NULL`,
 			booksID, pid,
 		)
 		log.Printf("[zoho-books] stored estimate %s for plot %d (%s)", booksID, pid, plotNum)
@@ -1088,6 +1096,39 @@ func createBooksRecordForBooking(b bookingInfo) {
 			go sendRebookAccountsEmail(plotNum, single.EstateName, single.BuyerName, prior.ZohoBooksID)
 		}
 	}
+}
+
+// createBooksRecordForBookingID fetches one booking's data and creates its
+// Zoho Books estimate — the actual trigger point for Books creation now
+// that it's deferred past initial booking time (see processBookingIntegrations).
+// Called from accounts.approveHandler (via the createBooksFn injected into
+// accounts.Init) once Accounts approves, and from adminSkipAccountsHandler
+// when a system_admin bypasses Accounts entirely. Safe to call even if a
+// record already exists — createBooksRecordForBooking is idempotent per plot.
+func createBooksRecordForBookingID(bookingID string) {
+	var b bookingInfo
+	var plotID int
+	var deposit float64
+	var plotNumber string
+	err := db.QueryRow(`
+		SELECT p.id, b.buyer_name, COALESCE(b.buyer_phone,''), COALESCE(b.buyer_email,''),
+		       COALESCE(b.agent_name,''), COALESCE(b.deposit,0), COALESCE(b.payment_plan,''),
+		       p.plot_number, e.name
+		FROM prop_bookings b
+		JOIN prop_plots p ON b.plot_id = p.id
+		JOIN prop_estates e ON b.estate_id = e.id
+		WHERE b.id = ?`, bookingID).Scan(
+		&plotID, &b.BuyerName, &b.BuyerPhone, &b.BuyerEmail,
+		&b.AgentName, &deposit, &b.PaymentPlan,
+		&plotNumber, &b.EstateName)
+	if err != nil {
+		log.Printf("[zoho-books] createBooksRecordForBookingID fetch error booking=%s: %v", bookingID, err)
+		return
+	}
+	b.PlotIDs = []int{plotID}
+	b.PlotNumbers = []string{plotNumber}
+	b.Deposit = fmt.Sprintf("%.2f", deposit)
+	createBooksRecordForBooking(b)
 }
 
 // updateBooksContact fetches the customer_id from the stored estimate, then

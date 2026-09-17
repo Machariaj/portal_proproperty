@@ -165,7 +165,7 @@ func main() {
 		getUserID,
 	)
 	welfare.InitTables()
-	accounts.Init(db, render, getAgentName, cancelBooksEstimate, sendReviewOutcomeEmail)
+	accounts.Init(db, render, getAgentName, cancelBooksEstimate, sendReviewOutcomeEmail, createBooksRecordForBookingID)
 	legal.Init(db, render, getAgentName, getUserID,
 		func(r *http.Request) bool { return getRole(r) == roleSystemAdmin },
 		getRole,
@@ -1676,6 +1676,11 @@ func adminSkipAccountsHandler(w http.ResponseWriter, r *http.Request) {
 	logBooking("SYSADMIN_SKIP_ACCOUNTS", reviewer, "", plotNumber+" — "+estateName,
 		"bypassed Accounts deposit-threshold check (KYC docs confirmed complete), pushed straight to Legal: "+reason)
 
+	// Zoho Books estimate is deliberately deferred until this exact moment —
+	// system_admin explicitly skipping Accounts and pushing straight to
+	// Legal — rather than at initial booking time.
+	go createBooksRecordForBookingID(bookingID)
+
 	redirectBack(w, r, "/admin/booked-plots", "booking-"+bookingID)
 }
 
@@ -2321,6 +2326,12 @@ func adminBookedPlotsHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// adminRetryZohoHandler manually retries Zoho Books estimate creation for one
+// booking (e.g. the first attempt errored). Refuses to run for a booking
+// that hasn't been approved by Accounts (or skipped straight to Legal) yet —
+// no Books record is expected to exist before then, so there's nothing to
+// "retry" (see createBooksRecordForBookingID and where it's actually
+// triggered: accounts.approveHandler, adminSkipAccountsHandler).
 func adminRetryZohoHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.NotFound(w, r)
@@ -2332,23 +2343,9 @@ func adminRetryZohoHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var plotID int
-	var deposit float64
-	var zohoBookID string
-	var b bookingInfo
-	var plotNumber string
-	err := db.QueryRow(`
-		SELECT p.id, b.buyer_name, COALESCE(b.buyer_phone,''), COALESCE(b.buyer_email,''),
-		       COALESCE(b.agent_name,''), COALESCE(b.deposit,0), COALESCE(b.payment_plan,''),
-		       p.plot_number, e.name, COALESCE(b.zoho_books_id,'')
-		FROM prop_bookings b
-		JOIN prop_plots p ON b.plot_id = p.id
-		JOIN prop_estates e ON b.estate_id = e.id
-		WHERE b.id = ?`, bookingID).Scan(
-		&plotID, &b.BuyerName, &b.BuyerPhone, &b.BuyerEmail,
-		&b.AgentName, &deposit, &b.PaymentPlan,
-		&plotNumber, &b.EstateName, &zohoBookID)
-	if err != nil {
+	var status, zohoBookID string
+	if err := db.QueryRow(`SELECT status, COALESCE(zoho_books_id,'') FROM prop_bookings WHERE id=?`, bookingID).
+		Scan(&status, &zohoBookID); err != nil {
 		http.Error(w, "Booking not found", http.StatusNotFound)
 		return
 	}
@@ -2356,10 +2353,12 @@ func adminRetryZohoHandler(w http.ResponseWriter, r *http.Request) {
 		redirectBack(w, r, "/admin/booked-plots", "booking-"+bookingID)
 		return
 	}
-	b.PlotIDs = []int{plotID}
-	b.PlotNumbers = []string{plotNumber}
-	b.Deposit = fmt.Sprintf("%.0f", deposit)
-	go createBooksRecordForBooking(b)
+	if status == "active" || status == "pending_accounts_review" {
+		redirectBack(w, r, "/admin/booked-plots", "booking-"+bookingID,
+			"err=No+Books+record+expected+yet+%E2%80%94+this+booking+hasn%27t+been+approved+by+Accounts")
+		return
+	}
+	go createBooksRecordForBookingID(bookingID)
 	redirectBack(w, r, "/admin/booked-plots?zoho_retry=1", "booking-"+bookingID, "zoho_retry=1")
 }
 

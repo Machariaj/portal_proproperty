@@ -18,23 +18,27 @@ var (
 	getAgentFn  func(r *http.Request) string
 	cancelBooks func(estimateID string)
 	sendOutcome func(outcome, plotNumber, estateName, buyerName, buyerPhone, agentName, notes string) error
+	createBooks func(bookingID string)
 )
 
-// Init wires this package to the host app's shared dependencies. cancelBooks
-// and sendOutcomeEmail are injected rather than imported directly since they
-// live in package main (cancelBooksEstimate, sendReviewOutcomeEmail).
+// Init wires this package to the host app's shared dependencies. cancelBooks,
+// sendOutcomeEmail and createBooks are injected rather than imported
+// directly since they live in package main (cancelBooksEstimate,
+// sendReviewOutcomeEmail, createBooksRecordForBookingID).
 func Init(
 	d *sql.DB,
 	render func(http.ResponseWriter, string, any),
 	agentFn func(*http.Request) string,
 	cancelBooksEstimate func(estimateID string),
 	sendOutcomeEmail func(outcome, plotNumber, estateName, buyerName, buyerPhone, agentName, notes string) error,
+	createBooksRecord func(bookingID string),
 ) {
 	db = d
 	renderFn = render
 	getAgentFn = agentFn
 	cancelBooks = cancelBooksEstimate
 	sendOutcome = sendOutcomeEmail
+	createBooks = createBooksRecord
 }
 
 func renderAccounts(w http.ResponseWriter, name string, data map[string]any) {
@@ -234,6 +238,13 @@ func approveHandler(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/accounts/queue?err=Booking+already+reviewed", http.StatusFound)
 		return
 	}
+
+	// Zoho Books estimate is deliberately deferred until this exact moment —
+	// Accounts approval — rather than at initial booking time.
+	if createBooks != nil {
+		go createBooks(bookingID)
+	}
+
 	http.Redirect(w, r, "/accounts/queue", http.StatusFound)
 }
 
