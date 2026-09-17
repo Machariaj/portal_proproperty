@@ -1455,7 +1455,7 @@ func adminEstatePlotsHandler(w http.ResponseWriter, r *http.Request) {
 			FROM prop_plots p
 			LEFT JOIN prop_bookings b ON b.id = (
 				SELECT id FROM prop_bookings
-				WHERE plot_id = p.id AND status NOT IN ('cancelled','expired')
+				WHERE plot_id = p.id
 				ORDER BY id DESC LIMIT 1
 			)
 			WHERE p.estate_id=? AND p.status=?
@@ -2240,7 +2240,6 @@ func adminBookedPlotsHandler(w http.ResponseWriter, r *http.Request) {
 		JOIN (
 			SELECT plot_id, MAX(id) AS latest_id
 			FROM prop_bookings
-			WHERE status NOT IN ('cancelled','expired')
 			GROUP BY plot_id
 		) latest ON b.id = latest.latest_id
 		WHERE p.status = 'booked'`
@@ -2482,7 +2481,6 @@ func adminSignedPlotsHandler(w http.ResponseWriter, r *http.Request) {
 		JOIN (
 			SELECT plot_id, MAX(id) AS latest_id
 			FROM prop_bookings
-			WHERE status NOT IN ('cancelled','expired')
 			GROUP BY plot_id
 		) latest ON b.id = latest.latest_id
 		WHERE p.status = 'sa_signed'`
@@ -2741,7 +2739,6 @@ func adminPlotsOverviewSearchHandler(w http.ResponseWriter, r *http.Request) {
 				LEFT JOIN (
 					SELECT plot_id, MAX(id) AS latest_id
 					FROM prop_bookings
-					WHERE status NOT IN ('cancelled','expired')
 					GROUP BY plot_id
 				) latest ON latest.plot_id = p.id
 				LEFT JOIN prop_bookings b ON b.id = latest.latest_id
@@ -2765,7 +2762,6 @@ func adminPlotsOverviewSearchHandler(w http.ResponseWriter, r *http.Request) {
 				LEFT JOIN (
 					SELECT plot_id, MAX(id) AS latest_id
 					FROM prop_bookings
-					WHERE status NOT IN ('cancelled','expired')
 					GROUP BY plot_id
 				) latest ON latest.plot_id = p.id
 				LEFT JOIN prop_bookings b ON b.id = latest.latest_id
@@ -2833,7 +2829,6 @@ func adminPlotsOverviewSearchHandler(w http.ResponseWriter, r *http.Request) {
 				LEFT JOIN (
 					SELECT plot_id, MAX(id) AS latest_id
 					FROM prop_bookings
-					WHERE status NOT IN ('cancelled','expired')
 					GROUP BY plot_id
 				) latest ON latest.plot_id = p.id
 				LEFT JOIN prop_bookings b ON b.id = latest.latest_id
@@ -2854,7 +2849,6 @@ func adminPlotsOverviewSearchHandler(w http.ResponseWriter, r *http.Request) {
 				LEFT JOIN (
 					SELECT plot_id, MAX(id) AS latest_id
 					FROM prop_bookings
-					WHERE status NOT IN ('cancelled','expired')
 					GROUP BY plot_id
 				) latest ON latest.plot_id = p.id
 				LEFT JOIN prop_bookings b ON b.id = latest.latest_id
@@ -4296,7 +4290,6 @@ func agentSignedPlotsHandler(w http.ResponseWriter, r *http.Request) {
 		JOIN (
 			SELECT plot_id, MAX(id) AS latest_id
 			FROM prop_bookings
-			WHERE status NOT IN ('cancelled','expired')
 			GROUP BY plot_id
 		) latest ON b.id = latest.latest_id
 		WHERE p.status='sa_signed' AND b.agent_name=?`
@@ -5259,7 +5252,7 @@ func adminPrivateEstatePlotsHandler(w http.ResponseWriter, r *http.Request) {
 				COALESCE(b.agent_name,''), COALESCE(DATE_FORMAT(b.date_booked,'%d %b %Y %H:%i'),'')
 			FROM prop_plots p
 			LEFT JOIN prop_bookings b ON b.id = (
-				SELECT id FROM prop_bookings WHERE plot_id=p.id AND status NOT IN ('cancelled','expired')
+				SELECT id FROM prop_bookings WHERE plot_id=p.id
 				ORDER BY id DESC LIMIT 1
 			)
 			WHERE p.estate_id=? AND p.status=? ORDER BY p.id`, id, status); pRows != nil {
