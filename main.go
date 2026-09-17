@@ -2749,7 +2749,7 @@ func adminPlotsOverviewSearchHandler(w http.ResponseWriter, r *http.Request) {
 						) AS rn
 						FROM prop_payment_plan_deals d WHERE sold_at IS NULL
 					) ranked WHERE rn = 1
-				) dl ON dl.estate = e.name AND TRIM(dl.plot) = p.plot_number
+				) dl ON dl.estate COLLATE utf8mb4_general_ci = e.name COLLATE utf8mb4_general_ci AND TRIM(dl.plot) COLLATE utf8mb4_general_ci = p.plot_number COLLATE utf8mb4_general_ci
 				WHERE p.status = 'sa_signed'
 				  AND (e.name LIKE ? OR p.plot_number LIKE ? OR COALESCE(b.agent_name,'') LIKE ? OR COALESCE(b.buyer_name,'') LIKE ?)
 				ORDER BY (b.deposit_ref IS NOT NULL AND b.deposit_ref != '') DESC, b.date_signed DESC`, q, q, q, q)
@@ -2778,7 +2778,7 @@ func adminPlotsOverviewSearchHandler(w http.ResponseWriter, r *http.Request) {
 						) AS rn
 						FROM prop_payment_plan_deals d WHERE sold_at IS NULL
 					) ranked WHERE rn = 1
-				) dl ON dl.estate = e.name AND TRIM(dl.plot) = p.plot_number
+				) dl ON dl.estate COLLATE utf8mb4_general_ci = e.name COLLATE utf8mb4_general_ci AND TRIM(dl.plot) COLLATE utf8mb4_general_ci = p.plot_number COLLATE utf8mb4_general_ci
 				WHERE p.status = 'sa_signed'
 				ORDER BY (b.deposit_ref IS NOT NULL AND b.deposit_ref != '') DESC, b.date_signed DESC`)
 		}
