@@ -2620,10 +2620,17 @@ func adminPlotsOverviewHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Count totals for tab badges
+	// Count totals for tab badges. Counted from prop_plots.status (the
+	// authoritative current state of the plot) rather than
+	// prop_bookings.status — a plot's most recent booking can be sitting in
+	// any of active/pending_accounts_review/pending_wakili_review while
+	// still plainly "booked", and a stale, superseded prop_bookings row
+	// left over from an earlier booking attempt on the same plot must not
+	// be counted once the plot itself has moved on (see the matching fix
+	// in adminPlotsOverviewSearchHandler below).
 	var cntBooked, cntSigned, cntSold int
-	db.QueryRow(`SELECT COUNT(*) FROM prop_bookings WHERE status='active'`).Scan(&cntBooked)
-	db.QueryRow(`SELECT COUNT(*) FROM prop_bookings WHERE status='sa_signed'`).Scan(&cntSigned)
+	db.QueryRow(`SELECT COUNT(*) FROM prop_plots WHERE status='booked'`).Scan(&cntBooked)
+	db.QueryRow(`SELECT COUNT(*) FROM prop_plots WHERE status='sa_signed'`).Scan(&cntSigned)
 	db.QueryRow(`SELECT COUNT(*) FROM prop_sales`).Scan(&cntSold)
 
 	renderAdmin(w, r, "admin_plots_overview.html", map[string]any{
@@ -2709,7 +2716,13 @@ func adminPlotsOverviewSearchHandler(w http.ResponseWriter, r *http.Request) {
 				JOIN prop_plots p ON p.id = b.plot_id
 				JOIN prop_estates e ON e.id = p.estate_id
 				LEFT JOIN prop_payment_plan_deals dl ON dl.estate = e.name AND TRIM(dl.plot) = p.plot_number AND dl.sold_at IS NULL
-				WHERE b.status = 'sa_signed'
+				JOIN (
+					SELECT plot_id, MAX(id) AS latest_id
+					FROM prop_bookings
+					WHERE status NOT IN ('cancelled','expired')
+					GROUP BY plot_id
+				) latest ON b.id = latest.latest_id
+				WHERE p.status = 'sa_signed'
 				  AND (e.name LIKE ? OR p.plot_number LIKE ? OR b.agent_name LIKE ? OR b.buyer_name LIKE ?)
 				ORDER BY (b.deposit_ref IS NOT NULL AND b.deposit_ref != '') DESC, b.date_signed DESC
 				LIMIT 100`, q, q, q, q)
@@ -2727,7 +2740,13 @@ func adminPlotsOverviewSearchHandler(w http.ResponseWriter, r *http.Request) {
 				JOIN prop_plots p ON p.id = b.plot_id
 				JOIN prop_estates e ON e.id = p.estate_id
 				LEFT JOIN prop_payment_plan_deals dl ON dl.estate = e.name AND TRIM(dl.plot) = p.plot_number AND dl.sold_at IS NULL
-				WHERE b.status = 'sa_signed'
+				JOIN (
+					SELECT plot_id, MAX(id) AS latest_id
+					FROM prop_bookings
+					WHERE status NOT IN ('cancelled','expired')
+					GROUP BY plot_id
+				) latest ON b.id = latest.latest_id
+				WHERE p.status = 'sa_signed'
 				ORDER BY (b.deposit_ref IS NOT NULL AND b.deposit_ref != '') DESC, b.date_signed DESC
 				LIMIT 100`)
 		}
@@ -2763,6 +2782,15 @@ func adminPlotsOverviewSearchHandler(w http.ResponseWriter, r *http.Request) {
 				ORDER BY s.date_sold DESC LIMIT 100`)
 		}
 	default: // booked
+		// Filters on p.status (the plot's actual current status) rather
+		// than b.status='active' — a booking still legitimately "booked"
+		// can be sitting in pending_accounts_review or
+		// pending_wakili_review, not just 'active', and the latest-booking
+		// join keeps a stale, superseded prop_bookings row (e.g. from an
+		// earlier booking attempt on a plot that has since been re-booked,
+		// signed, or sold through a later row) from being picked up instead
+		// of the plot's actual current booking. Mirrors the same join used
+		// by adminBookedPlotsHandler (the Booked Plots page).
 		if hasSearch {
 			queryAndScan(`
 				SELECT b.id, p.plot_number, e.name,
@@ -2774,7 +2802,13 @@ func adminPlotsOverviewSearchHandler(w http.ResponseWriter, r *http.Request) {
 				FROM prop_bookings b
 				JOIN prop_plots p ON p.id = b.plot_id
 				JOIN prop_estates e ON e.id = p.estate_id
-				WHERE b.status = 'active'
+				JOIN (
+					SELECT plot_id, MAX(id) AS latest_id
+					FROM prop_bookings
+					WHERE status NOT IN ('cancelled','expired')
+					GROUP BY plot_id
+				) latest ON b.id = latest.latest_id
+				WHERE p.status = 'booked'
 				  AND (e.name LIKE ? OR p.plot_number LIKE ? OR b.agent_name LIKE ? OR b.buyer_name LIKE ?)
 				ORDER BY (b.deposit_ref IS NOT NULL AND b.deposit_ref != '') DESC, b.date_booked DESC
 				LIMIT 100`, q, q, q, q)
@@ -2789,7 +2823,13 @@ func adminPlotsOverviewSearchHandler(w http.ResponseWriter, r *http.Request) {
 				FROM prop_bookings b
 				JOIN prop_plots p ON p.id = b.plot_id
 				JOIN prop_estates e ON e.id = p.estate_id
-				WHERE b.status = 'active'
+				JOIN (
+					SELECT plot_id, MAX(id) AS latest_id
+					FROM prop_bookings
+					WHERE status NOT IN ('cancelled','expired')
+					GROUP BY plot_id
+				) latest ON b.id = latest.latest_id
+				WHERE p.status = 'booked'
 				ORDER BY (b.deposit_ref IS NOT NULL AND b.deposit_ref != '') DESC, b.date_booked DESC
 				LIMIT 100`)
 		}
