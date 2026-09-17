@@ -45,6 +45,7 @@
                 </a>
             </li>
             <li><a href="/agent/bookings" {{ if eq .Active "bookings" }}class="active" {{ end }}>My Booked Plots</a></li>
+            <li><a href="/agent/signed-plots" {{ if eq .Active "signed-plots" }}class="active" {{ end }}>My Signed Plots</a></li>
             <li><a href="/agent/sales" {{ if eq .Active "sales" }}class="active" {{ end }}>My Sold Plots</a></li>
             {{ if .CanSeePrivateEstates }}<li><a href="/agent/private-estates" {{ if eq .Active "private-estates" }}class="active" {{ end }}>🔒 Private Estates</a></li>{{ end }}
             <li>

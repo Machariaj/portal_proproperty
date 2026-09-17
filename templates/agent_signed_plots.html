@@ -1,0 +1,69 @@
+{{ define "title" }}My Signed Plots - Pro-Property{{ end }}
+{{ define "content" }}
+<div class="top-bar">
+    <h1>My Signed Plots</h1>
+</div>
+
+<!-- Filters -->
+<div class="card" style="padding:14px 18px;margin-bottom:0;">
+    <form method="GET" action="/agent/signed-plots" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+        <div>
+            <label style="margin-bottom:4px;">Estate</label>
+            <select name="estate_id" onchange="this.form.submit()">
+                <option value="0">All Estates</option>
+                {{ range .Estates }}
+                <option value="{{ .ID }}" {{ if eq (printf "%d" .ID) $.EstateFilter }}selected{{ end }}>{{ .Name }}</option>
+                {{ end }}
+            </select>
+        </div>
+        <div style="flex:1;min-width:180px;">
+            <label style="margin-bottom:4px;">Search</label>
+            <input type="text" name="search" value="{{ .Search }}" placeholder="Client name or plot number">
+        </div>
+        <button type="submit">🔍 Search</button>
+    </form>
+</div>
+
+<div class="card" style="margin-top:16px;">
+    {{ if .Signed }}
+    <div class="table-responsive">
+        <table>
+            <thead>
+                <tr>
+                    <th>Client Name</th>
+                    <th>Phone</th>
+                    <th>Email</th>
+                    <th>Plot</th>
+                    <th>Estate</th>
+                    <th>Deposit (Ksh)</th>
+                    <th>Date Signed</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{ range .Signed }}
+                <tr id="booking-{{ .BookingID }}">
+                    <td>{{ .BuyerName }}</td>
+                    <td>{{ .BuyerPhone }}</td>
+                    <td>{{ .BuyerEmail }}</td>
+                    <td><strong>{{ .PlotNumber }}</strong></td>
+                    <td>{{ .EstateName }}</td>
+                    <td>{{ printf "%.0f" .Deposit }}</td>
+                    <td>{{ .DateSigned }}</td>
+                    <td>
+                        <a href="/agent/booking/{{ .BookingID }}/attachments"
+                           style="background:#2563eb;color:#fff;padding:5px 10px;border-radius:6px;font-size:12px;text-decoration:none;white-space:nowrap;">
+                            📎 Documents
+                        </a>
+                    </td>
+                </tr>
+                {{ end }}
+            </tbody>
+        </table>
+    </div>
+    {{ else }}
+    <p style="color:#6b7280;text-align:center;padding:2rem 0;">No signed plots found.</p>
+    {{ end }}
+</div>
+{{ end }}
+{{ template "agent_base" . }}

@@ -52,6 +52,7 @@ var featureRegistry = []featureDef{
 	{"agent.dashboard", "Dashboard", "agent", "Marketers Portal"},
 	{"agent.estates", "Browse Estates", "agent", "Marketers Portal"},
 	{"agent.bookings", "My Bookings", "agent", "Marketers Portal"},
+	{"agent.signed_plots", "My Signed Plots", "agent", "Marketers Portal"},
 	{"agent.sales", "My Sales", "agent", "Marketers Portal"},
 	{"agent.private_estates", "Private Estates", "agent", "Marketers Portal"},
 	// Accounts Module

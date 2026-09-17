@@ -235,6 +235,15 @@ func main() {
 		WHERE a.role != 'system_admin'
 		AND EXISTS (SELECT 1 FROM prop_restricted_access ra WHERE ra.user_id = CAST(a.id AS CHAR))
 		ON DUPLICATE KEY UPDATE can_read = 1`)
+	// Backfill: sa_signed bookings just moved off "My Bookings" onto their
+	// own new "My Signed Plots" page (see agentSignedPlotsHandler) — grant
+	// every agent who could already see My Bookings the new page too, so
+	// nobody loses visibility into their signed plots as a side effect.
+	db.Exec(`INSERT INTO prop_permissions (user_id, feature, can_read, can_write)
+		SELECT user_id, 'agent.signed_plots', 1, 0
+		FROM prop_permissions
+		WHERE feature = 'agent.bookings' AND can_read = 1
+		ON DUPLICATE KEY UPDATE can_read = 1`)
 	initWhatsAppLog()
 	initPlotStatusLog()
 	startOverdueBookingChecker()
@@ -297,6 +306,7 @@ func main() {
 		"agent_private_estates.html":       mustParse("templates/agent_base.html", "templates/agent_private_estates.html"),
 		"agent_private_estate_plots.html":  mustParse("templates/agent_base.html", "templates/agent_private_estate_plots.html"),
 		"agent_bookings.html":              mustParse("templates/agent_base.html", "templates/agent_bookings.html"),
+		"agent_signed_plots.html":          mustParse("templates/agent_base.html", "templates/agent_signed_plots.html"),
 		"agent_sales.html":                 mustParse("templates/agent_base.html", "templates/agent_sales.html"),
 		"agent_van_booking.html":           mustParse("templates/vanbooking/van_agent_base.html", "templates/vanbooking/agent_van_booking.html"),
 		"agent_van_bookings.html":          mustParse("templates/vanbooking/van_agent_base.html", "templates/vanbooking/agent_van_bookings.html"),
@@ -398,6 +408,7 @@ func main() {
 	mux.Handle("/agent/private-estate/", authMiddleware(requireRole(roleAgent, requirePerm("agent.private_estates", "read", http.HandlerFunc(agentPrivateEstateRouter)))))
 	mux.Handle("/agent/bookings/cancel/", authMiddleware(requireRole(roleAgent, requirePerm("agent.bookings", "write", http.HandlerFunc(agentCancelBookingHandler)))))
 	mux.Handle("/agent/bookings", authMiddleware(requireRole(roleAgent, requirePerm("agent.bookings", "read", http.HandlerFunc(agentBookingsHandler)))))
+	mux.Handle("/agent/signed-plots", authMiddleware(requireRole(roleAgent, requirePerm("agent.signed_plots", "read", http.HandlerFunc(agentSignedPlotsHandler)))))
 	mux.Handle("/agent/sales", authMiddleware(requireRole(roleAgent, requirePerm("agent.sales", "read", http.HandlerFunc(agentSalesHandler)))))
 	mux.Handle("/agent/van-booking", authMiddleware(requireRole(roleAgent, requirePerm("agent.van_booking", "read", http.HandlerFunc(vanbooking.AgentVanBookingHandler)))))
 	mux.Handle("/agent/van-bookings", authMiddleware(requireRole(roleAgent, requirePerm("agent.van_booking", "read", http.HandlerFunc(vanbooking.AgentVanBookingsHandler)))))
@@ -4161,15 +4172,17 @@ func agentBookingsHandler(w http.ResponseWriter, r *http.Request) {
 		StageLabel string
 	}
 
-	// Covers the full pipeline (active -> Accounts -> Legal -> SA Signed) so
-	// a booking never vanishes from the agent's own view partway through --
-	// only cancelled/expired (dead ends) and completed/sold (shown on My
-	// Sales instead) are left out.
+	// Covers the pipeline up to (not including) SA Signed — active ->
+	// Accounts -> Legal — so a booking never vanishes from the agent's own
+	// view partway through review. Once signed it moves to its own
+	// dedicated "My Signed Plots" page (agentSignedPlotsHandler) instead of
+	// staying listed here; cancelled/expired (dead ends) and completed/sold
+	// (My Sales) are left out same as before.
 	query := `SELECT b.id, p.id, p.plot_number, e.name, b.buyer_name, COALESCE(b.buyer_phone,''), COALESCE(b.buyer_email,''), COALESCE(b.notes,''), DATE_FORMAT(b.date_booked,'%d %b %Y'), COALESCE(b.batch_ref,''), b.status, b.legal_stage
 		FROM prop_bookings b
 		JOIN prop_plots p ON p.id=b.plot_id
 		JOIN prop_estates e ON e.id=p.estate_id
-		WHERE b.status IN ('active','pending_accounts_review','pending_wakili_review','sa_signed') AND b.agent_name=?`
+		WHERE b.status IN ('active','pending_accounts_review','pending_wakili_review') AND b.agent_name=?`
 	args := []any{agentName}
 
 	if estateFilter != "" && estateFilter != "0" {
@@ -4193,9 +4206,7 @@ func agentBookingsHandler(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var b bookingRow
 		if rows.Scan(&b.BookingID, &b.PlotID, &b.PlotNumber, &b.EstateName, &b.BuyerName, &b.BuyerPhone, &b.BuyerEmail, &b.Notes, &b.DateBooked, &b.BatchRef, &b.Status, &b.LegalStage) == nil {
-			if b.Status == "sa_signed" {
-				b.StageLabel = "SA Signed"
-			} else if label := bookingStageLabel(b.Status, b.LegalStage); label != "" {
+			if label := bookingStageLabel(b.Status, b.LegalStage); label != "" {
 				b.StageLabel = label
 			} else {
 				b.StageLabel = "Active"
@@ -4225,6 +4236,85 @@ func agentBookingsHandler(w http.ResponseWriter, r *http.Request) {
 		"Title":        "My Bookings",
 		"Active":       "bookings",
 		"Bookings":     bookings,
+		"Estates":      estateOptions,
+		"EstateFilter": estateFilter,
+		"Search":       search,
+	})
+}
+
+// agentSignedPlotsHandler lists the agent's own bookings that have reached
+// sa_signed — split out from My Bookings (agentBookingsHandler), which now
+// stops at pending_wakili_review, so a signed plot has one dedicated place
+// to show up instead of sitting mixed in with still-in-review bookings.
+func agentSignedPlotsHandler(w http.ResponseWriter, r *http.Request) {
+	agentName := getAgentName(r)
+	estateFilter := r.URL.Query().Get("estate_id")
+	search := r.URL.Query().Get("search")
+
+	type signedRow struct {
+		BookingID  int
+		PlotNumber string
+		EstateName string
+		BuyerName  string
+		BuyerPhone string
+		BuyerEmail string
+		Deposit    float64
+		DateSigned string
+	}
+
+	query := `SELECT b.id, p.plot_number, e.name, b.buyer_name, COALESCE(b.buyer_phone,''), COALESCE(b.buyer_email,''),
+			COALESCE(b.deposit,0), COALESCE(DATE_FORMAT(b.date_signed,'%d %b %Y'),'')
+		FROM prop_bookings b
+		JOIN prop_plots p ON p.id=b.plot_id
+		JOIN prop_estates e ON e.id=p.estate_id
+		WHERE b.status='sa_signed' AND b.agent_name=?`
+	args := []any{agentName}
+
+	if estateFilter != "" && estateFilter != "0" {
+		query += " AND p.estate_id=?"
+		args = append(args, estateFilter)
+	}
+	if search != "" {
+		query += " AND (b.buyer_name LIKE ? OR p.plot_number LIKE ?)"
+		args = append(args, "%"+search+"%", "%"+search+"%")
+	}
+	query += " ORDER BY b.date_signed DESC"
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		log.Printf("agentSignedPlots: %v", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+	var signed []signedRow
+	for rows.Next() {
+		var s signedRow
+		if rows.Scan(&s.BookingID, &s.PlotNumber, &s.EstateName, &s.BuyerName, &s.BuyerPhone, &s.BuyerEmail, &s.Deposit, &s.DateSigned) == nil {
+			signed = append(signed, s)
+		}
+	}
+
+	eRows, _ := db.Query(`SELECT id, name FROM prop_estates ORDER BY name`)
+	type estOption struct {
+		ID   int
+		Name string
+	}
+	var estateOptions []estOption
+	if eRows != nil {
+		defer eRows.Close()
+		for eRows.Next() {
+			var e estOption
+			if eRows.Scan(&e.ID, &e.Name) == nil {
+				estateOptions = append(estateOptions, e)
+			}
+		}
+	}
+
+	renderAgent(w, r, "agent_signed_plots.html", map[string]any{
+		"Title":        "My Signed Plots",
+		"Active":       "signed-plots",
+		"Signed":       signed,
 		"Estates":      estateOptions,
 		"EstateFilter": estateFilter,
 		"Search":       search,
