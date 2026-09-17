@@ -2721,9 +2721,14 @@ func adminPlotsOverviewSearchHandler(w http.ResponseWriter, r *http.Request) {
 
 	switch tab {
 	case "signed":
+		// LEFT JOINs from prop_plots (not an INNER JOIN starting from
+		// prop_bookings) so a plot whose status is sa_signed but which has
+		// no non-cancelled/expired booking row to match — common for
+		// older/imported records — still shows here instead of silently
+		// vanishing while still counted in the tab's badge total.
 		if hasSearch {
 			queryAndScan(`
-				SELECT b.id, p.plot_number, e.name,
+				SELECT COALESCE(b.id,0), p.plot_number, e.name,
 				       COALESCE(b.agent_name,''), COALESCE(b.buyer_name,''),
 				       COALESCE(b.buyer_phone,''), COALESCE(b.buyer_email,''),
 				       COALESCE(DATE_FORMAT(b.date_signed,'%d %b %Y'),''),
@@ -2731,23 +2736,23 @@ func adminPlotsOverviewSearchHandler(w http.ResponseWriter, r *http.Request) {
 				       COALESCE(b.kra,''), COALESCE(b.passport_photo,''),
 				       COALESCE(b.sale_agreement,''),
 				       COALESCE(dl.consent_file,''), COALESCE(dl.transfer_file,''), COALESCE(dl.title_file,'')
-				FROM prop_bookings b
-				JOIN prop_plots p ON p.id = b.plot_id
+				FROM prop_plots p
 				JOIN prop_estates e ON e.id = p.estate_id
-				LEFT JOIN prop_payment_plan_deals dl ON dl.estate = e.name AND TRIM(dl.plot) = p.plot_number AND dl.sold_at IS NULL
-				JOIN (
+				LEFT JOIN (
 					SELECT plot_id, MAX(id) AS latest_id
 					FROM prop_bookings
 					WHERE status NOT IN ('cancelled','expired')
 					GROUP BY plot_id
-				) latest ON b.id = latest.latest_id
+				) latest ON latest.plot_id = p.id
+				LEFT JOIN prop_bookings b ON b.id = latest.latest_id
+				LEFT JOIN prop_payment_plan_deals dl ON dl.estate = e.name AND TRIM(dl.plot) = p.plot_number AND dl.sold_at IS NULL
 				WHERE p.status = 'sa_signed'
-				  AND (e.name LIKE ? OR p.plot_number LIKE ? OR b.agent_name LIKE ? OR b.buyer_name LIKE ?)
+				  AND (e.name LIKE ? OR p.plot_number LIKE ? OR COALESCE(b.agent_name,'') LIKE ? OR COALESCE(b.buyer_name,'') LIKE ?)
 				ORDER BY (b.deposit_ref IS NOT NULL AND b.deposit_ref != '') DESC, b.date_signed DESC
 				LIMIT 100`, q, q, q, q)
 		} else {
 			queryAndScan(`
-				SELECT b.id, p.plot_number, e.name,
+				SELECT COALESCE(b.id,0), p.plot_number, e.name,
 				       COALESCE(b.agent_name,''), COALESCE(b.buyer_name,''),
 				       COALESCE(b.buyer_phone,''), COALESCE(b.buyer_email,''),
 				       COALESCE(DATE_FORMAT(b.date_signed,'%d %b %Y'),''),
@@ -2755,16 +2760,16 @@ func adminPlotsOverviewSearchHandler(w http.ResponseWriter, r *http.Request) {
 				       COALESCE(b.kra,''), COALESCE(b.passport_photo,''),
 				       COALESCE(b.sale_agreement,''),
 				       COALESCE(dl.consent_file,''), COALESCE(dl.transfer_file,''), COALESCE(dl.title_file,'')
-				FROM prop_bookings b
-				JOIN prop_plots p ON p.id = b.plot_id
+				FROM prop_plots p
 				JOIN prop_estates e ON e.id = p.estate_id
-				LEFT JOIN prop_payment_plan_deals dl ON dl.estate = e.name AND TRIM(dl.plot) = p.plot_number AND dl.sold_at IS NULL
-				JOIN (
+				LEFT JOIN (
 					SELECT plot_id, MAX(id) AS latest_id
 					FROM prop_bookings
 					WHERE status NOT IN ('cancelled','expired')
 					GROUP BY plot_id
-				) latest ON b.id = latest.latest_id
+				) latest ON latest.plot_id = p.id
+				LEFT JOIN prop_bookings b ON b.id = latest.latest_id
+				LEFT JOIN prop_payment_plan_deals dl ON dl.estate = e.name AND TRIM(dl.plot) = p.plot_number AND dl.sold_at IS NULL
 				WHERE p.status = 'sa_signed'
 				ORDER BY (b.deposit_ref IS NOT NULL AND b.deposit_ref != '') DESC, b.date_signed DESC
 				LIMIT 100`)
@@ -2810,44 +2815,49 @@ func adminPlotsOverviewSearchHandler(w http.ResponseWriter, r *http.Request) {
 		// signed, or sold through a later row) from being picked up instead
 		// of the plot's actual current booking. Mirrors the same join used
 		// by adminBookedPlotsHandler (the Booked Plots page).
+		// LEFT JOINs from prop_plots (not an INNER JOIN starting from
+		// prop_bookings) so a plot whose status is booked but which has no
+		// non-cancelled/expired booking row to match — common for
+		// older/imported records — still shows here instead of silently
+		// vanishing while still counted in the tab's badge total.
 		if hasSearch {
 			queryAndScan(`
-				SELECT b.id, p.plot_number, e.name,
+				SELECT COALESCE(b.id,0), p.plot_number, e.name,
 				       COALESCE(b.agent_name,''), COALESCE(b.buyer_name,''),
 				       COALESCE(b.buyer_phone,''), COALESCE(b.buyer_email,''),
-				       DATE_FORMAT(b.date_booked,'%d %b %Y'),
+				       COALESCE(DATE_FORMAT(b.date_booked,'%d %b %Y'),''),
 				       COALESCE(b.deposit_ref,''), COALESCE(b.id_photo,''),
 				       COALESCE(b.kra,''), COALESCE(b.passport_photo,'')
-				FROM prop_bookings b
-				JOIN prop_plots p ON p.id = b.plot_id
+				FROM prop_plots p
 				JOIN prop_estates e ON e.id = p.estate_id
-				JOIN (
+				LEFT JOIN (
 					SELECT plot_id, MAX(id) AS latest_id
 					FROM prop_bookings
 					WHERE status NOT IN ('cancelled','expired')
 					GROUP BY plot_id
-				) latest ON b.id = latest.latest_id
+				) latest ON latest.plot_id = p.id
+				LEFT JOIN prop_bookings b ON b.id = latest.latest_id
 				WHERE p.status = 'booked'
-				  AND (e.name LIKE ? OR p.plot_number LIKE ? OR b.agent_name LIKE ? OR b.buyer_name LIKE ?)
+				  AND (e.name LIKE ? OR p.plot_number LIKE ? OR COALESCE(b.agent_name,'') LIKE ? OR COALESCE(b.buyer_name,'') LIKE ?)
 				ORDER BY (b.deposit_ref IS NOT NULL AND b.deposit_ref != '') DESC, b.date_booked DESC
 				LIMIT 100`, q, q, q, q)
 		} else {
 			queryAndScan(`
-				SELECT b.id, p.plot_number, e.name,
+				SELECT COALESCE(b.id,0), p.plot_number, e.name,
 				       COALESCE(b.agent_name,''), COALESCE(b.buyer_name,''),
 				       COALESCE(b.buyer_phone,''), COALESCE(b.buyer_email,''),
-				       DATE_FORMAT(b.date_booked,'%d %b %Y'),
+				       COALESCE(DATE_FORMAT(b.date_booked,'%d %b %Y'),''),
 				       COALESCE(b.deposit_ref,''), COALESCE(b.id_photo,''),
 				       COALESCE(b.kra,''), COALESCE(b.passport_photo,'')
-				FROM prop_bookings b
-				JOIN prop_plots p ON p.id = b.plot_id
+				FROM prop_plots p
 				JOIN prop_estates e ON e.id = p.estate_id
-				JOIN (
+				LEFT JOIN (
 					SELECT plot_id, MAX(id) AS latest_id
 					FROM prop_bookings
 					WHERE status NOT IN ('cancelled','expired')
 					GROUP BY plot_id
-				) latest ON b.id = latest.latest_id
+				) latest ON latest.plot_id = p.id
+				LEFT JOIN prop_bookings b ON b.id = latest.latest_id
 				WHERE p.status = 'booked'
 				ORDER BY (b.deposit_ref IS NOT NULL AND b.deposit_ref != '') DESC, b.date_booked DESC
 				LIMIT 100`)
