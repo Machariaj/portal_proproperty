@@ -165,7 +165,7 @@ func main() {
 		getUserID,
 	)
 	welfare.InitTables()
-	accounts.Init(db, render, getAgentName, cancelBooksEstimate, sendReviewOutcomeEmail, createBooksRecordForBookingID)
+	accounts.Init(db, render, getAgentName, cancelBooksEstimate, sendReviewOutcomeEmail, createBooksRecordForBookingID, sendAccountsApprovedEmail)
 	legal.Init(db, render, getAgentName, getUserID,
 		func(r *http.Request) bool { return getRole(r) == roleSystemAdmin },
 		getRole,
@@ -1698,6 +1698,15 @@ func adminSkipAccountsHandler(w http.ResponseWriter, r *http.Request) {
 	// system_admin explicitly skipping Accounts and pushing straight to
 	// Legal — rather than at initial booking time.
 	go createBooksRecordForBookingID(bookingID)
+
+	// sales@/systemadmin@ are notified (without attachments) here too — this
+	// path also results in "booking sent to Legal," just bypassing the
+	// normal Accounts approval step.
+	go func() {
+		if err := sendAccountsApprovedEmail(bookingID); err != nil {
+			log.Printf("admin skip-accounts: notification email error: %v", err)
+		}
+	}()
 
 	redirectBack(w, r, "/admin/booked-plots", "booking-"+bookingID)
 }
@@ -4513,27 +4522,11 @@ func bookingAttachmentsHandler(w http.ResponseWriter, r *http.Request, tmplName,
 
 		// When all docs are now present, check whether the deposit already meets
 		// the estate's threshold too — if so, this booking moves straight to
-		// Accounts review instead of just sending the "docs complete" email.
+		// Accounts review. No email fires here either way anymore — sales@/
+		// systemadmin@ are notified once (without attachments) at Accounts
+		// approval instead (sendAccountsApprovedEmail), not at doc-completion.
 		if allDocs {
-			go func() {
-				advanced, err := maybeAdvanceToAccountsReview(info.BookingID)
-				if err != nil {
-					log.Printf("[accounts-review] check error for booking %d: %v", info.BookingID, err)
-				}
-				if advanced {
-					return
-				}
-				b := bookingInfo{
-					PlotIDs: []int{info.PlotID}, BuyerName: info.BuyerName, BuyerPhone: info.BuyerPhone, BuyerEmail: info.BuyerEmail,
-					EstateName: info.EstateName, PlotNumbers: []string{info.PlotNumber},
-					Deposit: info.Deposit, PaymentPlan: info.PaymentPlan, AgentName: info.AgentName,
-					DepositRef: depositRef, IDPhoto: idPhoto, KRA: kra, PassportPhoto: passportPhoto,
-					Notes: notes,
-				}
-				if err := sendDocsCompletedEmail(b); err != nil {
-					log.Printf("[docs-completed] email error: %v", err)
-				}
-			}()
+			go maybeAdvanceToAccountsReview(info.BookingID)
 		}
 		http.Redirect(w, r, r.URL.Path+"?uploaded=1", http.StatusFound)
 		return

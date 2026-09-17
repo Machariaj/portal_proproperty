@@ -61,15 +61,20 @@ var bookingPendingRecipients = []string{
 	"systemadmin@proproperty.co.ke",
 }
 
-// bookingCompleteRecipients — booking made with all docs uploaded at the time of booking.
+// bookingCompleteRecipients — booking made with all docs uploaded at the time
+// of booking. sales@/systemadmin@ deliberately excluded — they no longer get
+// a with-attachments notification at doc-completion time; they get a
+// separate, attachment-free one once Accounts approves and the booking
+// moves to Legal instead (see accountsApprovedRecipients).
 var bookingCompleteRecipients = []string{
 	"info@proproperty.co.ke",
-	"sales@proproperty.co.ke",
-	"systemadmin@proproperty.co.ke",
 }
 
-// docsLaterRecipients — docs completed after an initial pending booking (info & accounts already notified).
-var docsLaterRecipients = []string{
+// accountsApprovedRecipients — notified, without attachments, once a
+// booking clears Accounts review and moves to Legal (normal approval, or a
+// system_admin's skip-Accounts override). Replaces the old
+// docs-complete-with-attachments email these two addresses used to get.
+var accountsApprovedRecipients = []string{
 	"sales@proproperty.co.ke",
 	"systemadmin@proproperty.co.ke",
 }
@@ -288,7 +293,7 @@ func processBookingIntegrations(b bookingInfo) {
 	}
 	go func() {
 		// 1. Email notification
-		if err := sendBookingEmail(b, bookingCompleteRecipients); err != nil {
+		if err := sendBookingEmail(b, bookingCompleteRecipients, true); err != nil {
 			log.Printf("[email] send error: %v", err)
 		} else {
 			plotStr := strings.Join(b.PlotNumbers, ", ")
@@ -1325,7 +1330,7 @@ func sendRebookAccountsEmail(plotNumber, estateName, buyerName, priorEstimateID 
 
 // ─── Email ────────────────────────────────────────────────────────────────────
 
-func sendBookingEmail(b bookingInfo, recipients []string) error {
+func sendBookingEmail(b bookingInfo, recipients []string, withAttachments bool) error {
 	if devMode {
 		log.Printf("[devMode] skipping booking email for %s", b.EstateName)
 		return nil
@@ -1353,7 +1358,10 @@ func sendBookingEmail(b bookingInfo, recipients []string) error {
 		textBody += fmt.Sprintf("Notes:        %s\r\n", b.Notes)
 	}
 
-	attachFiles := splitFiles(b.DepositRef, b.IDPhoto, b.KRA, b.PassportPhoto)
+	var attachFiles []string
+	if withAttachments {
+		attachFiles = splitFiles(b.DepositRef, b.IDPhoto, b.KRA, b.PassportPhoto)
+	}
 
 	// Build MIME message
 	var msg bytes.Buffer
@@ -1511,15 +1519,36 @@ func processSoldAttachments(plotID int, letterOfConsent, transferForms, titleDee
 	}()
 }
 
-// sendDocsCompletedEmail notifies docsLaterRecipients when all documents are uploaded
-// after an initial pending booking. Info and accounts are intentionally excluded
-// because they were already notified at booking time.
-func sendDocsCompletedEmail(b bookingInfo) error {
+// sendAccountsApprovedEmail notifies accountsApprovedRecipients, without
+// attachments, once a booking has cleared Accounts review and moved to
+// Legal. Fetches the booking fresh from the DB since callers only have a
+// booking ID at that point: accounts.approveHandler (via the createBooksFn-
+// style function injected into accounts.Init) on normal approval, and
+// adminSkipAccountsHandler on a system_admin's skip-Accounts override.
+func sendAccountsApprovedEmail(bookingID string) error {
 	if devMode {
-		log.Printf("[devMode] skipping docs-completed email for %s", b.BuyerName)
+		log.Printf("[devMode] skipping accounts-approved email for booking %s", bookingID)
 		return nil
 	}
-	return sendBookingEmail(b, docsLaterRecipients)
+	var b bookingInfo
+	var plotNumber string
+	err := db.QueryRow(`
+		SELECT b.buyer_name, COALESCE(b.buyer_phone,''), COALESCE(b.buyer_email,''),
+		       COALESCE(b.agent_name,''), COALESCE(CAST(b.deposit AS CHAR),'0'),
+		       COALESCE(b.payment_plan,''), COALESCE(b.notes,''),
+		       e.name, p.plot_number
+		FROM prop_bookings b
+		JOIN prop_plots p ON p.id = b.plot_id
+		JOIN prop_estates e ON e.id = b.estate_id
+		WHERE b.id = ?`, bookingID).
+		Scan(&b.BuyerName, &b.BuyerPhone, &b.BuyerEmail,
+			&b.AgentName, &b.Deposit, &b.PaymentPlan, &b.Notes,
+			&b.EstateName, &plotNumber)
+	if err != nil {
+		return fmt.Errorf("fetch booking %s: %w", bookingID, err)
+	}
+	b.PlotNumbers = []string{plotNumber}
+	return sendBookingEmail(b, accountsApprovedRecipients, false)
 }
 
 // sendSoldEmail notifies soldRecipients when a plot is marked as sold.

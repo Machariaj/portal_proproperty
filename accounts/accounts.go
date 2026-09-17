@@ -13,18 +13,20 @@ import (
 )
 
 var (
-	db          *sql.DB
-	renderFn    func(w http.ResponseWriter, name string, data any)
-	getAgentFn  func(r *http.Request) string
-	cancelBooks func(estimateID string)
-	sendOutcome func(outcome, plotNumber, estateName, buyerName, buyerPhone, agentName, notes string) error
-	createBooks func(bookingID string)
+	db           *sql.DB
+	renderFn     func(w http.ResponseWriter, name string, data any)
+	getAgentFn   func(r *http.Request) string
+	cancelBooks  func(estimateID string)
+	sendOutcome  func(outcome, plotNumber, estateName, buyerName, buyerPhone, agentName, notes string) error
+	createBooks  func(bookingID string)
+	sendApproved func(bookingID string) error
 )
 
 // Init wires this package to the host app's shared dependencies. cancelBooks,
-// sendOutcomeEmail and createBooks are injected rather than imported
-// directly since they live in package main (cancelBooksEstimate,
-// sendReviewOutcomeEmail, createBooksRecordForBookingID).
+// sendOutcomeEmail, createBooks and sendApprovedEmail are injected rather
+// than imported directly since they live in package main
+// (cancelBooksEstimate, sendReviewOutcomeEmail,
+// createBooksRecordForBookingID, sendAccountsApprovedEmail).
 func Init(
 	d *sql.DB,
 	render func(http.ResponseWriter, string, any),
@@ -32,6 +34,7 @@ func Init(
 	cancelBooksEstimate func(estimateID string),
 	sendOutcomeEmail func(outcome, plotNumber, estateName, buyerName, buyerPhone, agentName, notes string) error,
 	createBooksRecord func(bookingID string),
+	sendApprovedEmail func(bookingID string) error,
 ) {
 	db = d
 	renderFn = render
@@ -39,6 +42,7 @@ func Init(
 	cancelBooks = cancelBooksEstimate
 	sendOutcome = sendOutcomeEmail
 	createBooks = createBooksRecord
+	sendApproved = sendApprovedEmail
 }
 
 func renderAccounts(w http.ResponseWriter, name string, data map[string]any) {
@@ -243,6 +247,17 @@ func approveHandler(w http.ResponseWriter, r *http.Request) {
 	// Accounts approval — rather than at initial booking time.
 	if createBooks != nil {
 		go createBooks(bookingID)
+	}
+
+	// sales@/systemadmin@ are notified (without attachments) here, once the
+	// booking has actually cleared Accounts and moved to Legal — not at
+	// doc-completion time anymore.
+	if sendApproved != nil {
+		go func() {
+			if err := sendApproved(bookingID); err != nil {
+				log.Printf("accounts approve: notification email error: %v", err)
+			}
+		}()
 	}
 
 	http.Redirect(w, r, "/accounts/queue", http.StatusFound)
