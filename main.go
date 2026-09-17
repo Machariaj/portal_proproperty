@@ -186,6 +186,11 @@ func main() {
 	db.Exec(`ALTER TABLE prop_sales ADD COLUMN transfer_forms VARCHAR(500) DEFAULT NULL`)
 	db.Exec(`ALTER TABLE prop_sales ADD COLUMN title_deed VARCHAR(500) DEFAULT NULL`)
 	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN lead_source VARCHAR(50) DEFAULT NULL`)
+	// Set by the agent/admin at booking time, shown only to them (never to
+	// Accounts or Legal — deliberately excluded from both modules' review
+	// queries/templates) and forwarded only as the "Care_Of" field on the
+	// Zoho CRM deal, created later at SA Signed — see processSignedIntegrations.
+	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN care_of VARCHAR(255) DEFAULT NULL`)
 	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN sale_agreement VARCHAR(500) DEFAULT NULL`)
 	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN installment_page VARCHAR(20) DEFAULT NULL`)
 	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN batch_ref VARCHAR(64) DEFAULT NULL`)
@@ -1963,6 +1968,7 @@ func adminEstateBookHandler(w http.ResponseWriter, r *http.Request) {
 		paymentPlan := r.FormValue("payment_plan")
 		leadSource := r.FormValue("lead_source")
 		notes := strings.TrimSpace(r.FormValue("notes"))
+		careOf := strings.TrimSpace(r.FormValue("care_of"))
 		rebookConfirmed := r.FormValue("rebook_confirmed") == "1"
 
 		plots, estateName := fetchPlots(plotIDs)
@@ -2011,8 +2017,8 @@ func adminEstateBookHandler(w http.ResponseWriter, r *http.Request) {
 		var newBookingIDs []int
 		estateIDInt, _ := strconv.Atoi(id)
 		for _, p := range plots {
-			if res, err := db.Exec(`INSERT INTO prop_bookings (plot_id, estate_id, buyer_name, buyer_phone, buyer_email, agent_name, deposit, payment_plan, deposit_ref, id_photo, kra, passport_photo, lead_source, notes, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active')`,
-				p.ID, id, buyerName, buyerPhone, buyerEmail, agentName, deposit, paymentPlan, depositRef, idPhoto, kra, passportPhoto, leadSource, notes); err != nil {
+			if res, err := db.Exec(`INSERT INTO prop_bookings (plot_id, estate_id, buyer_name, buyer_phone, buyer_email, agent_name, deposit, payment_plan, deposit_ref, id_photo, kra, passport_photo, lead_source, notes, care_of, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active')`,
+				p.ID, id, buyerName, buyerPhone, buyerEmail, agentName, deposit, paymentPlan, depositRef, idPhoto, kra, passportPhoto, leadSource, notes, careOf); err != nil {
 				log.Printf("adminBook: booking insert failed for plot %d: %v", p.ID, err)
 			} else if bid, err2 := res.LastInsertId(); err2 == nil {
 				newBookingIDs = append(newBookingIDs, int(bid))
@@ -3764,6 +3770,7 @@ func agentEstateBookHandler(w http.ResponseWriter, r *http.Request) {
 		paymentPlan := r.FormValue("payment_plan")
 		leadSource := r.FormValue("lead_source")
 		notes := strings.TrimSpace(r.FormValue("notes"))
+		careOf := strings.TrimSpace(r.FormValue("care_of"))
 		rebookConfirmed := r.FormValue("rebook_confirmed") == "1"
 
 		plots, estateName := fetchPlots(plotIDs)
@@ -3812,8 +3819,8 @@ func agentEstateBookHandler(w http.ResponseWriter, r *http.Request) {
 		var newBookingIDs []int
 		agentEstateIDInt, _ := strconv.Atoi(id)
 		for _, p := range plots {
-			if res, err := db.Exec(`INSERT INTO prop_bookings (plot_id, estate_id, buyer_name, buyer_phone, buyer_email, agent_name, deposit, payment_plan, deposit_ref, id_photo, kra, passport_photo, lead_source, notes, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active')`,
-				p.ID, id, buyerName, buyerPhone, buyerEmail, agentName, deposit, paymentPlan, depositRef, idPhoto, kra, passportPhoto, leadSource, notes); err != nil {
+			if res, err := db.Exec(`INSERT INTO prop_bookings (plot_id, estate_id, buyer_name, buyer_phone, buyer_email, agent_name, deposit, payment_plan, deposit_ref, id_photo, kra, passport_photo, lead_source, notes, care_of, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active')`,
+				p.ID, id, buyerName, buyerPhone, buyerEmail, agentName, deposit, paymentPlan, depositRef, idPhoto, kra, passportPhoto, leadSource, notes, careOf); err != nil {
 				log.Printf("agentBook: booking insert failed for plot %d: %v", p.ID, err)
 			} else if bid, err2 := res.LastInsertId(); err2 == nil {
 				newBookingIDs = append(newBookingIDs, int(bid))
@@ -3886,6 +3893,7 @@ func cartCheckoutHandler(w http.ResponseWriter, r *http.Request, cartPath, recei
 	paymentPlan := r.FormValue("payment_plan")
 	leadSource := r.FormValue("lead_source")
 	notes := strings.TrimSpace(r.FormValue("notes"))
+	careOf := strings.TrimSpace(r.FormValue("care_of"))
 	rebookConfirmed := r.FormValue("rebook_confirmed") == "1"
 
 	switch {
@@ -3966,8 +3974,8 @@ func cartCheckoutHandler(w http.ResponseWriter, r *http.Request, cartPath, recei
 
 	var newBookingIDs []int
 	for _, cp := range plots {
-		if res, err := db.Exec(`INSERT INTO prop_bookings (plot_id, estate_id, buyer_name, buyer_phone, buyer_email, agent_name, deposit, payment_plan, deposit_ref, id_photo, kra, passport_photo, lead_source, notes, batch_ref, receipt_number, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active')`,
-			cp.ID, cp.EstateID, buyerName, buyerPhone, buyerEmail, agentName, deposit, paymentPlan, depositRef, idPhoto, kra, passportPhoto, leadSource, notes, batchRef, receiptNumber); err == nil {
+		if res, err := db.Exec(`INSERT INTO prop_bookings (plot_id, estate_id, buyer_name, buyer_phone, buyer_email, agent_name, deposit, payment_plan, deposit_ref, id_photo, kra, passport_photo, lead_source, notes, care_of, batch_ref, receipt_number, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active')`,
+			cp.ID, cp.EstateID, buyerName, buyerPhone, buyerEmail, agentName, deposit, paymentPlan, depositRef, idPhoto, kra, passportPhoto, leadSource, notes, careOf, batchRef, receiptNumber); err == nil {
 			if bid, err2 := res.LastInsertId(); err2 == nil {
 				newBookingIDs = append(newBookingIDs, int(bid))
 			}

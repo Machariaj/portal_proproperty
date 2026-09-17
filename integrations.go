@@ -171,7 +171,8 @@ type bookingInfo struct {
 	PassportPhoto   string
 	SaleAgreement   string
 	Notes           string
-	RebookConfirmed bool // agent confirmed this is the same client rebooking a plot they'd previously booked
+	CareOf          string // agent/admin-entered at booking time; shown only to them, forwarded only to the Zoho CRM deal's Care_Of field (see createCRMDeal) — never to Accounts, Legal, or any email/SMS
+	RebookConfirmed bool   // agent confirmed this is the same client rebooking a plot they'd previously booked
 }
 
 // hasAllAttachments returns true only when all four document fields are filled.
@@ -556,7 +557,7 @@ func processSignedIntegrations(plotID int, plotNumber, estateName string) {
 			       COALESCE(payment_plan,''),
 			       COALESCE(deposit_ref,''), COALESCE(id_photo,''),
 			       COALESCE(kra,''), COALESCE(passport_photo,''),
-			       COALESCE(sale_agreement,''), COALESCE(notes,''),
+			       COALESCE(sale_agreement,''), COALESCE(notes,''), COALESCE(care_of,''),
 			       COALESCE(zoho_books_id,''), COALESCE(zoho_crm_id,''),
 			       COALESCE(installment_page,'')
 			FROM prop_bookings
@@ -564,7 +565,7 @@ func processSignedIntegrations(plotID int, plotNumber, estateName string) {
 			Scan(&b.BuyerName, &b.BuyerPhone, &b.BuyerEmail,
 				&b.AgentName, &b.Deposit, &b.PaymentPlan,
 				&b.DepositRef, &b.IDPhoto, &b.KRA, &b.PassportPhoto,
-				&b.SaleAgreement, &b.Notes,
+				&b.SaleAgreement, &b.Notes, &b.CareOf,
 				&zohoBookID, &existingCRMID, &installmentPage)
 		if err != nil {
 			log.Printf("[signed-integrations] fetch booking for plot %d: %v", plotID, err)
@@ -669,6 +670,7 @@ func createCRMDeal(b bookingInfo, zohoBookID string) (string, error) {
 			"Closing_Date":     time.Now().Format("2006-01-02"),
 			"Description":      fmt.Sprintf("Plot(s): %s | Estate: %s | Agent: %s", plotStr, b.EstateName, b.AgentName),
 			"Books_Ref_Number": zohoBookID,
+			"Care_Of":          b.CareOf,
 		}},
 	}
 
