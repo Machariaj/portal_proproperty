@@ -20,6 +20,7 @@ var (
 	getUserIDFn       func(r *http.Request) string
 	isSystemAdminFn   func(r *http.Request) bool
 	getRoleFn         func(r *http.Request) string
+	hasWritePermFn    func(r *http.Request) bool
 	saveUploadedFiles func(r *http.Request, fieldName string) string
 	processSAIntegr   func(plotID int, plotNumber, estateName string)
 	cancelBooks       func(estimateID string)
@@ -32,7 +33,10 @@ var (
 //   - legal:  the assigned lawyer on an estate (prop_estates.lawyer_id) —
 //     full access to that estate's bookings, can act on them.
 //   - admin:  every booking, every estate — read-only oversight of what's
-//     pending and at what stage, with the assigned lawyer shown per row.
+//     pending and at what stage, with the assigned lawyer shown per row, by
+//     default. A system_admin can lift this per-admin via the "Legal
+//     Module" write permission (Settings → Users → Permissions), letting a
+//     specific admin also draft/send/upload/cancel — see hasWritePermFn.
 //   - system_admin: everything, full access, same as legal.
 func Init(
 	d *sql.DB,
@@ -41,6 +45,7 @@ func Init(
 	getUserID func(*http.Request) string,
 	isSystemAdmin func(*http.Request) bool,
 	getRole func(*http.Request) string,
+	hasWritePerm func(r *http.Request) bool,
 	saveFiles func(r *http.Request, fieldName string) string,
 	processSignedIntegrations func(plotID int, plotNumber, estateName string),
 	cancelBooksEstimate func(estimateID string),
@@ -52,6 +57,7 @@ func Init(
 	getUserIDFn = getUserID
 	isSystemAdminFn = isSystemAdmin
 	getRoleFn = getRole
+	hasWritePermFn = hasWritePerm
 	saveUploadedFiles = saveFiles
 	processSAIntegr = processSignedIntegrations
 	cancelBooks = cancelBooksEstimate
@@ -69,13 +75,12 @@ func scopeQuery(r *http.Request, query string, args []any) (string, []any) {
 	return query, args // admin, system_admin
 }
 
-// isAssignedLawyer reports whether the current user may act on a booking on
-// the given estate — either they're system_admin, or the estate's
-// lawyer_id matches their own user ID. This is also, deliberately, the
-// action gate for the three mutating handlers below: an admin or agent's
-// own ID never matches an estate's lawyer_id, so they're naturally blocked
-// from acting even though they can now reach these routes — no separate
-// "canAct" check needed.
+// isAssignedLawyer reports whether the current user IS the estate's
+// assigned lawyer — either they're system_admin, or the estate's
+// lawyer_id matches their own user ID. An admin or agent's own ID never
+// matches an estate's lawyer_id, so this alone naturally excludes them.
+// Use canAct (below), not this, to gate the mutating handlers — it also
+// admits an admin explicitly granted the "Legal Module" write permission.
 func isAssignedLawyer(r *http.Request, estateID int) bool {
 	if isSystemAdminFn(r) {
 		return true
@@ -85,6 +90,20 @@ func isAssignedLawyer(r *http.Request, estateID int) bool {
 		return false
 	}
 	return lawyerID == getUserIDFn(r)
+}
+
+// canAct reports whether the current user may act on (not just view) a
+// booking on the given estate — the assigned lawyer/system_admin (see
+// isAssignedLawyer), or an admin a system_admin has explicitly granted the
+// "Legal Module" write permission (e.g. so a specific admin can upload sale
+// agreements directly, without becoming that estate's assigned lawyer).
+// This is the action gate for the three mutating handlers below and for the
+// CanAct template flag.
+func canAct(r *http.Request, estateID int) bool {
+	if isAssignedLawyer(r, estateID) {
+		return true
+	}
+	return hasWritePermFn != nil && hasWritePermFn(r)
 }
 
 // canView reports whether the current viewer may see a booking on the given
@@ -480,11 +499,12 @@ func reviewDetailHandler(w http.ResponseWriter, r *http.Request) {
 		"Active": active,
 		"Info":   detail,
 		"Error":  r.URL.Query().Get("err"),
-		// Admin/agent get read-only visibility — the action forms below are
-		// hidden for them, not just blocked server-side (isAssignedLawyer
+		// Admin/agent get read-only visibility by default — the action forms
+		// below are hidden for them, not just blocked server-side (canAct
 		// already rejects the POST regardless, but showing a button that
-		// would just 403 on click is bad UX).
-		"CanAct": isAssignedLawyer(r, detail.EstateID),
+		// would just 403 on click is bad UX) — unless this admin has been
+		// explicitly granted the Legal Module write permission.
+		"CanAct": canAct(r, detail.EstateID),
 	})
 }
 
@@ -504,7 +524,7 @@ func sendForSignatureHandler(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/legal/queue?err=Booking+already+moved", http.StatusFound)
 		return
 	}
-	if !isAssignedLawyer(r, estateID) {
+	if !canAct(r, estateID) {
 		http.Error(w, "Access denied — this estate is not assigned to you.", http.StatusForbidden)
 		return
 	}
@@ -542,7 +562,7 @@ func uploadAgreementHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	var estateIDForCheck int
 	db.QueryRow(`SELECT estate_id FROM prop_bookings WHERE id=?`, bookingID).Scan(&estateIDForCheck)
-	if !isAssignedLawyer(r, estateIDForCheck) {
+	if !canAct(r, estateIDForCheck) {
 		http.Error(w, "Access denied — this estate is not assigned to you.", http.StatusForbidden)
 		return
 	}
@@ -595,7 +615,7 @@ func cancelHandler(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/legal/queue?err=Booking+already+reviewed", http.StatusFound)
 		return
 	}
-	if !isAssignedLawyer(r, estateIDForCheck) {
+	if !canAct(r, estateIDForCheck) {
 		http.Error(w, "Access denied — this estate is not assigned to you.", http.StatusForbidden)
 		return
 	}

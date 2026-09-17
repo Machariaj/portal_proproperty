@@ -169,6 +169,7 @@ func main() {
 	legal.Init(db, render, getAgentName, getUserID,
 		func(r *http.Request) bool { return getRole(r) == roleSystemAdmin },
 		getRole,
+		func(r *http.Request) bool { return hasPermission(getUserID(r), "legal.access", "write") },
 		saveUploadedFiles, processSignedIntegrations, cancelBooksEstimate, sendReviewOutcomeEmail)
 	initPermissionTables()
 	init2FATables()
