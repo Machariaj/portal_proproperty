@@ -94,6 +94,10 @@ function goNow() { clearInterval(timer); window.location.href = '/agent/bookings
                        style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;box-sizing:border-box;">
                 <p style="font-size:11px;color:#94a3b8;margin:4px 0 0;">Sets the running total directly. To log an itemized payment with a receipt/reference file instead, use "Generate Booking Confirmation Receipt" below.</p>
             </div>
+            <div>
+                <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">Care Of <span style="font-weight:400;color:#6b7280;">(optional — sent only to Zoho CRM, not visible to Accounts or Legal)</span></label>
+                <input type="text" name="care_of" value="{{ .Info.CareOf }}" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;box-sizing:border-box;">
+            </div>
         </div>
         <div class="upload-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;">
             <div style="min-width:0;">
@@ -247,10 +251,10 @@ function goNow() { clearInterval(timer); window.location.href = '/agent/bookings
     window.removeUploadedFile = function(field, filename, btn) {
         if (!confirm('Remove this file? This cannot be undone.')) return;
         var row = btn.closest('div');
-        var fd = new FormData();
-        fd.append('field', field);
-        fd.append('filename', filename);
-        fetch('/agent/booking-delete-attachment/{{ .Info.BookingID }}', { method: 'POST', body: fd })
+        var params = new URLSearchParams();
+        params.append('field', field);
+        params.append('filename', filename);
+        fetch('/agent/booking-delete-attachment/{{ .Info.BookingID }}', { method: 'POST', body: params })
             .then(function (r) { return r.json(); })
             .then(function (data) {
                 if (data.ok) { row.remove(); }

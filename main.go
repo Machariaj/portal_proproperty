@@ -4398,6 +4398,7 @@ func bookingAttachmentsHandler(w http.ResponseWriter, r *http.Request, tmplName,
 		PaymentPlan        string
 		Deposit            string
 		Notes              string
+		CareOf             string
 		ZohoBooksID        string
 		DepositRefFiles    []string
 		IDPhotoFiles       []string
@@ -4412,7 +4413,7 @@ func bookingAttachmentsHandler(w http.ResponseWriter, r *http.Request, tmplName,
 		       COALESCE(b.kra,''), COALESCE(b.passport_photo,''),
 		       b.plot_id, b.estate_id, COALESCE(b.agent_name,''),
 		       COALESCE(b.payment_plan,''), COALESCE(CAST(b.deposit AS CHAR),'0'),
-		       COALESCE(b.notes,''), COALESCE(b.zoho_books_id,'')
+		       COALESCE(b.notes,''), COALESCE(b.care_of,''), COALESCE(b.zoho_books_id,'')
 		FROM prop_bookings b
 		JOIN prop_plots p ON p.id = b.plot_id
 		JOIN prop_estates e ON e.id = b.estate_id
@@ -4421,7 +4422,7 @@ func bookingAttachmentsHandler(w http.ResponseWriter, r *http.Request, tmplName,
 			&info.EstateName, &info.PlotNumber,
 			&info.DepositRef, &info.IDPhoto, &info.KRA, &info.PassportPhoto,
 			&info.PlotID, &info.EstateID, &info.AgentName, &info.PaymentPlan, &info.Deposit,
-			&info.Notes, &info.ZohoBooksID)
+			&info.Notes, &info.CareOf, &info.ZohoBooksID)
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -4470,6 +4471,10 @@ func bookingAttachmentsHandler(w http.ResponseWriter, r *http.Request, tmplName,
 		if email := strings.TrimSpace(r.FormValue("buyer_email")); email != "" {
 			info.BuyerEmail = email
 		}
+		// Care Of: agent/admin-entered, shown only to them and forwarded only
+		// to the Zoho CRM deal's Care_Of field — see integrations.go. Allowed
+		// blank here (unlike name/phone/email above) so it can be cleared.
+		info.CareOf = strings.TrimSpace(r.FormValue("care_of"))
 
 		// Append new files to existing ones for each field
 		depositRef := appendFiles(saveUploadedFiles(r, "deposit_ref"), info.DepositRef)
@@ -4496,8 +4501,8 @@ func bookingAttachmentsHandler(w http.ResponseWriter, r *http.Request, tmplName,
 		}
 		info.Deposit = newDeposit
 
-		db.Exec(`UPDATE prop_bookings SET buyer_name=?, buyer_phone=?, buyer_email=?, payment_plan=?, deposit=?, deposit_ref=?, id_photo=?, kra=?, passport_photo=?, notes=? WHERE id=?`,
-			info.BuyerName, info.BuyerPhone, info.BuyerEmail, info.PaymentPlan, newDeposit, depositRef, idPhoto, kra, passportPhoto, notes, bookingID)
+		db.Exec(`UPDATE prop_bookings SET buyer_name=?, buyer_phone=?, buyer_email=?, payment_plan=?, deposit=?, deposit_ref=?, id_photo=?, kra=?, passport_photo=?, notes=?, care_of=? WHERE id=?`,
+			info.BuyerName, info.BuyerPhone, info.BuyerEmail, info.PaymentPlan, newDeposit, depositRef, idPhoto, kra, passportPhoto, notes, info.CareOf, bookingID)
 		if newDeposit != oldDeposit {
 			logBooking("DEPOSIT_UPDATED", info.AgentName, info.BuyerName, info.PlotNumber+" — "+info.EstateName,
 				fmt.Sprintf("deposit changed from KES %s to KES %s by %s", oldDeposit, newDeposit, getAgentName(r)))
