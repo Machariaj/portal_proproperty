@@ -144,6 +144,15 @@ type overdueRow struct {
 // an extension) via the UNIQUE KEY on prop_booking_warnings, but the "days
 // left" shown to the agent, and the staff-digest grouping, are computed from
 // the real deadline so an extended booking doesn't show stale numbers.
+//
+// Joins to the plot's single latest booking row (by id, any status) and
+// requires THAT row's status to be 'active' — not just "some row on this
+// plot_id is active". A plot only ever has one live booking row at a time,
+// but a stale row from an earlier booking attempt can still exist; without
+// pinning to the latest one, a plot that's already progressed to Accounts
+// or Legal review (its current row now pending_accounts_review /
+// pending_wakili_review) could still match on an old 'active' row and
+// incorrectly warn that it's about to expire.
 func checkWarningBookings() {
 	rows, err := db.Query(`
 		SELECT b.id, p.id, e.id, p.plot_number, e.name,
@@ -157,6 +166,9 @@ func checkWarningBookings() {
 		JOIN prop_plots   p ON p.id = b.plot_id
 		JOIN prop_estates e ON e.id = b.estate_id
 		LEFT JOIN prop_agents a ON a.name = b.agent_name
+		JOIN (
+			SELECT plot_id, MAX(id) AS latest_id FROM prop_bookings GROUP BY plot_id
+		) latest ON b.id = latest.latest_id
 		WHERE p.status  = 'booked'
 		  AND b.status  = 'active'
 		  AND DATEDIFF(COALESCE(b.booking_deadline, DATE_ADD(b.date_booked, INTERVAL 14 DAY)), NOW()) IN (2, 1)
@@ -307,6 +319,11 @@ func sendWarningEmail(rows []overdueRow, daysRemaining int) {
 // since days-remaining resets to a new, unseen range. This is separate from
 // checkWarningBookings' 1/2-day internal staff email above — that alerts
 // staff, this nudges the buyer/agent.
+//
+// Like checkWarningBookings, joins to the plot's single latest booking row
+// and requires that specific row's status to be 'active', so a plot already
+// in Accounts or Legal review (via a stale earlier row still marked
+// 'active') can't incorrectly trigger a reminder here either.
 func checkClientReminderSMS() {
 	notifyBuyer := notifyBuyerEnabled()
 	notifyAgent := notifyAgentEnabled()
@@ -321,6 +338,9 @@ func checkClientReminderSMS() {
 		JOIN prop_plots p ON p.id = b.plot_id
 		JOIN prop_estates e ON e.id = b.estate_id
 		LEFT JOIN prop_agents a ON a.name = b.agent_name
+		JOIN (
+			SELECT plot_id, MAX(id) AS latest_id FROM prop_bookings GROUP BY plot_id
+		) latest ON b.id = latest.latest_id
 		WHERE p.status = 'booked'
 		  AND b.status = 'active'
 		  AND DATEDIFF(COALESCE(b.booking_deadline, DATE_ADD(b.date_booked, INTERVAL 14 DAY)), NOW()) BETWEEN 0 AND 5`)
@@ -393,6 +413,15 @@ func checkClientReminderSMS() {
 
 // checkOverdueBookings finds booked plots older than 14 days, switches them
 // back to 'available', cancels the booking, and sends a notification email.
+//
+// Joins to the plot's single latest booking row and requires that specific
+// row's status to be 'active' — the same guard as checkWarningBookings and
+// checkClientReminderSMS. This is the one that matters most: without it, a
+// plot whose current booking has already moved on to Accounts or Legal
+// review could be auto-released back to 'available' by a stale earlier row
+// that happens to still say 'active' and be past its original deadline —
+// silently pulling a booking out from under Accounts/Legal mid-review. A
+// booking in Accounts or Legal review must only ever be released manually.
 func checkOverdueBookings() {
 	rows, err := db.Query(`
 		SELECT b.id, p.id, e.id, p.plot_number, e.name,
@@ -406,6 +435,9 @@ func checkOverdueBookings() {
 		JOIN prop_plots   p ON p.id = b.plot_id
 		JOIN prop_estates e ON e.id = b.estate_id
 		LEFT JOIN prop_agents a ON a.name = b.agent_name
+		JOIN (
+			SELECT plot_id, MAX(id) AS latest_id FROM prop_bookings GROUP BY plot_id
+		) latest ON b.id = latest.latest_id
 		WHERE p.status = 'booked'
 		  AND b.status = 'active'
 		  AND COALESCE(b.booking_deadline, DATE_ADD(b.date_booked, INTERVAL 14 DAY)) < NOW()
