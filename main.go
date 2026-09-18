@@ -2170,7 +2170,7 @@ type filterOption struct {
 }
 
 func loadFilterOptions() (agents []filterOption, estates []filterOption) {
-	ar, err := db.Query(`SELECT DISTINCT COALESCE(agent_name,'') FROM prop_bookings WHERE agent_name != '' ORDER BY agent_name`)
+	ar, err := db.Query(`SELECT DISTINCT COALESCE(agent_name,'') FROM prop_bookings WHERE agent_name != '' ORDER BY COALESCE(agent_name,'')`)
 	if err != nil {
 		log.Printf("loadFilterOptions: agent query error: %v", err)
 	} else {
