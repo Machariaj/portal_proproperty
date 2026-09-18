@@ -399,7 +399,7 @@ func checkOverdueBookings() {
 		       b.buyer_name, COALESCE(b.buyer_phone,''), COALESCE(b.agent_name,''),
 		       COALESCE(a.phone,''), COALESCE(a.email,''),
 		       DATE_FORMAT(b.date_booked,'%d %b %Y'),
-		       DATE_FORMAT(DATE_ADD(b.date_booked, INTERVAL 14 DAY),'%M %d, %Y'),
+		       DATE_FORMAT(COALESCE(b.booking_deadline, DATE_ADD(b.date_booked, INTERVAL 14 DAY)),'%M %d, %Y'),
 		       DATEDIFF(NOW(), b.date_booked) AS days_over,
 		       COALESCE(b.zoho_books_id,'')
 		FROM prop_bookings b

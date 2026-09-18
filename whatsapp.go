@@ -111,18 +111,18 @@ func testWhatsAppHandler(w http.ResponseWriter, r *http.Request) {
 	// If a booking ID was submitted, send the WA and show the result.
 	if bookingID := r.URL.Query().Get("send"); bookingID != "" {
 		var agentName, agentPhone, estateName, plotNumber, expiryDate string
-		var daysOver int
+		var daysRemaining int
 		err := db.QueryRow(`
 			SELECT COALESCE(b.agent_name,''), COALESCE(a.phone,''),
 			       e.name, p.plot_number,
-			       DATE_FORMAT(DATE_ADD(b.date_booked, INTERVAL 14 DAY),'%M %d, %Y'),
-			       DATEDIFF(NOW(), b.date_booked)
+			       DATE_FORMAT(COALESCE(b.booking_deadline, DATE_ADD(b.date_booked, INTERVAL 14 DAY)),'%M %d, %Y'),
+			       DATEDIFF(COALESCE(b.booking_deadline, DATE_ADD(b.date_booked, INTERVAL 14 DAY)), NOW())
 			FROM prop_bookings b
 			JOIN prop_plots   p ON p.id = b.plot_id
 			JOIN prop_estates e ON e.id = b.estate_id
 			LEFT JOIN prop_agents a ON a.name = b.agent_name
 			WHERE b.id = ?`, bookingID).
-			Scan(&agentName, &agentPhone, &estateName, &plotNumber, &expiryDate, &daysOver)
+			Scan(&agentName, &agentPhone, &estateName, &plotNumber, &expiryDate, &daysRemaining)
 		if err != nil {
 			fmt.Fprintf(w, `<p style="color:red">Booking not found: %v</p><a href="/admin/test-whatsapp">← Back</a>`, err)
 			return
@@ -132,7 +132,7 @@ func testWhatsAppHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		n := 14 - daysOver
+		n := daysRemaining
 		daysLeft := fmt.Sprintf("%d days", n)
 		if n == 1 {
 			daysLeft = "1 day"
@@ -166,7 +166,7 @@ func testWhatsAppHandler(w http.ResponseWriter, r *http.Request) {
 		SELECT b.id, COALESCE(b.agent_name,'—'), COALESCE(a.phone,''),
 		       p.plot_number, e.name,
 		       DATEDIFF(NOW(), b.date_booked) AS days_booked,
-		       DATE_FORMAT(DATE_ADD(b.date_booked, INTERVAL 14 DAY),'%M %d, %Y')
+		       DATE_FORMAT(COALESCE(b.booking_deadline, DATE_ADD(b.date_booked, INTERVAL 14 DAY)),'%M %d, %Y')
 		FROM prop_bookings b
 		JOIN prop_plots   p ON p.id = b.plot_id
 		JOIN prop_estates e ON e.id = b.estate_id
