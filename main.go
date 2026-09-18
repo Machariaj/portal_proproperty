@@ -2170,8 +2170,10 @@ type filterOption struct {
 }
 
 func loadFilterOptions() (agents []filterOption, estates []filterOption) {
-	ar, _ := db.Query(`SELECT DISTINCT COALESCE(agent_name,'') FROM prop_bookings WHERE agent_name != '' ORDER BY agent_name`)
-	if ar != nil {
+	ar, err := db.Query(`SELECT DISTINCT COALESCE(agent_name,'') FROM prop_bookings WHERE agent_name != '' ORDER BY agent_name`)
+	if err != nil {
+		log.Printf("loadFilterOptions: agent query error: %v", err)
+	} else {
 		defer ar.Close()
 		for ar.Next() {
 			var n string
@@ -2179,8 +2181,10 @@ func loadFilterOptions() (agents []filterOption, estates []filterOption) {
 			agents = append(agents, filterOption{ID: n, Name: n})
 		}
 	}
-	er, _ := db.Query(`SELECT id, name FROM prop_estates ORDER BY name`)
-	if er != nil {
+	er, err := db.Query(`SELECT id, name FROM prop_estates ORDER BY name`)
+	if err != nil {
+		log.Printf("loadFilterOptions: estate query error: %v", err)
+	} else {
 		defer er.Close()
 		for er.Next() {
 			var id int
