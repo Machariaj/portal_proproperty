@@ -165,12 +165,13 @@ func main() {
 		getUserID,
 	)
 	welfare.InitTables()
-	accounts.Init(db, render, getAgentName, cancelBooksEstimate, sendReviewOutcomeEmail, createBooksRecordForBookingID, sendAccountsApprovedEmail)
+	accounts.Init(db, render, getAgentName, cancelBooksEstimate, sendReviewOutcomeEmail, createBooksRecordForBookingID, sendAccountsApprovedEmail, sendAccountsApprovedSMS)
 	legal.Init(db, render, getAgentName, getUserID,
 		func(r *http.Request) bool { return getRole(r) == roleSystemAdmin },
 		getRole,
 		func(r *http.Request) bool { return hasPermission(getUserID(r), "legal.access", "write") },
-		saveUploadedFiles, processSignedIntegrations, cancelBooksEstimate, sendReviewOutcomeEmail)
+		saveUploadedFiles, processSignedIntegrations, cancelBooksEstimate, sendReviewOutcomeEmail,
+		sendSentForSignatureSMS, sendAgreementSignedSMS)
 	initPermissionTables()
 	init2FATables()
 	initSchedulerTables()
@@ -1707,6 +1708,8 @@ func adminSkipAccountsHandler(w http.ResponseWriter, r *http.Request) {
 			log.Printf("admin skip-accounts: notification email error: %v", err)
 		}
 	}()
+	// Buyer/agent SMS, per Settings -> Notifications — same "now with Legal" event.
+	sendAccountsApprovedSMS(bookingID)
 
 	redirectBack(w, r, "/admin/booked-plots", "booking-"+bookingID)
 }

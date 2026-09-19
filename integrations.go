@@ -1551,6 +1551,110 @@ func sendAccountsApprovedEmail(bookingID string) error {
 	return sendBookingEmail(b, accountsApprovedRecipients, false)
 }
 
+// fetchNotifySMSInfo loads the buyer/agent contact and plot/estate details
+// needed for the Accounts/Legal progress SMS below. Shared by all three
+// since each caller only has a booking ID at its trigger point.
+func fetchNotifySMSInfo(bookingID string) (buyerName, buyerPhone, agentName, agentPhone, plotNumber, estateName string, err error) {
+	err = db.QueryRow(`
+		SELECT b.buyer_name, COALESCE(b.buyer_phone,''), COALESCE(b.agent_name,''),
+		       COALESCE(a.phone,''), p.plot_number, e.name
+		FROM prop_bookings b
+		JOIN prop_plots p ON p.id = b.plot_id
+		JOIN prop_estates e ON e.id = b.estate_id
+		LEFT JOIN prop_agents a ON a.name = b.agent_name
+		WHERE b.id = ?`, bookingID).
+		Scan(&buyerName, &buyerPhone, &agentName, &agentPhone, &plotNumber, &estateName)
+	return
+}
+
+// sendAccountsApprovedSMS notifies the buyer and/or agent — per Settings ->
+// Notifications (notifyBuyerEnabled/notifyAgentEnabled, the same toggle that
+// already gates the booking-confirmation and 5-day reminder SMS) — that a
+// booking has cleared Accounts and moved to Legal for sale agreement
+// drafting. Fired from accounts.approveHandler (normal approval) and
+// adminSkipAccountsHandler (system_admin's skip-Accounts override) — both
+// land the booking at the same "now with Legal" point.
+func sendAccountsApprovedSMS(bookingID string) {
+	if !notifyBuyerEnabled() && !notifyAgentEnabled() {
+		return
+	}
+	buyerName, buyerPhone, _, agentPhone, plotNumber, estateName, err := fetchNotifySMSInfo(bookingID)
+	if err != nil {
+		log.Printf("[sms] accounts-approved fetch error booking=%s: %v", bookingID, err)
+		return
+	}
+	if notifyBuyerEnabled() && buyerPhone != "" {
+		msg := fmt.Sprintf(
+			"Dear %s, good news — your payment and documents for Plot %s at %s have been verified. Your booking now moves to our legal team for sale agreement preparation. - Pro-Property",
+			buyerName, plotNumber, estateName,
+		)
+		go vanbooking.SendSMS(buyerPhone, msg)
+	}
+	if notifyAgentEnabled() && agentPhone != "" {
+		msg := fmt.Sprintf(
+			"Your client %s's booking for Plot %s at %s has passed Accounts verification and moved to Legal for sale agreement drafting. - Pro-Property",
+			buyerName, plotNumber, estateName,
+		)
+		go vanbooking.SendSMS(agentPhone, msg)
+	}
+}
+
+// sendSentForSignatureSMS notifies the buyer and/or agent that the sale
+// agreement has been drafted and sent for the client's signature. Fired
+// from legal.sendForSignatureHandler.
+func sendSentForSignatureSMS(bookingID string) {
+	if !notifyBuyerEnabled() && !notifyAgentEnabled() {
+		return
+	}
+	buyerName, buyerPhone, agentName, agentPhone, plotNumber, estateName, err := fetchNotifySMSInfo(bookingID)
+	if err != nil {
+		log.Printf("[sms] sent-for-signature fetch error booking=%s: %v", bookingID, err)
+		return
+	}
+	if notifyBuyerEnabled() && buyerPhone != "" {
+		msg := fmt.Sprintf(
+			"Dear %s, your sale agreement for Plot %s at %s has been prepared and sent for your signature. Please contact %s to sign and return it. - Pro-Property",
+			buyerName, plotNumber, estateName, agentName,
+		)
+		go vanbooking.SendSMS(buyerPhone, msg)
+	}
+	if notifyAgentEnabled() && agentPhone != "" {
+		msg := fmt.Sprintf(
+			"The sale agreement for %s's Plot %s at %s is ready for signature — please coordinate with the client. - Pro-Property",
+			buyerName, plotNumber, estateName,
+		)
+		go vanbooking.SendSMS(agentPhone, msg)
+	}
+}
+
+// sendAgreementSignedSMS notifies the buyer and/or agent once the signed
+// sale agreement has been uploaded — the final step of this pipeline
+// (status sa_signed). Fired from legal.uploadAgreementHandler.
+func sendAgreementSignedSMS(bookingID string) {
+	if !notifyBuyerEnabled() && !notifyAgentEnabled() {
+		return
+	}
+	buyerName, buyerPhone, _, agentPhone, plotNumber, estateName, err := fetchNotifySMSInfo(bookingID)
+	if err != nil {
+		log.Printf("[sms] agreement-signed fetch error booking=%s: %v", bookingID, err)
+		return
+	}
+	if notifyBuyerEnabled() && buyerPhone != "" {
+		msg := fmt.Sprintf(
+			"Dear %s, congratulations! Your sale agreement for Plot %s at %s has been signed and finalized. - Pro-Property",
+			buyerName, plotNumber, estateName,
+		)
+		go vanbooking.SendSMS(buyerPhone, msg)
+	}
+	if notifyAgentEnabled() && agentPhone != "" {
+		msg := fmt.Sprintf(
+			"The sale agreement for %s's Plot %s at %s has been signed — booking complete. - Pro-Property",
+			buyerName, plotNumber, estateName,
+		)
+		go vanbooking.SendSMS(agentPhone, msg)
+	}
+}
+
 // sendSoldEmail notifies soldRecipients when a plot is marked as sold.
 func sendSoldEmail(b bookingInfo) error {
 	plotStr := strings.Join(b.PlotNumbers, ", ")

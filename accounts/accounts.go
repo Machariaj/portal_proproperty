@@ -13,20 +13,22 @@ import (
 )
 
 var (
-	db           *sql.DB
-	renderFn     func(w http.ResponseWriter, name string, data any)
-	getAgentFn   func(r *http.Request) string
-	cancelBooks  func(estimateID string)
-	sendOutcome  func(outcome, plotNumber, estateName, buyerName, buyerPhone, agentName, notes string) error
-	createBooks  func(bookingID string)
-	sendApproved func(bookingID string) error
+	db              *sql.DB
+	renderFn        func(w http.ResponseWriter, name string, data any)
+	getAgentFn      func(r *http.Request) string
+	cancelBooks     func(estimateID string)
+	sendOutcome     func(outcome, plotNumber, estateName, buyerName, buyerPhone, agentName, notes string) error
+	createBooks     func(bookingID string)
+	sendApproved    func(bookingID string) error
+	sendApprovedSMS func(bookingID string)
 )
 
 // Init wires this package to the host app's shared dependencies. cancelBooks,
-// sendOutcomeEmail, createBooks and sendApprovedEmail are injected rather
-// than imported directly since they live in package main
+// sendOutcomeEmail, createBooks, sendApprovedEmail and sendApprovedSMSFn are
+// injected rather than imported directly since they live in package main
 // (cancelBooksEstimate, sendReviewOutcomeEmail,
-// createBooksRecordForBookingID, sendAccountsApprovedEmail).
+// createBooksRecordForBookingID, sendAccountsApprovedEmail,
+// sendAccountsApprovedSMS).
 func Init(
 	d *sql.DB,
 	render func(http.ResponseWriter, string, any),
@@ -35,6 +37,7 @@ func Init(
 	sendOutcomeEmail func(outcome, plotNumber, estateName, buyerName, buyerPhone, agentName, notes string) error,
 	createBooksRecord func(bookingID string),
 	sendApprovedEmail func(bookingID string) error,
+	sendApprovedSMSFn func(bookingID string),
 ) {
 	db = d
 	renderFn = render
@@ -42,6 +45,7 @@ func Init(
 	cancelBooks = cancelBooksEstimate
 	sendOutcome = sendOutcomeEmail
 	createBooks = createBooksRecord
+	sendApprovedSMS = sendApprovedSMSFn
 	sendApproved = sendApprovedEmail
 }
 
@@ -258,6 +262,10 @@ func approveHandler(w http.ResponseWriter, r *http.Request) {
 				log.Printf("accounts approve: notification email error: %v", err)
 			}
 		}()
+	}
+	// Buyer/agent SMS, per Settings -> Notifications — same "now with Legal" event.
+	if sendApprovedSMS != nil {
+		sendApprovedSMS(bookingID)
 	}
 
 	http.Redirect(w, r, "/accounts/queue", http.StatusFound)

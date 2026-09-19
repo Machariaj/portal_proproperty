@@ -25,6 +25,8 @@ var (
 	processSAIntegr   func(plotID int, plotNumber, estateName string)
 	cancelBooks       func(estimateID string)
 	sendOutcome       func(outcome, plotNumber, estateName, buyerName, buyerPhone, agentName, notes string) error
+	sendSentForSigSMS func(bookingID string)
+	sendSignedSMS     func(bookingID string)
 )
 
 // Init wires this package to the host app's shared dependencies. Two roles
@@ -50,6 +52,8 @@ func Init(
 	processSignedIntegrations func(plotID int, plotNumber, estateName string),
 	cancelBooksEstimate func(estimateID string),
 	sendOutcomeEmail func(outcome, plotNumber, estateName, buyerName, buyerPhone, agentName, notes string) error,
+	sendSentForSignatureSMS func(bookingID string),
+	sendAgreementSignedSMS func(bookingID string),
 ) {
 	db = d
 	renderFn = render
@@ -62,6 +66,8 @@ func Init(
 	processSAIntegr = processSignedIntegrations
 	cancelBooks = cancelBooksEstimate
 	sendOutcome = sendOutcomeEmail
+	sendSentForSigSMS = sendSentForSignatureSMS
+	sendSignedSMS = sendAgreementSignedSMS
 }
 
 // scopeQuery narrows a queue query to what the current viewer is allowed to
@@ -535,6 +541,9 @@ func sendForSignatureHandler(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, fmt.Sprintf("/legal/review/%s?err=Database+error", bookingID), http.StatusFound)
 		return
 	}
+	if sendSentForSigSMS != nil {
+		sendSentForSigSMS(bookingID)
+	}
 	http.Redirect(w, r, "/legal/queue", http.StatusFound)
 }
 
@@ -589,6 +598,9 @@ func uploadAgreementHandler(w http.ResponseWriter, r *http.Request) {
 		if sendOutcome != nil {
 			go sendOutcome("legal_signed", detail.PlotNumber, detail.EstateName, detail.BuyerName, detail.BuyerPhone, detail.AgentName, notes)
 		}
+	}
+	if sendSignedSMS != nil {
+		sendSignedSMS(bookingID)
 	}
 
 	http.Redirect(w, r, "/legal/queue", http.StatusFound)
