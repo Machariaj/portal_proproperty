@@ -218,6 +218,10 @@ func main() {
 	// (on upload) status flips to 'sa_signed'. legal_stage is meaningless once
 	// status has moved past 'pending_wakili_review'.
 	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN legal_stage ENUM('drafting','awaiting_signature') NOT NULL DEFAULT 'drafting'`)
+	// Set when Legal moves a booking from drafting to awaiting_signature —
+	// distinct from wakili_reviewed_at, which only fires at the terminal
+	// sign/cancel action, not this intermediate stage change.
+	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN sent_for_signature_at TIMESTAMP NULL DEFAULT NULL`)
 	db.Exec(`CREATE TABLE IF NOT EXISTS prop_booking_receipts (
 		id INT AUTO_INCREMENT PRIMARY KEY,
 		booking_id INT NOT NULL,

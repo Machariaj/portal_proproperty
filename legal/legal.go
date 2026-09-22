@@ -282,24 +282,27 @@ type queueRow struct {
 	AgentName  string
 	EstateName string
 	PlotNumber string
-	DateBooked string
+	StageDate  string
 	LawyerName string
 }
 
 // queueHandler lists stage 1: bookings Legal has just received from
-// Accounts and has not yet drafted a sale agreement for.
+// Accounts and has not yet drafted a sale agreement for. StageDate here is
+// accounts_reviewed_at — when the booking actually moved into Legal's
+// queue, not date_booked (which can be days/weeks earlier, back when the
+// buyer first booked the plot).
 func queueHandler(w http.ResponseWriter, r *http.Request) {
 	query := `
 		SELECT b.id, b.buyer_name, COALESCE(b.agent_name,''), e.name, p.plot_number,
-		       DATE_FORMAT(b.date_booked,'%d %b %Y'), COALESCE(lw.name,'')
+		       COALESCE(DATE_FORMAT(b.accounts_reviewed_at,'%d %b %Y %h:%i %p'),'—'), COALESCE(lw.name,'')
 		FROM prop_bookings b
 		JOIN prop_plots p ON p.id = b.plot_id
 		JOIN prop_estates e ON e.id = b.estate_id
 		LEFT JOIN prop_agents lw ON lw.id = e.lawyer_id
 		WHERE b.status = 'pending_wakili_review' AND b.legal_stage = 'drafting'`
 	query, args := scopeQuery(r, query, nil)
-	query, args = applyListFilters(r, "b.date_booked", query, args)
-	query += ` ORDER BY b.date_booked ASC`
+	query, args = applyListFilters(r, "b.accounts_reviewed_at", query, args)
+	query += ` ORDER BY b.accounts_reviewed_at ASC`
 
 	rows, err := db.Query(query, args...)
 	if err != nil {
@@ -312,7 +315,7 @@ func queueHandler(w http.ResponseWriter, r *http.Request) {
 	var queue []queueRow
 	for rows.Next() {
 		var q queueRow
-		if err := rows.Scan(&q.BookingID, &q.BuyerName, &q.AgentName, &q.EstateName, &q.PlotNumber, &q.DateBooked, &q.LawyerName); err == nil {
+		if err := rows.Scan(&q.BookingID, &q.BuyerName, &q.AgentName, &q.EstateName, &q.PlotNumber, &q.StageDate, &q.LawyerName); err == nil {
 			queue = append(queue, q)
 		}
 	}
@@ -328,19 +331,21 @@ func queueHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // awaitingSignatureHandler lists stage 2: bookings whose sale agreement has
-// been drafted and sent out, waiting on the client's signature.
+// been drafted and sent out, waiting on the client's signature. StageDate
+// here is sent_for_signature_at — when it was sent to the client — not
+// date_booked.
 func awaitingSignatureHandler(w http.ResponseWriter, r *http.Request) {
 	query := `
 		SELECT b.id, b.buyer_name, COALESCE(b.agent_name,''), e.name, p.plot_number,
-		       DATE_FORMAT(b.date_booked,'%d %b %Y'), COALESCE(lw.name,'')
+		       COALESCE(DATE_FORMAT(b.sent_for_signature_at,'%d %b %Y %h:%i %p'),'—'), COALESCE(lw.name,'')
 		FROM prop_bookings b
 		JOIN prop_plots p ON p.id = b.plot_id
 		JOIN prop_estates e ON e.id = b.estate_id
 		LEFT JOIN prop_agents lw ON lw.id = e.lawyer_id
 		WHERE b.status = 'pending_wakili_review' AND b.legal_stage = 'awaiting_signature'`
 	query, args := scopeQuery(r, query, nil)
-	query, args = applyListFilters(r, "b.date_booked", query, args)
-	query += ` ORDER BY b.date_booked ASC`
+	query, args = applyListFilters(r, "b.sent_for_signature_at", query, args)
+	query += ` ORDER BY b.sent_for_signature_at ASC`
 
 	rows, err := db.Query(query, args...)
 	if err != nil {
@@ -353,7 +358,7 @@ func awaitingSignatureHandler(w http.ResponseWriter, r *http.Request) {
 	var queue []queueRow
 	for rows.Next() {
 		var q queueRow
-		if err := rows.Scan(&q.BookingID, &q.BuyerName, &q.AgentName, &q.EstateName, &q.PlotNumber, &q.DateBooked, &q.LawyerName); err == nil {
+		if err := rows.Scan(&q.BookingID, &q.BuyerName, &q.AgentName, &q.EstateName, &q.PlotNumber, &q.StageDate, &q.LawyerName); err == nil {
 			queue = append(queue, q)
 		}
 	}
@@ -535,7 +540,7 @@ func sendForSignatureHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := db.Exec(`UPDATE prop_bookings SET legal_stage='awaiting_signature'
+	if _, err := db.Exec(`UPDATE prop_bookings SET legal_stage='awaiting_signature', sent_for_signature_at=NOW()
 		WHERE id=? AND status='pending_wakili_review' AND legal_stage='drafting'`, bookingID); err != nil {
 		log.Printf("legal send-for-signature: %v", err)
 		http.Redirect(w, r, fmt.Sprintf("/legal/review/%s?err=Database+error", bookingID), http.StatusFound)

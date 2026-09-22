@@ -57,7 +57,7 @@
                 <th>Estate / Plot</th>
                 <th>Agent</th>
                 <th>Lawyer</th>
-                <th>Booked On</th>
+                <th>Sent for Signature</th>
                 <th></th>
             </tr>
         </thead>
@@ -68,7 +68,7 @@
                 <td>{{ .EstateName }} — Plot {{ .PlotNumber }}</td>
                 <td>{{ .AgentName }}</td>
                 <td>{{ if .LawyerName }}{{ .LawyerName }}{{ else }}<span style="color:#9ca3af;">—</span>{{ end }}</td>
-                <td>{{ .DateBooked }}</td>
+                <td>{{ .StageDate }}</td>
                 <td><a href="/legal/review/{{ .BookingID }}" class="btn-primary" style="padding:6px 14px;font-size:12.5px;">Review</a></td>
             </tr>
             {{ else }}
