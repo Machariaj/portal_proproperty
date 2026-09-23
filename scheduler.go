@@ -607,18 +607,22 @@ func checkOverdueBookings() {
 			log.Printf("[scheduler] no phone for agent %q (booking %d), skipping WA", r.AgentName, r.BookingID)
 		}
 
-		// SMS to the buyer: plot released back to available, request refund details.
-		if r.BuyerPhone != "" {
-			msg := fmt.Sprintf(
-				"Dear %s, your booking for Plot %s at %s has expired after 14 days and the plot has been "+
-					"switched back to available for sale. Kindly share your bank account details to "+
-					"collections@proproperty.co.ke so we can process a refund of the amount you paid — a "+
-					"cheque will be written. Contact us for assistance. - Pro-Property",
-				r.BuyerName, r.PlotNumber, r.EstateName,
-			)
-			go vanbooking.SendSMS(r.BuyerPhone, msg)
-		} else {
-			log.Printf("[scheduler] no phone for buyer %q (booking %d), skipping release SMS", r.BuyerName, r.BookingID)
+		// SMS to the buyer: plot released back to available, request refund
+		// details. Gated by Settings -> Notifications like every other
+		// buyer-facing SMS in this pipeline — previously sent unconditionally.
+		if notifyBuyerEnabled() {
+			if r.BuyerPhone == "" {
+				log.Printf("[scheduler] no phone for buyer %q (booking %d), skipping release SMS", r.BuyerName, r.BookingID)
+			} else {
+				msg := fmt.Sprintf(
+					"Dear %s, your booking for Plot %s at %s has expired after 14 days and the plot has been "+
+						"switched back to available for sale. Kindly share your bank account details to "+
+						"collections@proproperty.co.ke so we can process a refund of the amount you paid — a "+
+						"cheque will be written. Contact us for assistance. - Pro-Property",
+					r.BuyerName, r.PlotNumber, r.EstateName,
+				)
+				go vanbooking.SendSMS(r.BuyerPhone, msg)
+			}
 		}
 	}
 }
