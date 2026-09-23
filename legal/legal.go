@@ -263,6 +263,8 @@ func Router(w http.ResponseWriter, r *http.Request) {
 		awaitingSignatureHandler(w, r)
 	case p == "/legal/completed":
 		completedHandler(w, r)
+	case p == "/legal/estates":
+		estatesHandler(w, r)
 	case strings.HasPrefix(p, "/legal/review/") && strings.HasSuffix(p, "/send-for-signature"):
 		sendForSignatureHandler(w, r)
 	case strings.HasPrefix(p, "/legal/review/") && strings.HasSuffix(p, "/upload-agreement"):
@@ -433,6 +435,46 @@ func completedHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	maps.Copy(data, filterRenderData(r))
 	renderLegal(w, "legal_completed.html", data)
+}
+
+type estateRow struct {
+	ID   int
+	Name string
+	Info string
+}
+
+// estatesHandler lists just the estates this viewer has access to — the
+// same scope as everywhere else in this module (their own assigned estates
+// for role "legal", every estate for admin/system_admin). Deliberately
+// minimal: name and the estate's own info text only, nothing else (no
+// image, mutation document, price, or plot counts) — those live on the
+// booking-review pages already, this is purely "what estates am I on."
+func estatesHandler(w http.ResponseWriter, r *http.Request) {
+	query := `SELECT id, name, COALESCE(prop_plotinfo,'') FROM prop_estates e WHERE 1=1`
+	query, args := scopeQuery(r, query, nil)
+	query += ` ORDER BY name`
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		log.Printf("legal estates: %v", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var estates []estateRow
+	for rows.Next() {
+		var e estateRow
+		if rows.Scan(&e.ID, &e.Name, &e.Info) == nil {
+			estates = append(estates, e)
+		}
+	}
+
+	renderLegal(w, "legal_estates.html", map[string]any{
+		"Title":   "Legal — My Estates",
+		"Active":  "estates",
+		"Estates": estates,
+	})
 }
 
 type reviewDetail struct {

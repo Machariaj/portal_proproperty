@@ -119,6 +119,7 @@
         <li><a href="/legal/queue" {{ if eq .Active "queue" }}class="active"{{ end }}>Pending Drafting</a></li>
         <li><a href="/legal/awaiting-signature" {{ if eq .Active "awaiting" }}class="active"{{ end }}>Pending Client Signature</a></li>
         <li><a href="/legal/completed" {{ if eq .Active "completed" }}class="active"{{ end }}>Completed Sale Agreement</a></li>
+        <li><a href="/legal/estates" {{ if eq .Active "estates" }}class="active"{{ end }}>My Estates</a></li>
     </ul>
     <div style="padding:8px 12px; margin-top:auto;">
         <form action="/logout" method="post" style="margin:0">

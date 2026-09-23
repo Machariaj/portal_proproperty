@@ -337,6 +337,7 @@ func main() {
 		"legal_awaiting.html":  mustParse("templates/legal/legal_base.html", "templates/legal/legal_awaiting.html"),
 		"legal_review.html":    mustParse("templates/legal/legal_base.html", "templates/legal/legal_review.html"),
 		"legal_completed.html": mustParse("templates/legal/legal_base.html", "templates/legal/legal_completed.html"),
+		"legal_estates.html":   mustParse("templates/legal/legal_base.html", "templates/legal/legal_estates.html"),
 		// Settings pages (system_admin only)
 		"settings_users.html":         mustParse("templates/settings/settings_base.html", "templates/settings/settings_users.html"),
 		"settings_edit_user.html":     mustParse("templates/settings/settings_base.html", "templates/settings/settings_edit_user.html"),

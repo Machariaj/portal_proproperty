@@ -1,0 +1,26 @@
+{{ define "content" }}
+<div class="page-header">
+    <div>
+        <h1>My Estates</h1>
+        <p>Estates you have access to in the Legal module.</p>
+    </div>
+</div>
+
+{{ range .Estates }}
+<div class="review-section">
+    <h3>{{ .Name }}</h3>
+    {{ if .Info }}
+    <div style="font-size:13.5px;color:#374151;line-height:1.6;">
+        {{ range lines .Info }}{{ if . }}<p style="margin:0 0 8px;">{{ . }}</p>{{ end }}{{ end }}
+    </div>
+    {{ else }}
+    <p style="font-size:13px;color:#94a3b8;margin:0;">No estate info on file.</p>
+    {{ end }}
+</div>
+{{ else }}
+<div class="review-section" style="text-align:center;color:#94a3b8;">
+    No estates assigned to you yet.
+</div>
+{{ end }}
+{{ end }}
+{{ template "legal_base" . }}
