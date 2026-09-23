@@ -5112,15 +5112,8 @@ func adminSaveZonesHandler(w http.ResponseWriter, r *http.Request) {
 
 // ── Private Estates ─────────────────────────────────────────────────────────
 
-func privateEstateAccess(userID, estateID string) bool {
-	var cnt int
-	db.QueryRow(`SELECT COUNT(*) FROM prop_restricted_access WHERE estate_id=? AND user_id=?`, estateID, userID).Scan(&cnt)
-	return cnt > 0
-}
-
 func adminPrivateEstatesHandler(w http.ResponseWriter, r *http.Request) {
 	isSA := getRole(r) == roleSystemAdmin
-	userID := getUserID(r)
 
 	var formErr string
 	if r.Method == http.MethodPost && isSA {
@@ -5149,25 +5142,21 @@ func adminPrivateEstatesHandler(w http.ResponseWriter, r *http.Request) {
 		SaSigned  int
 		Sold      int
 	}
+	// Access to the Private Estates module is already gated at the route
+	// level (requirePerm admin.private_estates), so anyone who can reach
+	// this page sees every private estate — not just estates they have an
+	// individual prop_restricted_access grant for. That per-estate ACL
+	// predates the page-level permission and is only still used by the
+	// legacy grant/revoke screen (see adminPrivateEstateAccessHandler); a
+	// newly added private estate has no rows there yet, which was silently
+	// hiding it from anyone but system_admin.
+	q := `SELECT e.id, e.name, COUNT(p.id),
+		COALESCE(SUM(p.status='available'),0), COALESCE(SUM(p.status='booked'),0),
+		COALESCE(SUM(p.status='sa_signed'),0), COALESCE(SUM(p.status='sold'),0)
+		FROM prop_estates e LEFT JOIN prop_plots p ON p.estate_id=e.id
+		WHERE COALESCE(e.is_restricted,0)=1
+		GROUP BY e.id, e.name ORDER BY e.name`
 	var qArgs []any
-	var q string
-	if isSA {
-		q = `SELECT e.id, e.name, COUNT(p.id),
-			COALESCE(SUM(p.status='available'),0), COALESCE(SUM(p.status='booked'),0),
-			COALESCE(SUM(p.status='sa_signed'),0), COALESCE(SUM(p.status='sold'),0)
-			FROM prop_estates e LEFT JOIN prop_plots p ON p.estate_id=e.id
-			WHERE COALESCE(e.is_restricted,0)=1
-			GROUP BY e.id, e.name ORDER BY e.name`
-	} else {
-		q = `SELECT e.id, e.name, COUNT(p.id),
-			COALESCE(SUM(p.status='available'),0), COALESCE(SUM(p.status='booked'),0),
-			COALESCE(SUM(p.status='sa_signed'),0), COALESCE(SUM(p.status='sold'),0)
-			FROM prop_estates e LEFT JOIN prop_plots p ON p.estate_id=e.id
-			WHERE COALESCE(e.is_restricted,0)=1
-			AND EXISTS (SELECT 1 FROM prop_restricted_access ra WHERE ra.estate_id=e.id AND ra.user_id=?)
-			GROUP BY e.id, e.name ORDER BY e.name`
-		qArgs = append(qArgs, userID)
-	}
 	type privateStats struct {
 		TotalEstates int
 		Available    int
@@ -5205,12 +5194,12 @@ func adminPrivateEstateRouter(w http.ResponseWriter, r *http.Request) {
 	estateID := pathSegment("/admin/private-estate/", r.URL.Path)
 	suffix := strings.TrimPrefix(r.URL.Path, "/admin/private-estate/"+estateID)
 	isSA := getRole(r) == roleSystemAdmin
-	userID := getUserID(r)
 
-	if !isSA && !privateEstateAccess(userID, estateID) {
-		http.Error(w, "Access denied", http.StatusForbidden)
-		return
-	}
+	// Viewing an individual private estate is gated the same way as the
+	// listing page: admin.private_estates read access (already enforced by
+	// requirePerm at the mux level) is enough — no per-estate ACL check.
+	// Granting/revoking that per-estate ACL, and adding plots, stay
+	// system_admin-only below.
 	r = withID(r, estateID)
 	switch suffix {
 	case "", "/", "/plots":
@@ -5392,7 +5381,6 @@ func adminPrivateEstateAccessHandler(w http.ResponseWriter, r *http.Request, suf
 }
 
 func agentPrivateEstatesHandler(w http.ResponseWriter, r *http.Request) {
-	userID := getUserID(r)
 	type estateRow struct {
 		ID        int
 		Name      string
@@ -5400,11 +5388,16 @@ func agentPrivateEstatesHandler(w http.ResponseWriter, r *http.Request) {
 		Available int
 	}
 	var estates []estateRow
+	// Same rationale as adminPrivateEstatesHandler: agent.private_estates
+	// read access (already enforced at the route level) is the sole gate —
+	// not an individual prop_restricted_access grant per estate, which was
+	// leaving newly added private estates invisible to anyone but
+	// system_admin.
 	if rows, _ := db.Query(`
 		SELECT e.id, e.name, COUNT(p.id), COALESCE(SUM(p.status='available'),0)
 		FROM prop_estates e LEFT JOIN prop_plots p ON p.estate_id=e.id
-		WHERE EXISTS (SELECT 1 FROM prop_restricted_access ra WHERE ra.estate_id=e.id AND ra.user_id=?)
-		GROUP BY e.id, e.name ORDER BY e.name`, userID); rows != nil {
+		WHERE COALESCE(e.is_restricted,0)=1
+		GROUP BY e.id, e.name ORDER BY e.name`); rows != nil {
 		defer rows.Close()
 		for rows.Next() {
 			var e estateRow
@@ -5422,11 +5415,8 @@ func agentPrivateEstatesHandler(w http.ResponseWriter, r *http.Request) {
 
 func agentPrivateEstateRouter(w http.ResponseWriter, r *http.Request) {
 	estateID := pathSegment("/agent/private-estate/", r.URL.Path)
-	userID := getUserID(r)
-	if !privateEstateAccess(userID, estateID) {
-		http.Error(w, "Access denied", http.StatusForbidden)
-		return
-	}
+	// agent.private_estates read access (already enforced at the route
+	// level) is the sole gate here too — see agentPrivateEstatesHandler.
 	r = withID(r, estateID)
 	agentPrivateEstatePlotsHandler(w, r)
 }
