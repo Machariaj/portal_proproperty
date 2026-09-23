@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"strings"
@@ -324,6 +325,23 @@ func sendWarningEmail(rows []overdueRow, daysRemaining int) {
 // and requires that specific row's status to be 'active', so a plot already
 // in Accounts or Legal review (via a stale earlier row still marked
 // 'active') can't incorrectly trigger a reminder here either.
+type reminderRow struct {
+	BookingID        int
+	BuyerName        string
+	PlotNumber       string
+	EstateName       string
+	BuyerPhone       string
+	AgentName        string
+	AgentPhone       string
+	DaysRemaining    int
+	Deposit          float64
+	DepositThreshold sql.NullFloat64
+	DepositRef       string
+	IDPhoto          string
+	KRA              string
+	PassportPhoto    string
+}
+
 func checkClientReminderSMS() {
 	notifyBuyer := notifyBuyerEnabled()
 	notifyAgent := notifyAgentEnabled()
@@ -331,9 +349,11 @@ func checkClientReminderSMS() {
 		return
 	}
 	rows, err := db.Query(`
-		SELECT b.id, p.plot_number, e.name, COALESCE(b.buyer_phone,''),
+		SELECT b.id, b.buyer_name, p.plot_number, e.name, COALESCE(b.buyer_phone,''),
 		       COALESCE(b.agent_name,''), COALESCE(a.phone,''),
-		       DATEDIFF(COALESCE(b.booking_deadline, DATE_ADD(b.date_booked, INTERVAL 14 DAY)), NOW()) AS days_remaining
+		       DATEDIFF(COALESCE(b.booking_deadline, DATE_ADD(b.date_booked, INTERVAL 14 DAY)), NOW()) AS days_remaining,
+		       COALESCE(b.deposit,0), e.deposit_threshold,
+		       COALESCE(b.deposit_ref,''), COALESCE(b.id_photo,''), COALESCE(b.kra,''), COALESCE(b.passport_photo,'')
 		FROM prop_bookings b
 		JOIN prop_plots p ON p.id = b.plot_id
 		JOIN prop_estates e ON e.id = b.estate_id
@@ -350,20 +370,12 @@ func checkClientReminderSMS() {
 	}
 	defer rows.Close()
 
-	type reminderRow struct {
-		BookingID     int
-		PlotNumber    string
-		EstateName    string
-		BuyerPhone    string
-		AgentName     string
-		AgentPhone    string
-		DaysRemaining int
-	}
 	var toRemind []reminderRow
 	for rows.Next() {
 		var rr reminderRow
-		if err := rows.Scan(&rr.BookingID, &rr.PlotNumber, &rr.EstateName, &rr.BuyerPhone,
-			&rr.AgentName, &rr.AgentPhone, &rr.DaysRemaining); err == nil {
+		if err := rows.Scan(&rr.BookingID, &rr.BuyerName, &rr.PlotNumber, &rr.EstateName, &rr.BuyerPhone,
+			&rr.AgentName, &rr.AgentPhone, &rr.DaysRemaining, &rr.Deposit, &rr.DepositThreshold,
+			&rr.DepositRef, &rr.IDPhoto, &rr.KRA, &rr.PassportPhoto); err == nil {
 			toRemind = append(toRemind, rr)
 		}
 	}
@@ -388,10 +400,7 @@ func checkClientReminderSMS() {
 			if rr.BuyerPhone == "" {
 				log.Printf("[scheduler] no phone for buyer on booking %d, skipping reminder SMS", rr.BookingID)
 			} else {
-				msg := fmt.Sprintf(
-					"Reminder: Plot %s at %s — payment/documents still pending. %s to pay the deposit threshold and submit your ID copy, KRA PIN and passport photo, or the plot will be released back to available. - Pro-Property",
-					rr.PlotNumber, rr.EstateName, daysLeftMsg,
-				)
+				msg := buildClientReminderSMS(rr)
 				go vanbooking.SendSMS(rr.BuyerPhone, msg)
 			}
 		}
@@ -407,6 +416,62 @@ func checkClientReminderSMS() {
 			}
 		}
 	}
+}
+
+// buildClientReminderSMS builds the daily reminder text sent to the buyer —
+// naming the exact balance still owed (deposit_threshold minus what's
+// recorded as paid) and exactly which of the 4 KYC items (payment
+// reference, ID copy, KRA PIN, passport photo) are still missing, rather
+// than a generic "payment/documents pending" line, and asks that whatever
+// is still missing be shared with the booking agent.
+func buildClientReminderSMS(rr reminderRow) string {
+	var missing []string
+	if rr.DepositRef == "" {
+		missing = append(missing, "payment reference")
+	}
+	if rr.IDPhoto == "" {
+		missing = append(missing, "ID copy")
+	}
+	if rr.KRA == "" {
+		missing = append(missing, "KRA PIN")
+	}
+	if rr.PassportPhoto == "" {
+		missing = append(missing, "passport-size photo")
+	}
+
+	var balanceClause string
+	if rr.DepositThreshold.Valid && rr.DepositThreshold.Float64 > 0 {
+		if balance := rr.DepositThreshold.Float64 - rr.Deposit; balance > 0 {
+			balanceClause = fmt.Sprintf("pay the balance of KES %.0f", balance)
+		}
+	}
+
+	var docsClause string
+	if len(missing) > 0 {
+		docsClause = fmt.Sprintf("share your %s with %s", strings.Join(missing, ", "), rr.AgentName)
+	}
+
+	var ask string
+	switch {
+	case balanceClause != "" && docsClause != "":
+		ask = balanceClause + " and " + docsClause
+	case balanceClause != "":
+		ask = balanceClause
+	case docsClause != "":
+		ask = docsClause
+	default:
+		ask = "complete your outstanding balance and documents with " + rr.AgentName
+	}
+
+	daysClause := fmt.Sprintf("You have %d day(s) left", rr.DaysRemaining)
+	if rr.DaysRemaining <= 0 {
+		daysClause = "Today is the last day"
+	}
+
+	return fmt.Sprintf(
+		"Dear %s, Reminder: Plot %s at %s — %s to %s, or the plot will be released back to available. - Pro-Property",
+		rr.BuyerName, rr.PlotNumber, rr.EstateName, daysClause, ask,
+	)
 }
 
 // ── >14-day auto-release ──────────────────────────────────────────────────────
@@ -546,8 +611,9 @@ func checkOverdueBookings() {
 		if r.BuyerPhone != "" {
 			msg := fmt.Sprintf(
 				"Dear %s, your booking for Plot %s at %s has expired after 14 days and the plot has been "+
-					"switched back to available for sale. Kindly share your bank account details so we can "+
-					"process a refund of the amount you paid — a cheque will be written. Contact us for assistance. - Pro-Property",
+					"switched back to available for sale. Kindly share your bank account details to "+
+					"collections@proproperty.co.ke so we can process a refund of the amount you paid — a "+
+					"cheque will be written. Contact us for assistance. - Pro-Property",
 				r.BuyerName, r.PlotNumber, r.EstateName,
 			)
 			go vanbooking.SendSMS(r.BuyerPhone, msg)
