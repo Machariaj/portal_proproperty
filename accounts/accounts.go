@@ -21,14 +21,15 @@ var (
 	createBooks     func(bookingID string)
 	sendApproved    func(bookingID string) error
 	sendApprovedSMS func(bookingID string)
+	notifyLawyer    func(bookingID string)
 )
 
 // Init wires this package to the host app's shared dependencies. cancelBooks,
-// sendOutcomeEmail, createBooks, sendApprovedEmail and sendApprovedSMSFn are
-// injected rather than imported directly since they live in package main
-// (cancelBooksEstimate, sendReviewOutcomeEmail,
+// sendOutcomeEmail, createBooks, sendApprovedEmail, sendApprovedSMSFn and
+// notifyLawyerFn are injected rather than imported directly since they live
+// in package main (cancelBooksEstimate, sendReviewOutcomeEmail,
 // createBooksRecordForBookingID, sendAccountsApprovedEmail,
-// sendAccountsApprovedSMS).
+// sendAccountsApprovedSMS, notifyLawyerOfNewCase).
 func Init(
 	d *sql.DB,
 	render func(http.ResponseWriter, string, any),
@@ -38,6 +39,7 @@ func Init(
 	createBooksRecord func(bookingID string),
 	sendApprovedEmail func(bookingID string) error,
 	sendApprovedSMSFn func(bookingID string),
+	notifyLawyerFn func(bookingID string),
 ) {
 	db = d
 	renderFn = render
@@ -47,6 +49,7 @@ func Init(
 	createBooks = createBooksRecord
 	sendApprovedSMS = sendApprovedSMSFn
 	sendApproved = sendApprovedEmail
+	notifyLawyer = notifyLawyerFn
 }
 
 func renderAccounts(w http.ResponseWriter, name string, data map[string]any) {
@@ -266,6 +269,10 @@ func approveHandler(w http.ResponseWriter, r *http.Request) {
 	// Buyer/agent SMS, per Settings -> Notifications — same "now with Legal" event.
 	if sendApprovedSMS != nil {
 		sendApprovedSMS(bookingID)
+	}
+	// Assigned lawyer email + SMS — always fires, not gated by that setting.
+	if notifyLawyer != nil {
+		notifyLawyer(bookingID)
 	}
 
 	http.Redirect(w, r, "/accounts/queue", http.StatusFound)

@@ -1599,6 +1599,66 @@ func sendAccountsApprovedSMS(bookingID string) {
 	}
 }
 
+// notifyLawyerOfNewCase emails and SMSes the estate's assigned lawyer
+// (prop_estates.lawyer_id) the moment a booking clears Accounts and lands in
+// their Legal queue — fired from accounts.approveHandler and
+// adminSkipAccountsHandler, the same two "now with Legal" points that
+// already trigger sendAccountsApprovedSMS. Unlike the buyer/agent SMS,
+// this always fires — it's not gated by Settings -> Notifications, which
+// only controls buyer/agent audiences; a lawyer needs to know a case has
+// landed in their queue regardless of that setting. No-ops quietly (with a
+// log line) if the estate has no assigned lawyer yet.
+func notifyLawyerOfNewCase(bookingID string) {
+	var lawyerName, lawyerEmail, lawyerPhone, buyerName, agentName, plotNumber, estateName string
+	err := db.QueryRow(`
+		SELECT COALESCE(lw.name,''), COALESCE(lw.email,''), COALESCE(lw.phone,''),
+		       b.buyer_name, COALESCE(b.agent_name,''), p.plot_number, e.name
+		FROM prop_bookings b
+		JOIN prop_plots p ON p.id = b.plot_id
+		JOIN prop_estates e ON e.id = b.estate_id
+		LEFT JOIN prop_agents lw ON lw.id = e.lawyer_id
+		WHERE b.id = ?`, bookingID).
+		Scan(&lawyerName, &lawyerEmail, &lawyerPhone, &buyerName, &agentName, &plotNumber, &estateName)
+	if err != nil {
+		log.Printf("[lawyer-notify] fetch error booking=%s: %v", bookingID, err)
+		return
+	}
+	if lawyerName == "" {
+		log.Printf("[lawyer-notify] no lawyer assigned to estate %q, skipping notification for booking %s", estateName, bookingID)
+		return
+	}
+
+	if lawyerEmail != "" {
+		subject := fmt.Sprintf("New Case — Plot %s at %s", plotNumber, estateName)
+		body := fmt.Sprintf(
+			"Dear %s,\r\n\r\nA new booking has cleared Accounts and is now waiting on you to draft the sale agreement.\r\n\r\n"+
+				"Estate:  %s\r\n"+
+				"Plot:    %s\r\n"+
+				"Buyer:   %s\r\n"+
+				"Agent:   %s\r\n\r\n"+
+				"Please log in to the Legal module to review.\r\n\r\nRegards,\r\nPro-Property Team",
+			lawyerName, estateName, plotNumber, buyerName, agentName,
+		)
+		go func() {
+			if err := sendPlainEmail([]string{lawyerEmail}, subject, body); err != nil {
+				log.Printf("[lawyer-notify] email error booking=%s: %v", bookingID, err)
+			}
+		}()
+	} else {
+		log.Printf("[lawyer-notify] no email for lawyer %q, skipping email for booking %s", lawyerName, bookingID)
+	}
+
+	if lawyerPhone != "" {
+		msg := fmt.Sprintf(
+			"New case: Plot %s at %s (buyer %s) has cleared Accounts and is waiting for you to draft the sale agreement. Log in to review. - Pro-Property",
+			plotNumber, estateName, buyerName,
+		)
+		go vanbooking.SendSMS(lawyerPhone, msg)
+	} else {
+		log.Printf("[lawyer-notify] no phone for lawyer %q, skipping SMS for booking %s", lawyerName, bookingID)
+	}
+}
+
 // sendSentForSignatureSMS notifies the buyer and/or agent that the sale
 // agreement has been drafted and sent for the client's signature. Fired
 // from legal.sendForSignatureHandler.

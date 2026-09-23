@@ -165,7 +165,7 @@ func main() {
 		getUserID,
 	)
 	welfare.InitTables()
-	accounts.Init(db, render, getAgentName, cancelBooksEstimate, sendReviewOutcomeEmail, createBooksRecordForBookingID, sendAccountsApprovedEmail, sendAccountsApprovedSMS)
+	accounts.Init(db, render, getAgentName, cancelBooksEstimate, sendReviewOutcomeEmail, createBooksRecordForBookingID, sendAccountsApprovedEmail, sendAccountsApprovedSMS, notifyLawyerOfNewCase)
 	legal.Init(db, render, getAgentName, getUserID,
 		func(r *http.Request) bool { return getRole(r) == roleSystemAdmin },
 		getRole,
@@ -1714,6 +1714,8 @@ func adminSkipAccountsHandler(w http.ResponseWriter, r *http.Request) {
 	}()
 	// Buyer/agent SMS, per Settings -> Notifications — same "now with Legal" event.
 	sendAccountsApprovedSMS(bookingID)
+	// Assigned lawyer email + SMS — always fires, not gated by that setting.
+	notifyLawyerOfNewCase(bookingID)
 
 	redirectBack(w, r, "/admin/booked-plots", "booking-"+bookingID)
 }
