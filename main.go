@@ -2033,14 +2033,18 @@ func adminEstateBookHandler(w http.ResponseWriter, r *http.Request) {
 		var plotNumbers []string
 		var bookedPlotIDs []int
 		var newBookingIDs []int
+		var failedPlots []string
 		estateIDInt, _ := strconv.Atoi(id)
 		for _, p := range plots {
-			if res, err := db.Exec(`INSERT INTO prop_bookings (plot_id, estate_id, buyer_name, buyer_phone, buyer_email, agent_name, deposit, payment_plan, deposit_ref, id_photo, kra, passport_photo, lead_source, notes, care_of, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active')`,
-				p.ID, id, buyerName, buyerPhone, buyerEmail, agentName, deposit, paymentPlan, depositRef, idPhoto, kra, passportPhoto, leadSource, notes, careOf); err != nil {
+			res, err := db.Exec(`INSERT INTO prop_bookings (plot_id, estate_id, buyer_name, buyer_phone, buyer_email, agent_name, deposit, payment_plan, deposit_ref, id_photo, kra, passport_photo, lead_source, notes, care_of, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active')`,
+				p.ID, id, buyerName, buyerPhone, buyerEmail, agentName, deposit, paymentPlan, depositRef, idPhoto, kra, passportPhoto, leadSource, notes, careOf)
+			if err != nil {
 				log.Printf("adminBook: booking insert failed for plot %d: %v", p.ID, err)
-			} else if bid, err2 := res.LastInsertId(); err2 == nil {
-				newBookingIDs = append(newBookingIDs, int(bid))
+				failedPlots = append(failedPlots, p.Number)
+				continue // no booking row exists for this plot — never mark it booked
 			}
+			bid, _ := res.LastInsertId()
+			newBookingIDs = append(newBookingIDs, int(bid))
 			if _, err := db.Exec(`UPDATE prop_plots SET status='booked' WHERE id=?`, p.ID); err != nil {
 				log.Printf("adminBook: plot status update failed for plot %d: %v", p.ID, err)
 			}
@@ -2048,7 +2052,14 @@ func adminEstateBookHandler(w http.ResponseWriter, r *http.Request) {
 			plotNumbers = append(plotNumbers, p.Number)
 			bookedPlotIDs = append(bookedPlotIDs, p.ID)
 		}
-		log.Printf("adminBook: %d plots booked for %s by %s", len(plots), buyerName, agentName)
+		if len(failedPlots) > 0 {
+			log.Printf("adminBook: FAILED to create booking record(s) for plot(s) %s — buyer=%s, left available/unchanged, not booked", strings.Join(failedPlots, ", "), buyerName)
+		}
+		if len(bookedPlotIDs) == 0 {
+			renderBookForm(plots, estateName, "Could not create the booking — a database error occurred. Please try again or contact support.")
+			return
+		}
+		log.Printf("adminBook: %d plots booked for %s by %s", len(bookedPlotIDs), buyerName, agentName)
 		logBooking("PLOT_BOOKED", agentName, buyerName,
 			strings.Join(plotNumbers, ", ")+" — "+estateName,
 			fmt.Sprintf("Deposit: KES %s | Plan: %s | Docs: %v", deposit, paymentPlan, hasAllAttachments(bookingInfo{DepositRef: depositRef, IDPhoto: idPhoto, KRA: kra, PassportPhoto: passportPhoto})))
@@ -3859,14 +3870,18 @@ func agentEstateBookHandler(w http.ResponseWriter, r *http.Request) {
 		var plotNumbers []string
 		var bookedPlotIDs []int
 		var newBookingIDs []int
+		var failedPlots []string
 		agentEstateIDInt, _ := strconv.Atoi(id)
 		for _, p := range plots {
-			if res, err := db.Exec(`INSERT INTO prop_bookings (plot_id, estate_id, buyer_name, buyer_phone, buyer_email, agent_name, deposit, payment_plan, deposit_ref, id_photo, kra, passport_photo, lead_source, notes, care_of, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active')`,
-				p.ID, id, buyerName, buyerPhone, buyerEmail, agentName, deposit, paymentPlan, depositRef, idPhoto, kra, passportPhoto, leadSource, notes, careOf); err != nil {
+			res, err := db.Exec(`INSERT INTO prop_bookings (plot_id, estate_id, buyer_name, buyer_phone, buyer_email, agent_name, deposit, payment_plan, deposit_ref, id_photo, kra, passport_photo, lead_source, notes, care_of, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active')`,
+				p.ID, id, buyerName, buyerPhone, buyerEmail, agentName, deposit, paymentPlan, depositRef, idPhoto, kra, passportPhoto, leadSource, notes, careOf)
+			if err != nil {
 				log.Printf("agentBook: booking insert failed for plot %d: %v", p.ID, err)
-			} else if bid, err2 := res.LastInsertId(); err2 == nil {
-				newBookingIDs = append(newBookingIDs, int(bid))
+				failedPlots = append(failedPlots, p.Number)
+				continue // no booking row exists for this plot — never mark it booked
 			}
+			bid, _ := res.LastInsertId()
+			newBookingIDs = append(newBookingIDs, int(bid))
 			if _, err := db.Exec(`UPDATE prop_plots SET status='booked' WHERE id=?`, p.ID); err != nil {
 				log.Printf("agentBook: plot status update failed for plot %d: %v", p.ID, err)
 			}
@@ -3874,7 +3889,14 @@ func agentEstateBookHandler(w http.ResponseWriter, r *http.Request) {
 			plotNumbers = append(plotNumbers, p.Number)
 			bookedPlotIDs = append(bookedPlotIDs, p.ID)
 		}
-		log.Printf("agentBook: %d plots booked for %s by %s", len(plots), buyerName, agentName)
+		if len(failedPlots) > 0 {
+			log.Printf("agentBook: FAILED to create booking record(s) for plot(s) %s — buyer=%s, left available/unchanged, not booked", strings.Join(failedPlots, ", "), buyerName)
+		}
+		if len(bookedPlotIDs) == 0 {
+			renderAgentBookForm(plots, estateName, "Could not create the booking — a database error occurred. Please try again or contact support.")
+			return
+		}
+		log.Printf("agentBook: %d plots booked for %s by %s", len(bookedPlotIDs), buyerName, agentName)
 		logBooking("PLOT_BOOKED", agentName, buyerName,
 			strings.Join(plotNumbers, ", ")+" — "+estateName,
 			fmt.Sprintf("Deposit: KES %s | Plan: %s | Docs: %v", deposit, paymentPlan, hasAllAttachments(bookingInfo{DepositRef: depositRef, IDPhoto: idPhoto, KRA: kra, PassportPhoto: passportPhoto})))
@@ -4015,12 +4037,17 @@ func cartCheckoutHandler(w http.ResponseWriter, r *http.Request, cartPath, recei
 	groups := map[int]*estateGroup{}
 
 	var newBookingIDs []int
+	var failedPlots []string
 	for _, cp := range plots {
-		if res, err := db.Exec(`INSERT INTO prop_bookings (plot_id, estate_id, buyer_name, buyer_phone, buyer_email, agent_name, deposit, payment_plan, deposit_ref, id_photo, kra, passport_photo, lead_source, notes, care_of, batch_ref, receipt_number, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active')`,
-			cp.ID, cp.EstateID, buyerName, buyerPhone, buyerEmail, agentName, deposit, paymentPlan, depositRef, idPhoto, kra, passportPhoto, leadSource, notes, careOf, batchRef, receiptNumber); err == nil {
-			if bid, err2 := res.LastInsertId(); err2 == nil {
-				newBookingIDs = append(newBookingIDs, int(bid))
-			}
+		res, err := db.Exec(`INSERT INTO prop_bookings (plot_id, estate_id, buyer_name, buyer_phone, buyer_email, agent_name, deposit, payment_plan, deposit_ref, id_photo, kra, passport_photo, lead_source, notes, care_of, batch_ref, receipt_number, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active')`,
+			cp.ID, cp.EstateID, buyerName, buyerPhone, buyerEmail, agentName, deposit, paymentPlan, depositRef, idPhoto, kra, passportPhoto, leadSource, notes, careOf, batchRef, receiptNumber)
+		if err != nil {
+			log.Printf("cartCheckout: booking insert failed for plot %d: %v", cp.ID, err)
+			failedPlots = append(failedPlots, cp.Number)
+			continue // no booking row exists for this plot — never mark it booked
+		}
+		if bid, err2 := res.LastInsertId(); err2 == nil {
+			newBookingIDs = append(newBookingIDs, int(bid))
 		}
 		db.Exec(`UPDATE prop_plots SET status='booked' WHERE id=?`, cp.ID)
 		logPlotStatus(cp.ID, cp.Number, cp.EstateName, cp.EstateID, "available", "booked", agentName, "booked")
@@ -4030,6 +4057,13 @@ func cartCheckoutHandler(w http.ResponseWriter, r *http.Request, cartPath, recei
 		}
 		groups[cp.EstateID].plotIDs = append(groups[cp.EstateID].plotIDs, cp.ID)
 		groups[cp.EstateID].plotNums = append(groups[cp.EstateID].plotNums, cp.Number)
+	}
+	if len(failedPlots) > 0 {
+		log.Printf("cartCheckout: FAILED to create booking record(s) for plot(s) %s — buyer=%s, left available/unchanged, not booked", strings.Join(failedPlots, ", "), buyerName)
+	}
+	if len(newBookingIDs) == 0 {
+		http.Redirect(w, r, cartPath+"?err=booking_failed", http.StatusFound)
+		return
 	}
 
 	for _, eg := range groups {
@@ -4043,8 +4077,8 @@ func cartCheckoutHandler(w http.ResponseWriter, r *http.Request, cartPath, recei
 	}
 
 	var allNums []string
-	for _, cp := range plots {
-		allNums = append(allNums, cp.Number)
+	for _, eg := range groups {
+		allNums = append(allNums, eg.plotNums...)
 	}
 	logBooking("PLOT_BOOKED", agentName, buyerName,
 		strings.Join(allNums, ", "),
