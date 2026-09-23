@@ -73,32 +73,37 @@
                     <option value="Other">Other</option>
                 </select>
             </div>
-            <div style="grid-column:1/-1;">
-                <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;font-size:12px;color:#92400e;">
-                    <strong>Payment reference is required to confirm booking.</strong>
-                    Other documents (ID, KRA, Passport) can be uploaded later.
-                    Email, Zoho CRM and Zoho Books will only be triggered once <em>all four</em> attachments are uploaded.
-                </div>
-            </div>
-            <div>
+        </div>
+
+        <div style="margin-top:12px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;font-size:12px;color:#92400e;">
+            <strong>Payment reference is required to confirm booking.</strong>
+            Other documents (ID, KRA, Passport) can be uploaded later.
+            Email, Zoho CRM and Zoho Books will only be triggered once <em>all four</em> attachments are uploaded.
+        </div>
+
+        <!-- Stacked (not side-by-side) on mobile via .upload-grid — a long
+             uploaded filename in a 2-up grid cell was forcing the row wider
+             than the screen instead of truncating. -->
+        <div class="upload-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-top:12px;">
+            <div style="min-width:0;">
                 <label>Deposit Reference <span style="color:#dc2626;">*</span></label>
                 <input type="file" id="fi-deposit_ref" name="deposit_ref" multiple accept="image/*,.pdf" required style="display:none;">
                 <div id="fl-deposit_ref" style="min-height:4px;margin-bottom:4px;overflow:hidden;"></div>
                 <button type="button" onclick="ppAdd('deposit_ref')" style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;width:100%;">+ Add File(s)</button>
             </div>
-            <div>
+            <div style="min-width:0;">
                 <label>ID Photo</label>
                 <input type="file" id="fi-id_photo" name="id_photo" multiple accept="image/*,.pdf" style="display:none;">
                 <div id="fl-id_photo" style="min-height:4px;margin-bottom:4px;overflow:hidden;"></div>
                 <button type="button" onclick="ppAdd('id_photo')" style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;width:100%;">+ Add File(s)</button>
             </div>
-            <div>
+            <div style="min-width:0;">
                 <label>KRA</label>
                 <input type="file" id="fi-kra" name="kra" multiple accept="image/*,.pdf" style="display:none;">
                 <div id="fl-kra" style="min-height:4px;margin-bottom:4px;overflow:hidden;"></div>
                 <button type="button" onclick="ppAdd('kra')" style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;width:100%;">+ Add File(s)</button>
             </div>
-            <div>
+            <div style="min-width:0;">
                 <label>Passport Photo</label>
                 <input type="file" id="fi-passport_photo" name="passport_photo" multiple accept="image/*,.pdf" style="display:none;">
                 <div id="fl-passport_photo" style="min-height:4px;margin-bottom:4px;overflow:hidden;"></div>
