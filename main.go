@@ -3544,12 +3544,17 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 
 	var totalEstates, totalAvailable, agentBooked, agentSaSigned, agentSold int
 	db.QueryRow(`SELECT COUNT(*) FROM prop_estates WHERE COALESCE(is_restricted,0)=0`).Scan(&totalEstates)
-	db.QueryRow(`SELECT COUNT(*) FROM prop_plots WHERE status='available'`).Scan(&totalAvailable)
+	db.QueryRow(`
+		SELECT COUNT(*) FROM prop_plots p
+		JOIN prop_estates e ON e.id = p.estate_id
+		WHERE p.status='available' AND COALESCE(e.is_restricted,0)=0`).Scan(&totalAvailable)
 	db.QueryRow(`SELECT COUNT(*) FROM prop_bookings WHERE agent_name=? AND status='active'`, agentName).Scan(&agentBooked)
 	db.QueryRow(`SELECT COUNT(*) FROM prop_bookings WHERE agent_name=? AND status='sa_signed'`, agentName).Scan(&agentSaSigned)
 	db.QueryRow(`SELECT COUNT(*) FROM prop_sales WHERE agent_name=?`, agentName).Scan(&agentSold)
 
-	// Per-estate chart data
+	// Per-estate chart data — private (is_restricted) estates are excluded,
+	// same as agentEstatesHandler and the admin dashboard; they have their
+	// own dedicated Private Estates page instead.
 	rows, _ := db.Query(`
 		SELECT e.name,
 			SUM(p.status='available'),
@@ -3557,6 +3562,7 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 			SUM(p.status='sold')
 		FROM prop_estates e
 		LEFT JOIN prop_plots p ON p.estate_id = e.id
+		WHERE COALESCE(e.is_restricted,0)=0
 		GROUP BY e.id, e.name ORDER BY e.name`)
 	var estates []string
 	var avail, booked, sold []int
