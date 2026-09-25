@@ -172,6 +172,7 @@ func main() {
 		func(r *http.Request) bool { return hasPermission(getUserID(r), "legal.access", "write") },
 		saveUploadedFiles, processSignedIntegrations, cancelBooksEstimate, sendReviewOutcomeEmail,
 		sendSentForSignatureSMS, sendAgreementSignedSMS)
+	legal.SetLogStatusFn(logPlotStatus)
 	initPermissionTables()
 	init2FATables()
 	initSchedulerTables()

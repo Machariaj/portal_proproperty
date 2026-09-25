@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -45,6 +46,16 @@ func initLoggers() {
 		log.Printf("logger: could not open bookings.log: %v", err)
 	} else {
 		bookingLogger = log.New(bf, "", 0)
+	}
+
+	// Route all log.* output to both stdout and app.log so `cat logs/app.log`
+	// shows everything: errors, status changes, Zoho calls, scheduler events.
+	appf, err := os.OpenFile(filepath.Join(logDir, "app.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Printf("logger: could not open app.log: %v", err)
+	} else {
+		log.SetOutput(io.MultiWriter(os.Stdout, appf))
+		log.SetFlags(log.LstdFlags)
 	}
 
 	log.Printf("logger: writing logs to %s", logDir)

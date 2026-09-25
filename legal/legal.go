@@ -27,6 +27,7 @@ var (
 	sendOutcome       func(outcome, plotNumber, estateName, buyerName, buyerPhone, agentName, notes string) error
 	sendSentForSigSMS func(bookingID string)
 	sendSignedSMS     func(bookingID string)
+	logStatusFn       func(plotID int, plotNumber, estateName string, estateID int, oldStatus, newStatus, changedBy, reason string)
 )
 
 // Init wires this package to the host app's shared dependencies. Two roles
@@ -68,6 +69,12 @@ func Init(
 	sendOutcome = sendOutcomeEmail
 	sendSentForSigSMS = sendSentForSignatureSMS
 	sendSignedSMS = sendAgreementSignedSMS
+}
+
+// SetLogStatusFn wires in the host's logPlotStatus function so the legal
+// package can record SA-signed transitions to prop_plot_status_log.
+func SetLogStatusFn(fn func(plotID int, plotNumber, estateName string, estateID int, oldStatus, newStatus, changedBy, reason string)) {
+	logStatusFn = fn
 }
 
 // scopeQuery narrows a queue query to what the current viewer is allowed to
@@ -636,6 +643,13 @@ func uploadAgreementHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	db.Exec(`UPDATE prop_plots SET status='sa_signed' WHERE id=?`, plotID)
+
+	if logStatusFn != nil {
+		detail0, err0 := loadReviewDetail(bookingID)
+		if err0 == nil {
+			logStatusFn(plotID, detail0.PlotNumber, detail0.EstateName, detail0.EstateID, "booked", "sa_signed", reviewer, "legal signed")
+		}
+	}
 
 	detail, derr := loadReviewDetail(bookingID)
 	if derr == nil {
