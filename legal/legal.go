@@ -228,7 +228,7 @@ func applyListFilters(r *http.Request, dateCol, query string, args []any) (strin
 		args = append(args, fEstate)
 	}
 	if fLawyer := q.Get("lawyer"); fLawyer != "" {
-		query += ` AND e.lawyer_id = ?`
+		query += ` AND COALESCE(b.lawyer_id, e.lawyer_id) = ?`
 		args = append(args, fLawyer)
 	}
 	if fFrom := q.Get("date_from"); fFrom != "" {
@@ -331,7 +331,7 @@ func queueHandler(w http.ResponseWriter, r *http.Request) {
 		FROM prop_bookings b
 		JOIN prop_plots p ON p.id = b.plot_id
 		JOIN prop_estates e ON e.id = b.estate_id
-		LEFT JOIN prop_agents lw ON lw.id = e.lawyer_id
+		LEFT JOIN prop_agents lw ON lw.id = COALESCE(b.lawyer_id, e.lawyer_id)
 		WHERE b.status = 'pending_wakili_review' AND b.legal_stage = 'drafting'`
 	query, args := scopeQuery(r, query, nil)
 	query, args = applyListFilters(r, "b.accounts_reviewed_at", query, args)
@@ -374,7 +374,7 @@ func awaitingSignatureHandler(w http.ResponseWriter, r *http.Request) {
 		FROM prop_bookings b
 		JOIN prop_plots p ON p.id = b.plot_id
 		JOIN prop_estates e ON e.id = b.estate_id
-		LEFT JOIN prop_agents lw ON lw.id = e.lawyer_id
+		LEFT JOIN prop_agents lw ON lw.id = COALESCE(b.lawyer_id, e.lawyer_id)
 		WHERE b.status = 'pending_wakili_review' AND b.legal_stage = 'awaiting_signature'`
 	query, args := scopeQuery(r, query, nil)
 	query, args = applyListFilters(r, "b.sent_for_signature_at", query, args)
@@ -430,7 +430,7 @@ func completedHandler(w http.ResponseWriter, r *http.Request) {
 		FROM prop_bookings b
 		JOIN prop_plots p ON p.id = b.plot_id
 		JOIN prop_estates e ON e.id = b.estate_id
-		LEFT JOIN prop_agents lw ON lw.id = e.lawyer_id
+		LEFT JOIN prop_agents lw ON lw.id = COALESCE(b.lawyer_id, e.lawyer_id)
 		WHERE b.status IN ('sa_signed','completed')`
 	var args []any
 	if month != "" {
@@ -546,7 +546,7 @@ func loadReviewDetail(bookingID string) (reviewDetail, error) {
 		JOIN prop_plots p ON p.id = b.plot_id
 		JOIN prop_estates e ON e.id = b.estate_id
 		LEFT JOIN prop_agents a ON a.name = b.agent_name
-		LEFT JOIN prop_agents lw ON lw.id = e.lawyer_id
+		LEFT JOIN prop_agents lw ON lw.id = COALESCE(b.lawyer_id, e.lawyer_id)
 		WHERE b.id = ?`, bookingID).
 		Scan(&d.BookingID, &d.BuyerName, &d.BuyerPhone, &d.BuyerEmail,
 			&d.AgentName, &d.AgentPhone, &d.AgentEmail,
