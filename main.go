@@ -259,6 +259,7 @@ func main() {
 	initWhatsAppLog()
 	initPlotStatusLog()
 	startOverdueBookingChecker()
+	startDailyNotifier()
 	startPaymentPlanSync()
 
 	pageTemplates = map[string]*template.Template{

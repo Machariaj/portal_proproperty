@@ -49,27 +49,45 @@ func initSchedulerTables() {
 	db.Exec(`ALTER TABLE prop_booking_sms_reminders CHANGE COLUMN days_elapsed days_remaining INT NOT NULL`)
 }
 
+var eat = time.FixedZone("EAT", 3*60*60)
+
 // startOverdueBookingChecker fires every 30 minutes to:
-//  1. Send warning emails for plots booked exactly 12 or 13 days ago.
-//  2. Send the buyer a daily SMS reminder from day 10 through day 14.
-//  3. Auto-switch plots booked >14 days back to 'available' and notify.
-//  4. Sweep 'active' bookings that now qualify for Accounts but never got
+//  1. Auto-switch plots past their deadline back to 'available' and notify.
+//  2. Sweep 'active' bookings that now qualify for Accounts but never got
 //     swept — see sweepQualifiedBookings.
+//
+// Warning emails and buyer SMS reminders (checkWarningBookings,
+// checkClientReminderSMS) are sent once daily at 08:00 EAT instead —
+// see startDailyNotifier.
 func startOverdueBookingChecker() {
 	go func() {
 		// Run once immediately on startup, then every 30 minutes.
-		checkWarningBookings()
-		checkClientReminderSMS()
 		checkOverdueBookings()
 		sweepQualifiedBookings()
 
 		ticker := time.NewTicker(30 * time.Minute)
 		defer ticker.Stop()
 		for range ticker.C {
-			checkWarningBookings()
-			checkClientReminderSMS()
 			checkOverdueBookings()
 			sweepQualifiedBookings()
+		}
+	}()
+}
+
+// startDailyNotifier sends expiry warning emails and buyer/agent SMS reminders
+// once per day at 08:00 EAT, regardless of when the server started.
+func startDailyNotifier() {
+	go func() {
+		for {
+			now := time.Now().In(eat)
+			next := time.Date(now.Year(), now.Month(), now.Day(), 8, 0, 0, 0, eat)
+			if !next.After(now) {
+				next = next.Add(24 * time.Hour)
+			}
+			time.Sleep(time.Until(next))
+			log.Printf("[scheduler] 08:00 EAT — running daily expiry notifications")
+			checkWarningBookings()
+			checkClientReminderSMS()
 		}
 	}()
 }
