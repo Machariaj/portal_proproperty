@@ -62,7 +62,6 @@ func startOverdueBookingChecker() {
 		checkClientReminderSMS()
 		checkOverdueBookings()
 		sweepQualifiedBookings()
-		repairExpiredPlots()
 
 		ticker := time.NewTicker(30 * time.Minute)
 		defer ticker.Stop()
@@ -71,7 +70,6 @@ func startOverdueBookingChecker() {
 			checkClientReminderSMS()
 			checkOverdueBookings()
 			sweepQualifiedBookings()
-			repairExpiredPlots()
 		}
 	}()
 }
@@ -626,27 +624,5 @@ func checkOverdueBookings() {
 				go vanbooking.SendSMS(r.BuyerPhone, msg)
 			}
 		}
-	}
-}
-
-// repairExpiredPlots is a safety net for the rare case where checkOverdueBookings
-// set a booking to 'expired' but the corresponding plot update to 'available' was
-// lost (e.g. a mid-tick DB hiccup). It finds any plot still marked 'booked' whose
-// latest booking is already 'expired', and releases it.
-func repairExpiredPlots() {
-	res, err := db.Exec(`
-		UPDATE prop_plots p
-		JOIN prop_bookings b ON b.plot_id = p.id
-		JOIN (SELECT plot_id, MAX(id) AS latest_id FROM prop_bookings GROUP BY plot_id) latest
-		  ON b.id = latest.latest_id
-		SET p.status = 'available'
-		WHERE b.status = 'expired'
-		  AND p.status  = 'booked'`)
-	if err != nil {
-		log.Printf("[scheduler] repair-expired-plots error: %v", err)
-		return
-	}
-	if n, _ := res.RowsAffected(); n > 0 {
-		log.Printf("[scheduler] repair-expired-plots: released %d plot(s) stuck in booked/expired state", n)
 	}
 }
