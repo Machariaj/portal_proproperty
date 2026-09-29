@@ -10,6 +10,7 @@ import (
 	"log"
 	"maps"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -83,7 +84,8 @@ func SetLogStatusFn(fn func(plotID int, plotNumber, estateName string, estateID 
 // isAssignedLawyer's use as the action gate below).
 func scopeQuery(r *http.Request, query string, args []any) (string, []any) {
 	if getRoleFn(r) == "legal" {
-		return query + ` AND e.lawyer_id = ?`, append(args, getUserIDFn(r))
+		// COALESCE: booking-level lawyer override wins over estate-level default.
+		return query + ` AND COALESCE(b.lawyer_id, e.lawyer_id) = ?`, append(args, getUserIDFn(r))
 	}
 	return query, args // admin, system_admin
 }
@@ -95,14 +97,28 @@ func scopeQuery(r *http.Request, query string, args []any) (string, []any) {
 // Use canAct (below), not this, to gate the mutating handlers — it also
 // admits an admin explicitly granted the "Legal Module" write permission.
 func isAssignedLawyer(r *http.Request, estateID int) bool {
+	return isAssignedLawyerForBooking(r, 0, estateID)
+}
+
+// isAssignedLawyerForBooking checks the booking-level lawyer override first
+// (prop_bookings.lawyer_id), falling back to the estate-level default.
+// Pass bookingID=0 to skip the booking check (e.g. for list-level scoping).
+func isAssignedLawyerForBooking(r *http.Request, bookingID, estateID int) bool {
 	if isSystemAdminFn(r) {
 		return true
+	}
+	uid := getUserIDFn(r)
+	if bookingID > 0 {
+		var overrideLawyerID string
+		if db.QueryRow(`SELECT COALESCE(lawyer_id,'') FROM prop_bookings WHERE id=?`, bookingID).Scan(&overrideLawyerID) == nil && overrideLawyerID != "" && overrideLawyerID != "0" {
+			return overrideLawyerID == uid
+		}
 	}
 	var lawyerID string
 	if err := db.QueryRow(`SELECT COALESCE(lawyer_id,0) FROM prop_estates WHERE id=?`, estateID).Scan(&lawyerID); err != nil {
 		return false
 	}
-	return lawyerID == getUserIDFn(r)
+	return lawyerID == uid
 }
 
 // canAct reports whether the current user may act on (not just view) a
@@ -113,7 +129,11 @@ func isAssignedLawyer(r *http.Request, estateID int) bool {
 // This is the action gate for the three mutating handlers below and for the
 // CanAct template flag.
 func canAct(r *http.Request, estateID int) bool {
-	if isAssignedLawyer(r, estateID) {
+	return canActForBooking(r, 0, estateID)
+}
+
+func canActForBooking(r *http.Request, bookingID, estateID int) bool {
+	if isAssignedLawyerForBooking(r, bookingID, estateID) {
 		return true
 	}
 	return hasWritePermFn != nil && hasWritePermFn(r)
@@ -122,11 +142,15 @@ func canAct(r *http.Request, estateID int) bool {
 // canView reports whether the current viewer may see a booking on the given
 // estate — the assigned lawyer, system_admin, or any admin (full oversight).
 func canView(r *http.Request, estateID int) bool {
+	return canViewForBooking(r, 0, estateID)
+}
+
+func canViewForBooking(r *http.Request, bookingID, estateID int) bool {
 	switch getRoleFn(r) {
 	case "system_admin", "admin":
 		return true
 	case "legal":
-		return isAssignedLawyer(r, estateID)
+		return isAssignedLawyerForBooking(r, bookingID, estateID)
 	default:
 		return false
 	}
@@ -546,7 +570,8 @@ func reviewDetailHandler(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if !canView(r, detail.EstateID) {
+	bid, _ := strconv.Atoi(bookingID)
+	if !canViewForBooking(r, bid, detail.EstateID) {
 		http.Error(w, "Access denied — you don't have visibility into this booking.", http.StatusForbidden)
 		return
 	}
@@ -559,12 +584,7 @@ func reviewDetailHandler(w http.ResponseWriter, r *http.Request) {
 		"Active": active,
 		"Info":   detail,
 		"Error":  r.URL.Query().Get("err"),
-		// Admin/agent get read-only visibility by default — the action forms
-		// below are hidden for them, not just blocked server-side (canAct
-		// already rejects the POST regardless, but showing a button that
-		// would just 403 on click is bad UX) — unless this admin has been
-		// explicitly granted the Legal Module write permission.
-		"CanAct": canAct(r, detail.EstateID),
+		"CanAct": canActForBooking(r, bid, detail.EstateID),
 	})
 }
 
@@ -584,7 +604,8 @@ func sendForSignatureHandler(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/legal/queue?err=Booking+already+moved", http.StatusFound)
 		return
 	}
-	if !canAct(r, estateID) {
+	bid, _ := strconv.Atoi(bookingID)
+	if !canActForBooking(r, bid, estateID) {
 		http.Error(w, "Access denied — this estate is not assigned to you.", http.StatusForbidden)
 		return
 	}
@@ -625,7 +646,8 @@ func uploadAgreementHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	var estateIDForCheck int
 	db.QueryRow(`SELECT estate_id FROM prop_bookings WHERE id=?`, bookingID).Scan(&estateIDForCheck)
-	if !canAct(r, estateIDForCheck) {
+	bid2, _ := strconv.Atoi(bookingID)
+	if !canActForBooking(r, bid2, estateIDForCheck) {
 		http.Error(w, "Access denied — this estate is not assigned to you.", http.StatusForbidden)
 		return
 	}

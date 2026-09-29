@@ -207,6 +207,7 @@ func main() {
 	// specific prop_agents row with role='legal'. Loosely referenced (no FK
 	// constraint), matching the pattern used elsewhere in this schema.
 	db.Exec(`ALTER TABLE prop_estates ADD COLUMN lawyer_id INT DEFAULT NULL`)
+	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN lawyer_id INT DEFAULT NULL`)
 	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN accounts_notes TEXT DEFAULT NULL`)
 	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN accounts_reviewed_by VARCHAR(255) DEFAULT NULL`)
 	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN accounts_reviewed_at TIMESTAMP NULL DEFAULT NULL`)
