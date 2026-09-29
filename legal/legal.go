@@ -327,7 +327,7 @@ type queueRow struct {
 func queueHandler(w http.ResponseWriter, r *http.Request) {
 	query := `
 		SELECT b.id, b.buyer_name, COALESCE(b.agent_name,''), e.name, p.plot_number,
-		       COALESCE(DATE_FORMAT(b.accounts_reviewed_at,'%d %b %Y %h:%i %p'),'—'), COALESCE(lw.name,'')
+		       COALESCE(DATE_FORMAT(CONVERT_TZ(b.accounts_reviewed_at,'+00:00','+03:00'),'%d %b %Y %h:%i %p'),'—'), COALESCE(lw.name,'')
 		FROM prop_bookings b
 		JOIN prop_plots p ON p.id = b.plot_id
 		JOIN prop_estates e ON e.id = b.estate_id
@@ -370,7 +370,7 @@ func queueHandler(w http.ResponseWriter, r *http.Request) {
 func awaitingSignatureHandler(w http.ResponseWriter, r *http.Request) {
 	query := `
 		SELECT b.id, b.buyer_name, COALESCE(b.agent_name,''), e.name, p.plot_number,
-		       COALESCE(DATE_FORMAT(b.sent_for_signature_at,'%d %b %Y %h:%i %p'),'—'), COALESCE(lw.name,'')
+		       COALESCE(DATE_FORMAT(CONVERT_TZ(b.sent_for_signature_at,'+00:00','+03:00'),'%d %b %Y %h:%i %p'),'—'), COALESCE(lw.name,'')
 		FROM prop_bookings b
 		JOIN prop_plots p ON p.id = b.plot_id
 		JOIN prop_estates e ON e.id = b.estate_id
