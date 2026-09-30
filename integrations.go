@@ -1666,21 +1666,21 @@ func sendSentForSignatureSMS(bookingID string) {
 	if !notifyBuyerEnabled() && !notifyAgentEnabled() {
 		return
 	}
-	buyerName, buyerPhone, agentName, agentPhone, plotNumber, estateName, err := fetchNotifySMSInfo(bookingID)
+	buyerName, buyerPhone, _, agentPhone, plotNumber, estateName, err := fetchNotifySMSInfo(bookingID)
 	if err != nil {
 		log.Printf("[sms] sent-for-signature fetch error booking=%s: %v", bookingID, err)
 		return
 	}
 	if notifyBuyerEnabled() && buyerPhone != "" {
 		msg := fmt.Sprintf(
-			"Dear %s, your sale agreement for Plot %s at %s has been prepared and sent for your signature. Please contact %s to sign and return it. - Pro-Property",
-			buyerName, plotNumber, estateName, agentName,
+			"Dear %s, your sale agreement for Plot %s at %s has been prepared and sent for your signature. Evalyn our Assistant Sales Manager will contact you on 254717595785 to guide on how to proceed with signing the sale agreement. - Pro-Property",
+			buyerName, plotNumber, estateName,
 		)
 		go vanbooking.SendSMS(buyerPhone, msg)
 	}
 	if notifyAgentEnabled() && agentPhone != "" {
 		msg := fmt.Sprintf(
-			"The sale agreement for %s's Plot %s at %s is ready for signature — please coordinate with the client. - Pro-Property",
+			"The sale agreement for %s's Plot %s at %s is ready for signature — please coordinate with the Assistant Sales Manager to have them sign. - Pro-Property",
 			buyerName, plotNumber, estateName,
 		)
 		go vanbooking.SendSMS(agentPhone, msg)
