@@ -178,7 +178,8 @@ func main() {
 	initSchedulerTables()
 	initAppSettingsTables()
 	initPaymentPlanTables()
-	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN booking_deadline DATE DEFAULT NULL`)
+	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN booking_deadline DATETIME DEFAULT NULL`)
+	db.Exec(`ALTER TABLE prop_bookings MODIFY COLUMN booking_deadline DATETIME DEFAULT NULL`)
 	db.Exec(`ALTER TABLE prop_estates ADD COLUMN plot_price DECIMAL(15,2) DEFAULT NULL`)
 	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN zoho_books_id VARCHAR(64) DEFAULT NULL`)
 	db.Exec(`ALTER TABLE prop_bookings ADD COLUMN zoho_crm_id VARCHAR(64) DEFAULT NULL`)
@@ -2488,12 +2489,14 @@ func extendBookingHandler(w http.ResponseWriter, r *http.Request) {
 		redirectBack(w, r, "/admin/booked-plots", "booking-"+bookingID)
 		return
 	}
-	// Extend: move deadline forward by N days from current deadline (or date_booked+14 if none set)
+	// Extend: push the deadline date forward by N days, keeping the wall-clock
+	// time as NOW() so the booking expires at the same time of day the
+	// extension was made — not at midnight.
 	db.Exec(`
 		UPDATE prop_bookings
-		SET booking_deadline = DATE_ADD(
-			COALESCE(booking_deadline, DATE_ADD(date_booked, INTERVAL 14 DAY)),
-			INTERVAL ? DAY
+		SET booking_deadline = TIMESTAMP(
+			DATE(DATE_ADD(COALESCE(booking_deadline, DATE_ADD(date_booked, INTERVAL 14 DAY)), INTERVAL ? DAY)),
+			TIME(NOW())
 		)
 		WHERE id = ?`, days, bookingID)
 
