@@ -819,39 +819,39 @@ func runBackfillInstallments(args []string) {
 // Tesseract directly for images. Parsed with the existing installmentLineRe
 // regex, so the schedule must use the standard "Kshs X/- shall be paid on or
 // before DATE" wording used by both current lawyer templates.
-func tesseractExtractInstallments(path, ext string) ([]installmentRow, error) {
+// Returns the parsed rows AND the raw OCR text so the caller can show it.
+func tesseractExtractInstallments(path, ext string) (rows []installmentRow, rawText string, err error) {
 	var text string
 
 	switch strings.ToLower(ext) {
 	case ".pdf":
 		var method string
-		var err error
 		text, method, err = extractSaleAgreementText(path, "")
 		if err != nil {
-			return nil, fmt.Errorf("PDF text extraction: %w", err)
+			return nil, "", fmt.Errorf("PDF text extraction: %w", err)
 		}
 		log.Printf("[installments-ocr] PDF via %s: %d chars", method, len(text))
 	default:
 		// Image file — preprocess then run Tesseract directly.
 		ocrTarget := path
-		if cleaned, err := preprocessForOCR(path); err != nil {
-			log.Printf("[installments-ocr] preprocessing skipped: %v", err)
+		if cleaned, cerr := preprocessForOCR(path); cerr != nil {
+			log.Printf("[installments-ocr] preprocessing skipped: %v", cerr)
 		} else {
 			ocrTarget = cleaned
 			defer os.Remove(cleaned)
 		}
-		out, err := exec.Command("tesseract", ocrTarget, "stdout", "-l", "eng").Output()
-		if err != nil {
-			return nil, fmt.Errorf("tesseract: %w", err)
+		out, terr := exec.Command("tesseract", ocrTarget, "stdout", "-l", "eng").Output()
+		if terr != nil {
+			return nil, "", fmt.Errorf("tesseract: %w", terr)
 		}
 		text = string(out)
 		log.Printf("[installments-ocr] tesseract image: %d chars", len(text))
 	}
 
 	section := isolatePaymentSection(path, text)
-	rows := parseInstallmentSchedule(section)
+	rows = parseInstallmentSchedule(section)
 	for i := range rows {
 		rows[i].Number = i + 1
 	}
-	return rows, nil
+	return rows, text, nil
 }

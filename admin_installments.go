@@ -101,7 +101,7 @@ func adminInstallmentsExtract(w http.ResponseWriter, r *http.Request, info instB
 	}
 	file, header, err := r.FormFile("schedule")
 	if err != nil {
-		renderInstPage(w, r, info, nil, "No file uploaded — please choose an image or PDF.")
+		renderInstPage(w, r, info, nil, "", "No file uploaded — please choose an image or PDF.")
 		return
 	}
 	defer file.Close()
@@ -126,18 +126,18 @@ func adminInstallmentsExtract(w http.ResponseWriter, r *http.Request, info instB
 	}
 	tmp.Close()
 
-	rows, err := tesseractExtractInstallments(tmpPath, ext)
+	rows, rawText, err := tesseractExtractInstallments(tmpPath, ext)
 	if err != nil {
 		log.Printf("[installments-extract] booking %d: %v", info.BookingID, err)
-		renderInstPage(w, r, info, nil, "Extraction failed: "+err.Error())
+		renderInstPage(w, r, info, nil, "", "Extraction failed: "+err.Error())
 		return
 	}
 	if len(rows) == 0 {
-		renderInstPage(w, r, info, nil, "No installments found in the image. Check the image is clear and try again.")
+		renderInstPage(w, r, info, nil, rawText, "No installments found in the image. Check the image quality and try again.")
 		return
 	}
-	log.Printf("[installments-extract] booking %d: extracted %d row(s) via Claude Vision", info.BookingID, len(rows))
-	renderInstPage(w, r, info, toDisplay(rows), "")
+	log.Printf("[installments-extract] booking %d: extracted %d row(s) via tesseract", info.BookingID, len(rows))
+	renderInstPage(w, r, info, toDisplay(rows), rawText, "")
 }
 
 func adminInstallmentsPush(w http.ResponseWriter, r *http.Request, info instBookingInfo) {
@@ -185,13 +185,14 @@ func adminInstallmentsPush(w http.ResponseWriter, r *http.Request, info instBook
 	http.Redirect(w, r, fmt.Sprintf("/admin/installments/%d?ok=1", info.BookingID), http.StatusFound)
 }
 
-func renderInstPage(w http.ResponseWriter, r *http.Request, info instBookingInfo, rows []instRowDisplay, errMsg string) {
+func renderInstPage(w http.ResponseWriter, r *http.Request, info instBookingInfo, rows []instRowDisplay, rawText, errMsg string) {
 	renderAdmin(w, r, "admin_installments.html", map[string]any{
 		"Title":    "Installment Schedule",
 		"Active":   "signed-plots",
 		"Booking":  info,
 		"Rows":     rows,
 		"RowCount": len(rows),
+		"RawText":  rawText,
 		"Error":    errMsg,
 	})
 }

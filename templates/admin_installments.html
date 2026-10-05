@@ -33,30 +33,43 @@
 
 {{ if .Rows }}
 <!-- ── Stage 2: Review & Push ─────────────────────────────────────────── -->
+
+{{ if .RawText }}
+<!-- OCR raw text (collapsible) -->
+<details style="margin-bottom:16px;">
+    <summary style="cursor:pointer;font-size:13px;font-weight:600;color:#4f46e5;padding:10px 16px;background:#f5f3ff;border:1px solid #c4b5fd;border-radius:8px;">
+        View raw OCR text ({{ len .RawText }} chars)
+    </summary>
+    <pre style="margin:0;padding:14px 16px;background:#fafafa;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;font-size:11px;line-height:1.6;white-space:pre-wrap;word-break:break-word;max-height:300px;overflow-y:auto;color:#374151;">{{ .RawText }}</pre>
+</details>
+{{ end }}
+
 <div class="card" style="margin-bottom:16px;">
     <h3 style="margin:0 0 14px;font-size:15px;">Extracted Installments — Review &amp; Edit Before Pushing</h3>
-    <form method="POST" action="/admin/installments/{{ .Booking.BookingID }}">
+    <form method="POST" action="/admin/installments/{{ .Booking.BookingID }}" id="instForm">
         <input type="hidden" name="action" value="push">
-        <input type="hidden" name="count" value="{{ .RowCount }}">
+        <input type="hidden" name="count" id="rowCount" value="{{ .RowCount }}">
         <div class="table-responsive">
-            <table>
+            <table id="instTable">
                 <thead>
                     <tr>
                         <th>#</th>
                         <th>Amount (KES)</th>
                         <th>Due Date</th>
                         <th>Description</th>
+                        <th></th>
                     </tr>
                 </thead>
                 <tbody>
                     {{ range $i, $r := .Rows }}
-                    <tr>
+                    <tr data-row="{{ $i }}">
                         <td>
                             <input type="hidden" name="number_{{ $i }}" value="{{ $r.Number }}">
-                            {{ $r.Number }}
+                            <span class="row-num">{{ $r.Number }}</span>
                         </td>
                         <td>
                             <input type="number" step="0.01" min="0" name="amount_{{ $i }}" value="{{ $r.Amount }}"
+                                   oninput="updateTotal()"
                                    style="width:130px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;" required>
                         </td>
                         <td>
@@ -67,9 +80,23 @@
                             <input type="text" name="description_{{ $i }}" value="{{ $r.Description }}"
                                    style="width:200px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
                         </td>
+                        <td>
+                            <button type="button" onclick="deleteRow(this)"
+                                    style="background:#ef4444;color:#fff;border:none;border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer;">
+                                Delete
+                            </button>
+                        </td>
                     </tr>
                     {{ end }}
                 </tbody>
+                <tfoot>
+                    <tr style="background:#f9fafb;font-weight:600;">
+                        <td colspan="2" style="text-align:right;padding:8px 10px;font-size:13px;">
+                            Total: <span id="grandTotal">—</span>
+                        </td>
+                        <td colspan="3"></td>
+                    </tr>
+                </tfoot>
             </table>
         </div>
         <div style="margin-top:14px;display:flex;gap:10px;align-items:center;">
@@ -84,6 +111,40 @@
         </div>
     </form>
 </div>
+
+<script>
+function updateTotal() {
+    let total = 0;
+    document.querySelectorAll('#instTable tbody input[name^="amount_"]').forEach(function(inp) {
+        total += parseFloat(inp.value) || 0;
+    });
+    document.getElementById('grandTotal').textContent =
+        'KES ' + total.toLocaleString('en-KE', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+
+function deleteRow(btn) {
+    btn.closest('tr').remove();
+    reindex();
+    updateTotal();
+}
+
+function reindex() {
+    const rows = document.querySelectorAll('#instTable tbody tr');
+    rows.forEach(function(row, i) {
+        row.dataset.row = i;
+        row.querySelectorAll('[name]').forEach(function(inp) {
+            inp.name = inp.name.replace(/_\d+$/, '_' + i);
+        });
+        const numSpan = row.querySelector('.row-num');
+        if (numSpan) numSpan.textContent = i + 1;
+    });
+    document.getElementById('rowCount').value = rows.length;
+}
+
+// Compute total on page load.
+updateTotal();
+</script>
+
 {{ else }}
 <!-- ── Stage 1: Upload ────────────────────────────────────────────────── -->
 <div class="card">
@@ -92,6 +153,15 @@
         Upload a clear photo or scan of the installment schedule page.
         Supported formats: JPG, PNG, WEBP, PDF.
     </p>
+    {{ if .RawText }}
+    <!-- Show raw text even when no rows matched, so user can diagnose -->
+    <details style="margin-bottom:16px;">
+        <summary style="cursor:pointer;font-size:13px;font-weight:600;color:#d97706;padding:10px 16px;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;">
+            OCR read this text but found no installment rows — click to inspect
+        </summary>
+        <pre style="margin:0;padding:14px 16px;background:#fafafa;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;font-size:11px;line-height:1.6;white-space:pre-wrap;word-break:break-word;max-height:300px;overflow-y:auto;color:#374151;">{{ .RawText }}</pre>
+    </details>
+    {{ end }}
     <form method="POST" action="/admin/installments/{{ .Booking.BookingID }}" enctype="multipart/form-data">
         <input type="hidden" name="action" value="extract">
         <div style="display:flex;flex-direction:column;gap:10px;max-width:400px;">
