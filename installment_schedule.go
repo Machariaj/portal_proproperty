@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -18,11 +19,13 @@ import (
 	"time"
 )
 
-// installmentRow is one payment due date extracted from a sale agreement's
-// payment schedule clause.
+// installmentRow is one payment due date extracted from a sale agreement or
+// an installment schedule image.
 type installmentRow struct {
-	Amount  float64
-	DueDate time.Time
+	Number      int
+	Amount      float64
+	DueDate     time.Time
+	Description string
 }
 
 // parsePageRange parses an optional "5" or "5-6" page spec (as entered on
@@ -376,16 +379,25 @@ func createCRMInstallments(dealID string, rows []installmentRow) error {
 	}
 
 	data := make([]map[string]any, 0, len(rows))
-	for _, r := range rows {
+	for i, r := range rows {
 		due := time.Date(r.DueDate.Year(), r.DueDate.Month(), r.DueDate.Day(), 0, 0, 0, 0, time.Local)
-		data = append(data, map[string]any{
+		num := r.Number
+		if num == 0 {
+			num = i + 1
+		}
+		row := map[string]any{
+			"Name":         fmt.Sprintf("Installment %d", num),
 			"Due_Date":     due.Format(time.RFC3339),
 			"Amount":       r.Amount,
 			"Status":       "Pending",
 			"Deals":        map[string]any{"id": dealID},
 			"Related_Deal": map[string]any{"id": dealID},
 			"Lookup":       map[string]any{"id": dealID},
-		})
+		}
+		if r.Description != "" {
+			row["Description"] = r.Description
+		}
+		data = append(data, row)
 	}
 	body, _ := json.Marshal(map[string]any{"data": data})
 
@@ -798,4 +810,145 @@ func runBackfillInstallments(args []string) {
 	log.Printf("[backfill-installments] finished: %d checked, %d pushed, %d already had installments, %d had zero parseable rows, %d failed verification (mismatch/unreadable balance), %d failed",
 		checked, pushed, alreadyHas, noRows, unverified, failed)
 	os.Exit(0)
+}
+
+// ── Claude Vision extraction ──────────────────────────────────────────────────
+
+// claudeExtractInstallments sends the file at path to the Claude Vision API
+// and returns the installment rows it finds. For PDFs the first page is
+// rasterised to PNG with pdftoppm before the API call; images are sent
+// directly. Requires ANTHROPIC_API_KEY to be set in the environment.
+func claudeExtractInstallments(path, ext string) ([]installmentRow, error) {
+	apiKey := os.Getenv("ANTHROPIC_API_KEY")
+	if apiKey == "" {
+		return nil, fmt.Errorf("ANTHROPIC_API_KEY not set on the server")
+	}
+
+	imgPath := path
+	mediaType := "image/jpeg"
+
+	switch strings.ToLower(ext) {
+	case ".pdf":
+		// Rasterise the first page to PNG.
+		tmpDir, err := os.MkdirTemp("", "inst-pdf-*")
+		if err != nil {
+			return nil, fmt.Errorf("mkdtemp: %w", err)
+		}
+		defer os.RemoveAll(tmpDir)
+		prefix := filepath.Join(tmpDir, "page")
+		if out, err := exec.Command("pdftoppm", "-r", "200", "-png", "-f", "1", "-l", "1", path, prefix).CombinedOutput(); err != nil {
+			return nil, fmt.Errorf("pdftoppm: %w: %s", err, string(out))
+		}
+		pages, _ := filepath.Glob(prefix + "-*.png")
+		if len(pages) == 0 {
+			return nil, fmt.Errorf("pdftoppm produced no output")
+		}
+		imgPath = pages[0]
+		mediaType = "image/png"
+	case ".png":
+		mediaType = "image/png"
+	case ".webp":
+		mediaType = "image/webp"
+	case ".gif":
+		mediaType = "image/gif"
+	default:
+		mediaType = "image/jpeg"
+	}
+
+	imgBytes, err := os.ReadFile(imgPath)
+	if err != nil {
+		return nil, fmt.Errorf("read image: %w", err)
+	}
+	encoded := base64.StdEncoding.EncodeToString(imgBytes)
+
+	prompt := `Extract all installment payment rows from this payment schedule image.
+Return ONLY a JSON array — no markdown, no explanation, nothing else.
+Each object must have exactly these fields:
+  "number"      : installment number (integer, starting from 1)
+  "amount"      : amount in KES as a plain number (no commas, no currency symbol)
+  "due_date"    : date in YYYY-MM-DD format
+  "description" : any note or label for this row (empty string if none)
+
+Example output:
+[{"number":1,"amount":50000,"due_date":"2026-11-01","description":""},{"number":2,"amount":50000,"due_date":"2026-12-01","description":"Final"}]`
+
+	payload := map[string]any{
+		"model":      "claude-haiku-4-5-20251001",
+		"max_tokens": 1024,
+		"messages": []map[string]any{{
+			"role": "user",
+			"content": []map[string]any{
+				{
+					"type": "image",
+					"source": map[string]any{
+						"type":       "base64",
+						"media_type": mediaType,
+						"data":       encoded,
+					},
+				},
+				{"type": "text", "text": prompt},
+			},
+		}},
+	}
+
+	body, _ := json.Marshal(payload)
+	req, _ := http.NewRequest("POST", "https://api.anthropic.com/v1/messages", bytes.NewReader(body))
+	req.Header.Set("x-api-key", apiKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("Claude API request: %w", err)
+	}
+	defer resp.Body.Close()
+	rb, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("Claude API HTTP %d: %s", resp.StatusCode, string(rb))
+	}
+
+	var apiResp struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(rb, &apiResp); err != nil || len(apiResp.Content) == 0 {
+		return nil, fmt.Errorf("parse Claude response: %v (body: %s)", err, string(rb))
+	}
+
+	text := strings.TrimSpace(apiResp.Content[0].Text)
+	// Strip markdown code fences if Claude added them.
+	if i := strings.Index(text, "["); i > 0 {
+		text = text[i:]
+	}
+	if i := strings.LastIndex(text, "]"); i >= 0 && i < len(text)-1 {
+		text = text[:i+1]
+	}
+
+	var raw []struct {
+		Number      int     `json:"number"`
+		Amount      float64 `json:"amount"`
+		DueDate     string  `json:"due_date"`
+		Description string  `json:"description"`
+	}
+	if err := json.Unmarshal([]byte(text), &raw); err != nil {
+		return nil, fmt.Errorf("parse installments JSON: %w (text: %s)", err, text)
+	}
+
+	var rows []installmentRow
+	for _, r := range raw {
+		due, err := time.Parse("2006-01-02", r.DueDate)
+		if err != nil {
+			log.Printf("[claude-installments] bad date %q: %v", r.DueDate, err)
+			continue
+		}
+		rows = append(rows, installmentRow{
+			Number:      r.Number,
+			Amount:      r.Amount,
+			DueDate:     due,
+			Description: r.Description,
+		})
+	}
+	return rows, nil
 }

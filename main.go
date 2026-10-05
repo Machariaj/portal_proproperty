@@ -273,6 +273,7 @@ func main() {
 		"admin_estates.html":               mustParse("templates/admin_base.html", "templates/admin_estates.html"),
 		"admin_booked_plots.html":          mustParse("templates/admin_base.html", "templates/admin_booked_plots.html"),
 		"admin_signed_plots.html":          mustParse("templates/admin_base.html", "templates/admin_signed_plots.html"),
+		"admin_installments.html":          mustParse("templates/admin_base.html", "templates/admin_installments.html"),
 		"admin_sold_plots.html":            mustParse("templates/admin_base.html", "templates/admin_sold_plots.html"),
 		"admin_placeholder.html":           mustParse("templates/admin_base.html", "templates/admin_placeholder.html"),
 		"admin_estate_detail.html":         mustParse("templates/admin_base.html", "templates/admin_estate_detail.html"),
@@ -381,6 +382,7 @@ func main() {
 	mux.Handle("/agent/booking-receipt/", authMiddleware(requireRole(roleAgent, http.HandlerFunc(agentBookingReceiptViewHandler))))
 	mux.Handle("/admin/booked-plots", authMiddleware(requireRole(roleAdmin, requirePerm("admin.booked_plots", "read", http.HandlerFunc(adminBookedPlotsHandler)))))
 	mux.Handle("/admin/signed-plots", authMiddleware(requireRole(roleAdmin, requirePerm("admin.signed_plots", "read", http.HandlerFunc(adminSignedPlotsHandler)))))
+	mux.Handle("/admin/installments/", authMiddleware(requireRole(roleAdmin, requirePerm("admin.signed_plots", "read", http.HandlerFunc(adminInstallmentsHandler)))))
 	mux.Handle("/admin/sold-plots", authMiddleware(requireRole(roleAdmin, requirePerm("admin.sold_plots", "read", http.HandlerFunc(adminSoldPlotsHandler)))))
 	mux.Handle("/admin/payment-plans", authMiddleware(requireRole(roleAdmin, requirePerm("admin.payment_plans", "read", http.HandlerFunc(adminPaymentPlansHandler)))))
 	mux.Handle("/admin/payment-plans/deal/", authMiddleware(requireRole(roleAdmin, requirePerm("admin.payment_plans", "read", http.HandlerFunc(paymentPlanDealRouter)))))
@@ -2514,7 +2516,7 @@ func adminSignedPlotsHandler(w http.ResponseWriter, r *http.Request) {
 		SELECT b.id, p.id, b.estate_id, b.buyer_name, COALESCE(b.buyer_phone,''), e.name, p.plot_number,
 			COALESCE(b.agent_name,''), DATE_FORMAT(b.date_booked,'%d %b %Y'),
 			COALESCE(DATE_FORMAT(b.date_signed,'%d %b %Y'),'—'),
-			COALESCE(b.zoho_books_id,'')
+			COALESCE(b.zoho_books_id,''), COALESCE(b.zoho_crm_id,'')
 		FROM prop_bookings b
 		JOIN prop_estates e ON b.estate_id = e.id
 		JOIN prop_plots p ON b.plot_id = p.id
@@ -2555,6 +2557,7 @@ func adminSignedPlotsHandler(w http.ResponseWriter, r *http.Request) {
 		DateBooked  string
 		DateSigned  string
 		ZohoBooksID string
+		ZohoCRMID   string
 	}
 	rows, err := db.Query(query, args...)
 	if err != nil {
@@ -2566,7 +2569,7 @@ func adminSignedPlotsHandler(w http.ResponseWriter, r *http.Request) {
 	var bookings []bookingRow
 	for rows.Next() {
 		var b bookingRow
-		if err := rows.Scan(&b.BookingID, &b.PlotID, &b.EstateID, &b.BuyerName, &b.BuyerPhone, &b.EstateName, &b.PlotNumber, &b.AgentName, &b.DateBooked, &b.DateSigned, &b.ZohoBooksID); err != nil {
+		if err := rows.Scan(&b.BookingID, &b.PlotID, &b.EstateID, &b.BuyerName, &b.BuyerPhone, &b.EstateName, &b.PlotNumber, &b.AgentName, &b.DateBooked, &b.DateSigned, &b.ZohoBooksID, &b.ZohoCRMID); err != nil {
 			log.Printf("signed scan: %v", err)
 			continue
 		}

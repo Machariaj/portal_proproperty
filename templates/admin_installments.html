@@ -1,0 +1,108 @@
+{{ define "title" }}Installment Schedule - Pro-Property{{ end }}
+{{ define "content" }}
+<div class="top-bar">
+    <h1>Installment Schedule</h1>
+    <a href="/admin/signed-plots" style="font-size:13px;color:#6b7280;text-decoration:none;">← Back to Signed Plots</a>
+</div>
+
+<!-- Booking Info -->
+<div class="card" style="margin-bottom:16px;padding:14px 20px;">
+    <div style="display:flex;flex-wrap:wrap;gap:24px;font-size:13px;color:#374151;">
+        <span><strong>Client:</strong> {{ .Booking.BuyerName }}</span>
+        <span><strong>Plot:</strong> {{ .Booking.PlotNumber }}</span>
+        <span><strong>Estate:</strong> {{ .Booking.EstateName }}</span>
+        {{ if .Booking.ZohoCRMID }}
+        <span style="color:#16a34a;"><strong>CRM Deal:</strong> {{ .Booking.ZohoCRMID }}</span>
+        {{ else }}
+        <span style="color:#dc2626;"><strong>⚠ No CRM deal found</strong> — SA Signed integration may not have run yet.</span>
+        {{ end }}
+    </div>
+</div>
+
+{{ if .Error }}
+<div style="background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;padding:10px 16px;border-radius:8px;margin-bottom:16px;font-size:13px;">
+    {{ .Error }}
+</div>
+{{ end }}
+
+{{ if .Success }}
+<div style="background:#d1fae5;border:1px solid #6ee7b7;color:#065f46;padding:10px 16px;border-radius:8px;margin-bottom:16px;font-size:13px;">
+    ✓ Installments successfully pushed to Zoho CRM.
+</div>
+{{ end }}
+
+{{ if .Rows }}
+<!-- ── Stage 2: Review & Push ─────────────────────────────────────────── -->
+<div class="card" style="margin-bottom:16px;">
+    <h3 style="margin:0 0 14px;font-size:15px;">Extracted Installments — Review &amp; Edit Before Pushing</h3>
+    <form method="POST" action="/admin/installments/{{ .Booking.BookingID }}">
+        <input type="hidden" name="action" value="push">
+        <input type="hidden" name="count" value="{{ .RowCount }}">
+        <div class="table-responsive">
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Amount (KES)</th>
+                        <th>Due Date</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{ range $i, $r := .Rows }}
+                    <tr>
+                        <td>
+                            <input type="hidden" name="number_{{ $i }}" value="{{ $r.Number }}">
+                            {{ $r.Number }}
+                        </td>
+                        <td>
+                            <input type="number" step="0.01" min="0" name="amount_{{ $i }}" value="{{ $r.Amount }}"
+                                   style="width:130px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;" required>
+                        </td>
+                        <td>
+                            <input type="date" name="due_date_{{ $i }}" value="{{ $r.DueDateStr }}"
+                                   style="padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;" required>
+                        </td>
+                        <td>
+                            <input type="text" name="description_{{ $i }}" value="{{ $r.Description }}"
+                                   style="width:200px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                        </td>
+                    </tr>
+                    {{ end }}
+                </tbody>
+            </table>
+        </div>
+        <div style="margin-top:14px;display:flex;gap:10px;align-items:center;">
+            {{ if .Booking.ZohoCRMID }}
+            <button type="submit" style="background:#16a34a;color:#fff;padding:8px 22px;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">
+                Push to Zoho CRM
+            </button>
+            {{ else }}
+            <span style="color:#dc2626;font-size:13px;">Cannot push — no CRM deal linked to this booking.</span>
+            {{ end }}
+            <a href="/admin/installments/{{ .Booking.BookingID }}" style="color:#6b7280;font-size:13px;">Upload a different image</a>
+        </div>
+    </form>
+</div>
+{{ else }}
+<!-- ── Stage 1: Upload ────────────────────────────────────────────────── -->
+<div class="card">
+    <h3 style="margin:0 0 6px;font-size:15px;">Upload Installment Schedule</h3>
+    <p style="font-size:13px;color:#6b7280;margin:0 0 16px;">
+        Upload a clear photo or scan of the installment schedule page.
+        Supported formats: JPG, PNG, WEBP, PDF.
+    </p>
+    <form method="POST" action="/admin/installments/{{ .Booking.BookingID }}" enctype="multipart/form-data">
+        <input type="hidden" name="action" value="extract">
+        <div style="display:flex;flex-direction:column;gap:10px;max-width:400px;">
+            <input type="file" name="schedule" accept="image/*,.pdf" required
+                   style="padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+            <button type="submit" style="background:#4f46e5;color:#fff;padding:9px 22px;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;align-self:flex-start;">
+                Extract Installments
+            </button>
+        </div>
+    </form>
+</div>
+{{ end }}
+{{ end }}
+{{ template "admin_base" . }}
