@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -812,143 +811,47 @@ func runBackfillInstallments(args []string) {
 	os.Exit(0)
 }
 
-// ── Claude Vision extraction ──────────────────────────────────────────────────
+// ── Tesseract OCR extraction ──────────────────────────────────────────────────
 
-// claudeExtractInstallments sends the file at path to the Claude Vision API
-// and returns the installment rows it finds. For PDFs the first page is
-// rasterised to PNG with pdftoppm before the API call; images are sent
-// directly. Requires ANTHROPIC_API_KEY to be set in the environment.
-func claudeExtractInstallments(path, ext string) ([]installmentRow, error) {
-	apiKey := os.Getenv("ANTHROPIC_API_KEY")
-	if apiKey == "" {
-		return nil, fmt.Errorf("ANTHROPIC_API_KEY not set on the server")
-	}
-
-	imgPath := path
-	mediaType := "image/jpeg"
+// tesseractExtractInstallments extracts installment rows from an uploaded
+// installment schedule file using the same open-source pipeline already used
+// for sale agreements: pdftotext / pdftoppm + Tesseract OCR for PDFs, and
+// Tesseract directly for images. Parsed with the existing installmentLineRe
+// regex, so the schedule must use the standard "Kshs X/- shall be paid on or
+// before DATE" wording used by both current lawyer templates.
+func tesseractExtractInstallments(path, ext string) ([]installmentRow, error) {
+	var text string
 
 	switch strings.ToLower(ext) {
 	case ".pdf":
-		// Rasterise the first page to PNG.
-		tmpDir, err := os.MkdirTemp("", "inst-pdf-*")
+		var method string
+		var err error
+		text, method, err = extractSaleAgreementText(path, "")
 		if err != nil {
-			return nil, fmt.Errorf("mkdtemp: %w", err)
+			return nil, fmt.Errorf("PDF text extraction: %w", err)
 		}
-		defer os.RemoveAll(tmpDir)
-		prefix := filepath.Join(tmpDir, "page")
-		if out, err := exec.Command("pdftoppm", "-r", "200", "-png", "-f", "1", "-l", "1", path, prefix).CombinedOutput(); err != nil {
-			return nil, fmt.Errorf("pdftoppm: %w: %s", err, string(out))
-		}
-		pages, _ := filepath.Glob(prefix + "-*.png")
-		if len(pages) == 0 {
-			return nil, fmt.Errorf("pdftoppm produced no output")
-		}
-		imgPath = pages[0]
-		mediaType = "image/png"
-	case ".png":
-		mediaType = "image/png"
-	case ".webp":
-		mediaType = "image/webp"
-	case ".gif":
-		mediaType = "image/gif"
+		log.Printf("[installments-ocr] PDF via %s: %d chars", method, len(text))
 	default:
-		mediaType = "image/jpeg"
-	}
-
-	imgBytes, err := os.ReadFile(imgPath)
-	if err != nil {
-		return nil, fmt.Errorf("read image: %w", err)
-	}
-	encoded := base64.StdEncoding.EncodeToString(imgBytes)
-
-	prompt := `Extract all installment payment rows from this payment schedule image.
-Return ONLY a JSON array — no markdown, no explanation, nothing else.
-Each object must have exactly these fields:
-  "number"      : installment number (integer, starting from 1)
-  "amount"      : amount in KES as a plain number (no commas, no currency symbol)
-  "due_date"    : date in YYYY-MM-DD format
-  "description" : any note or label for this row (empty string if none)
-
-Example output:
-[{"number":1,"amount":50000,"due_date":"2026-11-01","description":""},{"number":2,"amount":50000,"due_date":"2026-12-01","description":"Final"}]`
-
-	payload := map[string]any{
-		"model":      "claude-haiku-4-5-20251001",
-		"max_tokens": 1024,
-		"messages": []map[string]any{{
-			"role": "user",
-			"content": []map[string]any{
-				{
-					"type": "image",
-					"source": map[string]any{
-						"type":       "base64",
-						"media_type": mediaType,
-						"data":       encoded,
-					},
-				},
-				{"type": "text", "text": prompt},
-			},
-		}},
-	}
-
-	body, _ := json.Marshal(payload)
-	req, _ := http.NewRequest("POST", "https://api.anthropic.com/v1/messages", bytes.NewReader(body))
-	req.Header.Set("x-api-key", apiKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("Claude API request: %w", err)
-	}
-	defer resp.Body.Close()
-	rb, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("Claude API HTTP %d: %s", resp.StatusCode, string(rb))
-	}
-
-	var apiResp struct {
-		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
-	}
-	if err := json.Unmarshal(rb, &apiResp); err != nil || len(apiResp.Content) == 0 {
-		return nil, fmt.Errorf("parse Claude response: %v (body: %s)", err, string(rb))
-	}
-
-	text := strings.TrimSpace(apiResp.Content[0].Text)
-	// Strip markdown code fences if Claude added them.
-	if i := strings.Index(text, "["); i > 0 {
-		text = text[i:]
-	}
-	if i := strings.LastIndex(text, "]"); i >= 0 && i < len(text)-1 {
-		text = text[:i+1]
-	}
-
-	var raw []struct {
-		Number      int     `json:"number"`
-		Amount      float64 `json:"amount"`
-		DueDate     string  `json:"due_date"`
-		Description string  `json:"description"`
-	}
-	if err := json.Unmarshal([]byte(text), &raw); err != nil {
-		return nil, fmt.Errorf("parse installments JSON: %w (text: %s)", err, text)
-	}
-
-	var rows []installmentRow
-	for _, r := range raw {
-		due, err := time.Parse("2006-01-02", r.DueDate)
-		if err != nil {
-			log.Printf("[claude-installments] bad date %q: %v", r.DueDate, err)
-			continue
+		// Image file — preprocess then run Tesseract directly.
+		ocrTarget := path
+		if cleaned, err := preprocessForOCR(path); err != nil {
+			log.Printf("[installments-ocr] preprocessing skipped: %v", err)
+		} else {
+			ocrTarget = cleaned
+			defer os.Remove(cleaned)
 		}
-		rows = append(rows, installmentRow{
-			Number:      r.Number,
-			Amount:      r.Amount,
-			DueDate:     due,
-			Description: r.Description,
-		})
+		out, err := exec.Command("tesseract", ocrTarget, "stdout", "-l", "eng").Output()
+		if err != nil {
+			return nil, fmt.Errorf("tesseract: %w", err)
+		}
+		text = string(out)
+		log.Printf("[installments-ocr] tesseract image: %d chars", len(text))
+	}
+
+	section := isolatePaymentSection(path, text)
+	rows := parseInstallmentSchedule(section)
+	for i := range rows {
+		rows[i].Number = i + 1
 	}
 	return rows, nil
 }

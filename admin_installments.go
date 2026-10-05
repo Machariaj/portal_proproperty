@@ -126,7 +126,7 @@ func adminInstallmentsExtract(w http.ResponseWriter, r *http.Request, info instB
 	}
 	tmp.Close()
 
-	rows, err := claudeExtractInstallments(tmpPath, ext)
+	rows, err := tesseractExtractInstallments(tmpPath, ext)
 	if err != nil {
 		log.Printf("[installments-extract] booking %d: %v", info.BookingID, err)
 		renderInstPage(w, r, info, nil, "Extraction failed: "+err.Error())
