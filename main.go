@@ -2274,7 +2274,7 @@ func adminBookedPlotsHandler(w http.ResponseWriter, r *http.Request) {
 		FROM prop_bookings b
 		JOIN prop_estates e ON b.estate_id = e.id
 		JOIN prop_plots p ON b.plot_id = p.id
-		LEFT JOIN prop_agents lw ON lw.id = e.lawyer_id
+		LEFT JOIN prop_agents lw ON lw.id = COALESCE(b.lawyer_id, e.lawyer_id)
 		JOIN (
 			SELECT plot_id, MAX(id) AS latest_id
 			FROM prop_bookings
@@ -2299,7 +2299,7 @@ func adminBookedPlotsHandler(w http.ResponseWriter, r *http.Request) {
 		args = append(args, fTo)
 	}
 	if fLawyer != "" {
-		query += " AND e.lawyer_id = ?"
+		query += " AND COALESCE(b.lawyer_id, e.lawyer_id) = ?"
 		args = append(args, fLawyer)
 	}
 	if fReadiness == "baked" {
