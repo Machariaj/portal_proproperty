@@ -182,14 +182,78 @@ func extractSaleAgreementText(path, pageRange string) (text string, method strin
 // sentence used by both sale-agreement templates currently in use (M Kamuya
 // Law Advocates and W Gichuhi & Company Advocates), tolerating the spacing
 // variations seen between them (e.g. "67,500/-" vs "79,000/ -").
-// The [a-zA-Z0-9]{0,4} after the day number (instead of a strict st/nd/rd/th
-// match) absorbs OCR corruption of the ordinal suffix — observed in practice
-// as "31st" -> "315t" (s misread as 5) and "30th" -> "30t" (h dropped). A
-// strict suffix match caused the whole line, and the whitespace check right
-// after it, to fail — silently dropping an otherwise perfectly readable row.
+//
+// OCR corruption notes (observed in production scans):
+//   - "shall" → "sha!", "shal", "sha" — matched by sha\w*
+//   - "I be paid" → OCR artefact where the line-label letter bleeds into the
+//     continuation; absorbed by (?:[Ii]\s+)?
+//   - ordinal suffix "st"/"th" → "5t", "¢t", dropped entirely — matched by
+//     [^\s]{0,5} instead of the old [a-zA-Z0-9]{0,4}
+//
+// normalizeInstallmentText (below) must be applied to the text BEFORE this
+// regex is run, to rejoin lines where "sha..." and "be paid on or before"
+// were split across separate OCR output lines.
 var installmentLineRe = regexp.MustCompile(
-	`(?i)K(?:sh|es)s?\.?\s*([\d,]+)\s*/\s*-?\s*shall\s+be\s+paid\s+on\s+or\s+before\s+(\d{1,2})[a-zA-Z0-9]{0,4}\s+([A-Za-z]+)\s+(\d{4})`,
+	`(?i)K(?:sh|es)s?\.?\s*([\d,]+)\s*/\s*-?\s*sha\w*\s+(?:[Ii]\s+)?be\s+paid\s+on\s+or\s+before\s+(\d{1,2})[^\s]{0,5}\s+([A-Za-z]+)\s+(\d{4})`,
 )
+
+// splitInstallmentLineRe matches a line that ends with a garbled "shall"
+// (sha, shal, sha!, etc.) — the amount half — followed only by whitespace
+// and then the "be paid on or before DATE" continuation half. Handles the
+// case where the two halves are on immediately adjacent (or blank-separated)
+// lines. For the harder case where all amounts appear in one block and all
+// dates in another, parseInstallmentScheduleZip is used instead.
+var splitInstallmentLineRe = regexp.MustCompile(
+	`(?i)(K(?:sh|es)s?\.?\s*[\d,]+\s*/\s*-?\s*sha\w*)\n[\n\t ]*([Ii]?\s*be\s+paid\s+on\s+or\s+before)`,
+)
+
+// normalizeInstallmentText rejoins split installment lines so that
+// installmentLineRe can match them. Applied once per text block before
+// parseInstallmentSchedule.
+func normalizeInstallmentText(text string) string {
+	return splitInstallmentLineRe.ReplaceAllString(text, "$1 $2")
+}
+
+// amountHalfRe matches the amount fragment of an installment line — just the
+// "Kshs. X/-" part — for use in the zip-pairing fallback. The (?im) flag
+// allows ^hs to anchor at the start of any line, catching the OCR corruption
+// where tesseract drops the leading "K" from "Kshs.".
+var amountHalfRe = regexp.MustCompile(`(?im)(?:K(?:sh|es)s?|^hs)\.?\s*([\d,]+)\s*/`)
+
+// dateHalfRe matches the date fragment of an installment line — "be paid on
+// or before DATE" — for use in the zip-pairing fallback.
+var dateHalfRe = regexp.MustCompile(`(?i)(?:[Ii]\s+)?be\s+paid\s+on\s+or\s+before\s+(\d{1,2})[^\s]{0,5}\s+([A-Za-z]+)\s+(\d{4})`)
+
+// parseInstallmentScheduleZip is a fallback parser for documents where
+// tesseract splits each installment line into two separate output lines — the
+// amount half and the "be paid on or before DATE" half — with other lines
+// (or blank lines) in between. It collects all amount fragments and all date
+// fragments in document order and zips them pairwise. Only used when the
+// primary single-line regex finds no rows. Returns nil when the amounts and
+// dates counts differ (indicating an ambiguous match that should not be
+// blindly paired).
+func parseInstallmentScheduleZip(text string) []installmentRow {
+	amounts := amountHalfRe.FindAllStringSubmatch(text, -1)
+	dates := dateHalfRe.FindAllStringSubmatch(text, -1)
+	if len(amounts) == 0 || len(dates) == 0 || len(amounts) != len(dates) {
+		return nil
+	}
+	rows := make([]installmentRow, 0, len(amounts))
+	for i := range amounts {
+		amtStr := strings.ReplaceAll(amounts[i][1], ",", "")
+		amt, err := strconv.ParseFloat(amtStr, 64)
+		if err != nil || amt <= 0 {
+			return nil
+		}
+		dateStr := fmt.Sprintf("%s %s %s", dates[i][1], dates[i][2], dates[i][3])
+		due, err := time.Parse("2 January 2006", dateStr)
+		if err != nil {
+			return nil
+		}
+		rows = append(rows, installmentRow{Amount: amt, DueDate: due})
+	}
+	return rows
+}
 
 // paymentClauseHeadingRe matches the "Payment of the Purchase Price" section
 // heading used by both known templates, tolerant of a dropped "the".
@@ -240,8 +304,9 @@ func findPaymentClauseSection(text string) (string, bool) {
 // just an edge case, so callers must not trust a non-empty result on its own
 // — see verifyInstallmentTotal below, which is the actual completeness check.
 func parseInstallmentSchedule(text string) []installmentRow {
+	text = normalizeInstallmentText(text)
 	matches := installmentLineRe.FindAllStringSubmatch(text, -1)
-	rows := make([]installmentRow, 0, len(matches))
+	var rows []installmentRow
 	for _, m := range matches {
 		amtStr := strings.ReplaceAll(m[1], ",", "")
 		amt, err := strconv.ParseFloat(amtStr, 64)
@@ -254,6 +319,11 @@ func parseInstallmentSchedule(text string) []installmentRow {
 			continue
 		}
 		rows = append(rows, installmentRow{Amount: amt, DueDate: due})
+	}
+	// Fallback: when tesseract splits each line into an amount-block and a
+	// date-block (common with scanned photos), zip the two lists pairwise.
+	if len(rows) == 0 {
+		rows = parseInstallmentScheduleZip(text)
 	}
 	return rows
 }
@@ -840,7 +910,9 @@ func tesseractExtractInstallments(path, ext string) (rows []installmentRow, rawT
 			ocrTarget = cleaned
 			defer os.Remove(cleaned)
 		}
-		out, terr := exec.Command("tesseract", ocrTarget, "stdout", "-l", "eng").Output()
+		// --psm 6: assume a single uniform block of text, which prevents
+		// tesseract from splitting structured list lines into columns.
+		out, terr := exec.Command("tesseract", ocrTarget, "stdout", "-l", "eng", "--psm", "6").Output()
 		if terr != nil {
 			return nil, "", fmt.Errorf("tesseract: %w", terr)
 		}
