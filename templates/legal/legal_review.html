@@ -16,7 +16,7 @@
     <div class="review-field"><span>Buyer Name</span><span>{{ .Info.BuyerName }}</span></div>
     <div class="review-field"><span>Buyer Phone</span><span>{{ .Info.BuyerPhone }}</span></div>
     <div class="review-field"><span>Buyer Email</span><span>{{ .Info.BuyerEmail }}</span></div>
-    <div class="review-field"><span>Agent</span><span>{{ .Info.AgentName }} {{ if .Info.AgentPhone }}({{ .Info.AgentPhone }}){{ end }}</span></div>
+    <div class="review-field"><span>Agent</span><span>{{ .Info.AgentName }}</span></div>
     <div class="review-field"><span>Assigned Lawyer</span><span>{{ if .Info.LawyerName }}{{ .Info.LawyerName }}{{ else }}—{{ end }}</span></div>
     <div class="review-field"><span>Payment Plan</span><span>{{ .Info.PaymentPlan }}</span></div>
     <div class="review-field"><span>Deposit Paid</span><span>KES {{ fmtAmount (printf "%.2f" .Info.Deposit) }}</span></div>
