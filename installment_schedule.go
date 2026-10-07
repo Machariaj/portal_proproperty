@@ -194,7 +194,7 @@ func extractSaleAgreementText(path, pageRange string) (text string, method strin
 // regex is run, to rejoin lines where "sha..." and "be paid on or before"
 // were split across separate OCR output lines.
 var installmentLineRe = regexp.MustCompile(
-	`(?i)K(?:sh|es)s?\.?\s*([\d,]+)\s*/\s*-?\s*sha\w*\s+(?:[Ii]\s+)?be\s+paid\s+on\s+or\s+before\s+(\d{1,2})[^\s]{0,5}\s+([A-Za-z]+)\s+(\d{4})`,
+	`(?i)K(?:sh|es)s?\.?\s*([\d,]+)\s*/\s*-?\s*sha\w*\s+(?:[Ii]\s+)?be\s+paid\s+on\s+or\s+before\s+(\d{1,2})(?:st|nd|rd|th|[^\s]{0,4})\s*([A-Za-z]+)\s+(\d{4})`,
 )
 
 // splitInstallmentLineRe matches a line that ends with a garbled "shall"
@@ -222,7 +222,7 @@ var amountHalfRe = regexp.MustCompile(`(?im)(?:K(?:sh|es)s?|^hs)\.?\s*([\d,]+)\s
 
 // dateHalfRe matches the date fragment of an installment line — "be paid on
 // or before DATE" — for use in the zip-pairing fallback.
-var dateHalfRe = regexp.MustCompile(`(?i)(?:[Ii]\s+)?be\s+paid\s+on\s+or\s+before\s+(\d{1,2})[^\s]{0,5}\s+([A-Za-z]+)\s+(\d{4})`)
+var dateHalfRe = regexp.MustCompile(`(?i)(?:[Ii]\s+)?be\s+paid\s+on\s+or\s+before\s+(\d{1,2})(?:st|nd|rd|th|[^\s]{0,4})\s*([A-Za-z]+)\s+(\d{4})`)
 
 // parseInstallmentScheduleZip is a fallback parser for documents where
 // tesseract splits each installment line into two separate output lines — the

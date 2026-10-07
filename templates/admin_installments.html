@@ -99,7 +99,7 @@
                 </tfoot>
             </table>
         </div>
-        <div style="margin-top:14px;display:flex;gap:10px;align-items:center;">
+        <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
             {{ if .Booking.ZohoCRMID }}
             <button type="submit" style="background:#16a34a;color:#fff;padding:8px 22px;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">
                 Push to Zoho CRM
@@ -107,6 +107,10 @@
             {{ else }}
             <span style="color:#dc2626;font-size:13px;">Cannot push — no CRM deal linked to this booking.</span>
             {{ end }}
+            <button type="button" onclick="addRow()"
+                    style="background:#f3f4f6;color:#374151;border:1px solid #d1d5db;padding:8px 16px;border-radius:6px;font-size:13px;cursor:pointer;">
+                + Add row
+            </button>
             <a href="/admin/installments/{{ .Booking.BookingID }}" style="color:#6b7280;font-size:13px;">Upload a different image</a>
         </div>
     </form>
@@ -139,6 +143,25 @@ function reindex() {
         if (numSpan) numSpan.textContent = i + 1;
     });
     document.getElementById('rowCount').value = rows.length;
+}
+
+function addRow() {
+    const tbody = document.querySelector('#instTable tbody');
+    const i = tbody.querySelectorAll('tr').length;
+    const tr = document.createElement('tr');
+    tr.dataset.row = i;
+    tr.innerHTML =
+        '<td>' +
+            '<input type="hidden" name="number_' + i + '" value="' + (i + 1) + '">' +
+            '<span class="row-num">' + (i + 1) + '</span>' +
+        '</td>' +
+        '<td><input type="number" step="0.01" min="0" name="amount_' + i + '" value="" oninput="updateTotal()" style="width:130px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;" required></td>' +
+        '<td><input type="date" name="due_date_' + i + '" value="" style="padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;" required></td>' +
+        '<td><input type="text" name="description_' + i + '" value="" style="width:200px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;"></td>' +
+        '<td><button type="button" onclick="deleteRow(this)" style="background:#ef4444;color:#fff;border:none;border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer;">Delete</button></td>';
+    tbody.appendChild(tr);
+    document.getElementById('rowCount').value = tbody.querySelectorAll('tr').length;
+    tr.querySelector('input[name^="amount_"]').focus();
 }
 
 // Compute total on page load.
