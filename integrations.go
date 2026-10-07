@@ -177,6 +177,7 @@ type bookingInfo struct {
 	SaleAgreement   string
 	Notes           string
 	CareOf          string // agent/admin-entered at booking time; shown only to them, forwarded only to the Zoho CRM deal's Care_Of field (see createCRMDeal) — never to Accounts, Legal, or any email/SMS
+	LawyerName      string // name of the lawyer who handled the sale agreement (COALESCE booking-level override, estate default)
 	RebookConfirmed bool   // agent confirmed this is the same client rebooking a plot they'd previously booked
 }
 
@@ -557,21 +558,25 @@ func processSignedIntegrations(plotID int, plotNumber, estateName string) {
 		b.EstateName = estateName
 		var zohoBookID, existingCRMID, installmentPage string
 		err := db.QueryRow(`
-			SELECT COALESCE(buyer_name,''), COALESCE(buyer_phone,''), COALESCE(buyer_email,''),
-			       COALESCE(agent_name,''), COALESCE(CAST(deposit AS CHAR),'0'),
-			       COALESCE(payment_plan,''),
-			       COALESCE(deposit_ref,''), COALESCE(id_photo,''),
-			       COALESCE(kra,''), COALESCE(passport_photo,''),
-			       COALESCE(sale_agreement,''), COALESCE(notes,''), COALESCE(care_of,''),
-			       COALESCE(zoho_books_id,''), COALESCE(zoho_crm_id,''),
-			       COALESCE(installment_page,'')
-			FROM prop_bookings
-			WHERE plot_id = ? ORDER BY id DESC LIMIT 1`, plotID).
+			SELECT COALESCE(b.buyer_name,''), COALESCE(b.buyer_phone,''), COALESCE(b.buyer_email,''),
+			       COALESCE(b.agent_name,''), COALESCE(CAST(b.deposit AS CHAR),'0'),
+			       COALESCE(b.payment_plan,''),
+			       COALESCE(b.deposit_ref,''), COALESCE(b.id_photo,''),
+			       COALESCE(b.kra,''), COALESCE(b.passport_photo,''),
+			       COALESCE(b.sale_agreement,''), COALESCE(b.notes,''), COALESCE(b.care_of,''),
+			       COALESCE(b.zoho_books_id,''), COALESCE(b.zoho_crm_id,''),
+			       COALESCE(b.installment_page,''),
+			       COALESCE(lw.name,'')
+			FROM prop_bookings b
+			JOIN prop_estates e ON e.id = b.estate_id
+			LEFT JOIN prop_agents lw ON lw.id = COALESCE(b.lawyer_id, e.lawyer_id)
+			WHERE b.plot_id = ? ORDER BY b.id DESC LIMIT 1`, plotID).
 			Scan(&b.BuyerName, &b.BuyerPhone, &b.BuyerEmail,
 				&b.AgentName, &b.Deposit, &b.PaymentPlan,
 				&b.DepositRef, &b.IDPhoto, &b.KRA, &b.PassportPhoto,
 				&b.SaleAgreement, &b.Notes, &b.CareOf,
-				&zohoBookID, &existingCRMID, &installmentPage)
+				&zohoBookID, &existingCRMID, &installmentPage,
+				&b.LawyerName)
 		if err != nil {
 			log.Printf("[signed-integrations] fetch booking for plot %d: %v", plotID, err)
 			return
@@ -676,6 +681,7 @@ func createCRMDeal(b bookingInfo, zohoBookID string) (string, error) {
 			"Description":      fmt.Sprintf("Plot(s): %s | Estate: %s | Agent: %s", plotStr, b.EstateName, b.AgentName),
 			"Books_Ref_Number": zohoBookID,
 			"Care_Of":          b.CareOf,
+			"Wakili":           b.LawyerName,
 		}},
 	}
 
