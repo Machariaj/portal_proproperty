@@ -2644,15 +2644,7 @@ func adminSignedPlotsHandler(w http.ResponseWriter, r *http.Request) {
 		"CanSignedToSold":      isSA2 || hasPermission(uid2, "admin.signed_to_sold", "read"),
 		"CanSignedToAvailable": isSA2 || hasPermission(uid2, "admin.signed_to_available", "read"),
 		"CanRetryZoho":         isSA2,
-		"Success": func() string {
-				if r.URL.Query().Get("zoho_retry") != "" {
-					return "zoho_retry"
-				}
-				if r.URL.Query().Get("sync_ok") != "" {
-					return "sync_ok"
-				}
-				return ""
-			}(),
+		"Success":              r.URL.Query().Get("zoho_retry"),
 	})
 }
 
