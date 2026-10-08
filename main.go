@@ -373,6 +373,7 @@ func main() {
 	mux.Handle("/admin/booking-extend/", authMiddleware(requireRole(roleAdmin, requirePerm("admin.extend_booking", "read", http.HandlerFunc(extendBookingHandler)))))
 	mux.Handle("/admin/booking-retry-zoho/", authMiddleware(requireRole(roleAdmin, http.HandlerFunc(adminRetryZohoHandler))))
 	mux.Handle("/admin/signed-booking-retry-zoho/", authMiddleware(requireRole(roleAdmin, http.HandlerFunc(adminRetryZohoSignedHandler))))
+	mux.Handle("/admin/sync-crm-attachments/", authMiddleware(requireRole(roleAdmin, http.HandlerFunc(adminSyncCRMAttachmentsHandler))))
 	mux.Handle("/admin/booking-delete-attachment/", authMiddleware(requireRole(roleAdmin, requirePerm("admin.booked_plots", "write", http.HandlerFunc(bookingAttachmentDeleteHandler)))))
 	mux.Handle("/agent/booking-delete-attachment/", authMiddleware(requireRole(roleAgent, requirePerm("agent.bookings", "write", http.HandlerFunc(bookingAttachmentDeleteHandler)))))
 	mux.Handle("/agent/booking/", authMiddleware(requireRole(roleAgent, requirePerm("agent.bookings", "write", http.HandlerFunc(agentBookingAttachmentsHandler)))))
@@ -2474,6 +2475,58 @@ func adminRetryZohoSignedHandler(w http.ResponseWriter, r *http.Request) {
 	redirectBack(w, r, "/admin/signed-plots?zoho_retry=1", "booking-"+bookingID, "zoho_retry=1")
 }
 
+// adminSyncCRMAttachmentsHandler re-uploads all booking documents to an
+// existing Zoho CRM deal. Used when the initial SA-signed upload missed
+// one or more files (network hiccup, file not yet uploaded at signing time).
+func adminSyncCRMAttachmentsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.NotFound(w, r)
+		return
+	}
+	bookingID := pathSegment("/admin/sync-crm-attachments/", r.URL.Path)
+	if bookingID == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	var crmID, depositRef, idPhoto, kra, passportPhoto, saleAgreement, plotNumber string
+	err := db.QueryRow(`
+		SELECT COALESCE(b.zoho_crm_id,''),
+		       COALESCE(b.deposit_ref,''), COALESCE(b.id_photo,''),
+		       COALESCE(b.kra,''), COALESCE(b.passport_photo,''),
+		       COALESCE(b.sale_agreement,''),
+		       p.plot_number
+		FROM prop_bookings b
+		JOIN prop_plots p ON p.id = b.plot_id
+		WHERE b.id = ? AND b.status IN ('sa_signed','completed')`, bookingID).
+		Scan(&crmID, &depositRef, &idPhoto, &kra, &passportPhoto, &saleAgreement, &plotNumber)
+	if err != nil {
+		http.Error(w, "Booking not found", http.StatusNotFound)
+		return
+	}
+	if crmID == "" {
+		http.Redirect(w, r, "/admin/signed-plots?sync_err=no_crm_deal", http.StatusFound)
+		return
+	}
+
+	go func() {
+		files := splitFiles(depositRef, idPhoto, kra, passportPhoto, saleAgreement)
+		ok, fail := 0, 0
+		for _, f := range files {
+			if err := uploadCRMAttachment(crmID, f); err != nil {
+				log.Printf("[sync-crm-attachments] booking %s plot %s file %s: %v", bookingID, plotNumber, f, err)
+				fail++
+			} else {
+				log.Printf("[sync-crm-attachments] booking %s plot %s file %s: OK", bookingID, plotNumber, f)
+				ok++
+			}
+		}
+		log.Printf("[sync-crm-attachments] booking %s plot %s done: %d uploaded, %d failed", bookingID, plotNumber, ok, fail)
+	}()
+
+	http.Redirect(w, r, "/admin/signed-plots?sync_ok=1#booking-"+bookingID, http.StatusFound)
+}
+
 // extendBookingHandler handles POST /admin/booking-extend/{id}
 // It adds the requested number of days to the booking deadline.
 func extendBookingHandler(w http.ResponseWriter, r *http.Request) {
@@ -2591,7 +2644,15 @@ func adminSignedPlotsHandler(w http.ResponseWriter, r *http.Request) {
 		"CanSignedToSold":      isSA2 || hasPermission(uid2, "admin.signed_to_sold", "read"),
 		"CanSignedToAvailable": isSA2 || hasPermission(uid2, "admin.signed_to_available", "read"),
 		"CanRetryZoho":         isSA2,
-		"Success":              r.URL.Query().Get("zoho_retry"),
+		"Success": func() string {
+				if r.URL.Query().Get("zoho_retry") != "" {
+					return "zoho_retry"
+				}
+				if r.URL.Query().Get("sync_ok") != "" {
+					return "sync_ok"
+				}
+				return ""
+			}(),
 	})
 }
 

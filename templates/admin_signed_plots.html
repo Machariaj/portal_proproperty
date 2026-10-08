@@ -41,6 +41,11 @@
     Zoho Books retry triggered — the estimate will appear in Zoho Books within a few seconds.
 </div>
 {{ end }}
+{{ if eq (index . "Success") "sync_ok" }}
+<div style="background:#d1fae5;border:1px solid #6ee7b7;color:#065f46;padding:10px 16px;border-radius:8px;margin-bottom:16px;font-size:13px;">
+    Attachment sync triggered — files are being uploaded to the Zoho CRM deal in the background.
+</div>
+{{ end }}
 
 <div class="card">
     <div class="table-responsive">
@@ -72,6 +77,13 @@
                     <td style="display:flex;gap:6px;flex-wrap:wrap;">
                         <a href="/admin/installments/{{ $b.BookingID }}"
                            style="display:inline-block;background:#4f46e5;color:#fff;font-size:12px;padding:5px 10px;border-radius:4px;text-decoration:none;white-space:nowrap;">Installments</a>
+                        {{ if $b.ZohoCRMID }}
+                        <form method="POST" action="/admin/sync-crm-attachments/{{ $b.BookingID }}" style="margin:0;">
+                            <button type="submit"
+                                    style="background:#0891b2;color:#fff;font-size:12px;padding:5px 10px;border:none;border-radius:4px;cursor:pointer;white-space:nowrap;"
+                                    onclick="return confirm('Re-upload all documents for {{ $b.BuyerName }} to Zoho CRM deal?')">Sync Attachments</button>
+                        </form>
+                        {{ end }}
                         {{ if and $.CanRetryZoho (eq $b.ZohoBooksID "") }}
                         <form method="POST" action="/admin/signed-booking-retry-zoho/{{ $b.BookingID }}" style="margin:0;">
                             <button type="submit" style="background:#f59e0b;color:#fff;font-size:12px;padding:5px 10px;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;"
