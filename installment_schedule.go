@@ -456,7 +456,7 @@ func createCRMInstallments(dealID string, rows []installmentRow) error {
 		}
 		row := map[string]any{
 			"Name":         fmt.Sprintf("Installment %d", num),
-			"Due_Date":     due.Format(time.RFC3339),
+			"Due_Date":     due.Format("2006-01-02"),
 			"Amount":       r.Amount,
 			"Status":       "Pending",
 			"Deals":        map[string]any{"id": dealID},
