@@ -2044,18 +2044,35 @@ func adminEstateBookHandler(w http.ResponseWriter, r *http.Request) {
 		var failedPlots []string
 		estateIDInt, _ := strconv.Atoi(id)
 		for _, p := range plots {
+			// Atomically claim the plot before inserting the booking: the
+			// WHERE status='available' guard means only one concurrent
+			// request can win this UPDATE for a given plot — a second
+			// request racing in gets RowsAffected=0 and backs off, instead
+			// of both requests reading "available" and both inserting a
+			// booking (previously possible: plots.go was read, then
+			// unconditionally set to 'booked' after the insert, with no
+			// check that it was still available in between).
+			claimRes, err := db.Exec(`UPDATE prop_plots SET status='booked' WHERE id=? AND status='available'`, p.ID)
+			if err != nil {
+				log.Printf("adminBook: plot claim failed for plot %d: %v", p.ID, err)
+				failedPlots = append(failedPlots, p.Number)
+				continue
+			}
+			if n, _ := claimRes.RowsAffected(); n == 0 {
+				log.Printf("adminBook: plot %d was booked by someone else moments ago, skipping", p.ID)
+				failedPlots = append(failedPlots, p.Number+" (just booked by someone else)")
+				continue
+			}
 			res, err := db.Exec(`INSERT INTO prop_bookings (plot_id, estate_id, buyer_name, buyer_phone, buyer_email, agent_name, deposit, payment_plan, deposit_ref, id_photo, kra, passport_photo, lead_source, notes, care_of, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active')`,
 				p.ID, id, buyerName, buyerPhone, buyerEmail, agentName, deposit, paymentPlan, depositRef, idPhoto, kra, passportPhoto, leadSource, notes, careOf)
 			if err != nil {
 				log.Printf("adminBook: booking insert failed for plot %d: %v", p.ID, err)
+				db.Exec(`UPDATE prop_plots SET status='available' WHERE id=?`, p.ID) // release the claim
 				failedPlots = append(failedPlots, p.Number)
-				continue // no booking row exists for this plot — never mark it booked
+				continue
 			}
 			bid, _ := res.LastInsertId()
 			newBookingIDs = append(newBookingIDs, int(bid))
-			if _, err := db.Exec(`UPDATE prop_plots SET status='booked' WHERE id=?`, p.ID); err != nil {
-				log.Printf("adminBook: plot status update failed for plot %d: %v", p.ID, err)
-			}
 			logPlotStatus(p.ID, p.Number, estateName, estateIDInt, "available", "booked", agentName, "booked")
 			plotNumbers = append(plotNumbers, p.Number)
 			bookedPlotIDs = append(bookedPlotIDs, p.ID)
@@ -2064,7 +2081,11 @@ func adminEstateBookHandler(w http.ResponseWriter, r *http.Request) {
 			log.Printf("adminBook: FAILED to create booking record(s) for plot(s) %s — buyer=%s, left available/unchanged, not booked", strings.Join(failedPlots, ", "), buyerName)
 		}
 		if len(bookedPlotIDs) == 0 {
-			renderBookForm(plots, estateName, "Could not create the booking — a database error occurred. Please try again or contact support.")
+			msg := "Could not create the booking — a database error occurred. Please try again or contact support."
+			if len(failedPlots) > 0 && strings.Contains(failedPlots[0], "just booked by someone else") {
+				msg = "This plot was just booked by someone else. Please choose another plot."
+			}
+			renderBookForm(plots, estateName, msg)
 			return
 		}
 		log.Printf("adminBook: %d plots booked for %s by %s", len(bookedPlotIDs), buyerName, agentName)
@@ -3936,18 +3957,29 @@ func agentEstateBookHandler(w http.ResponseWriter, r *http.Request) {
 		var failedPlots []string
 		agentEstateIDInt, _ := strconv.Atoi(id)
 		for _, p := range plots {
+			// Atomically claim the plot before inserting the booking — see
+			// adminEstateBookHandler for why (concurrent double-booking fix).
+			claimRes, err := db.Exec(`UPDATE prop_plots SET status='booked' WHERE id=? AND status='available'`, p.ID)
+			if err != nil {
+				log.Printf("agentBook: plot claim failed for plot %d: %v", p.ID, err)
+				failedPlots = append(failedPlots, p.Number)
+				continue
+			}
+			if n, _ := claimRes.RowsAffected(); n == 0 {
+				log.Printf("agentBook: plot %d was booked by someone else moments ago, skipping", p.ID)
+				failedPlots = append(failedPlots, p.Number+" (just booked by someone else)")
+				continue
+			}
 			res, err := db.Exec(`INSERT INTO prop_bookings (plot_id, estate_id, buyer_name, buyer_phone, buyer_email, agent_name, deposit, payment_plan, deposit_ref, id_photo, kra, passport_photo, lead_source, notes, care_of, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active')`,
 				p.ID, id, buyerName, buyerPhone, buyerEmail, agentName, deposit, paymentPlan, depositRef, idPhoto, kra, passportPhoto, leadSource, notes, careOf)
 			if err != nil {
 				log.Printf("agentBook: booking insert failed for plot %d: %v", p.ID, err)
+				db.Exec(`UPDATE prop_plots SET status='available' WHERE id=?`, p.ID) // release the claim
 				failedPlots = append(failedPlots, p.Number)
-				continue // no booking row exists for this plot — never mark it booked
+				continue
 			}
 			bid, _ := res.LastInsertId()
 			newBookingIDs = append(newBookingIDs, int(bid))
-			if _, err := db.Exec(`UPDATE prop_plots SET status='booked' WHERE id=?`, p.ID); err != nil {
-				log.Printf("agentBook: plot status update failed for plot %d: %v", p.ID, err)
-			}
 			logPlotStatus(p.ID, p.Number, estateName, agentEstateIDInt, "available", "booked", agentName, "booked")
 			plotNumbers = append(plotNumbers, p.Number)
 			bookedPlotIDs = append(bookedPlotIDs, p.ID)
@@ -3956,7 +3988,11 @@ func agentEstateBookHandler(w http.ResponseWriter, r *http.Request) {
 			log.Printf("agentBook: FAILED to create booking record(s) for plot(s) %s — buyer=%s, left available/unchanged, not booked", strings.Join(failedPlots, ", "), buyerName)
 		}
 		if len(bookedPlotIDs) == 0 {
-			renderAgentBookForm(plots, estateName, "Could not create the booking — a database error occurred. Please try again or contact support.")
+			msg := "Could not create the booking — a database error occurred. Please try again or contact support."
+			if len(failedPlots) > 0 && strings.Contains(failedPlots[0], "just booked by someone else") {
+				msg = "This plot was just booked by someone else. Please choose another plot."
+			}
+			renderAgentBookForm(plots, estateName, msg)
 			return
 		}
 		log.Printf("agentBook: %d plots booked for %s by %s", len(bookedPlotIDs), buyerName, agentName)
@@ -4102,17 +4138,30 @@ func cartCheckoutHandler(w http.ResponseWriter, r *http.Request, cartPath, recei
 	var newBookingIDs []int
 	var failedPlots []string
 	for _, cp := range plots {
+		// Atomically claim the plot before inserting the booking — see
+		// adminEstateBookHandler for why (concurrent double-booking fix).
+		claimRes, err := db.Exec(`UPDATE prop_plots SET status='booked' WHERE id=? AND status='available'`, cp.ID)
+		if err != nil {
+			log.Printf("cartCheckout: plot claim failed for plot %d: %v", cp.ID, err)
+			failedPlots = append(failedPlots, cp.Number)
+			continue
+		}
+		if n, _ := claimRes.RowsAffected(); n == 0 {
+			log.Printf("cartCheckout: plot %d was booked by someone else moments ago, skipping", cp.ID)
+			failedPlots = append(failedPlots, cp.Number+" (just booked by someone else)")
+			continue
+		}
 		res, err := db.Exec(`INSERT INTO prop_bookings (plot_id, estate_id, buyer_name, buyer_phone, buyer_email, agent_name, deposit, payment_plan, deposit_ref, id_photo, kra, passport_photo, lead_source, notes, care_of, batch_ref, receipt_number, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active')`,
 			cp.ID, cp.EstateID, buyerName, buyerPhone, buyerEmail, agentName, deposit, paymentPlan, depositRef, idPhoto, kra, passportPhoto, leadSource, notes, careOf, batchRef, receiptNumber)
 		if err != nil {
 			log.Printf("cartCheckout: booking insert failed for plot %d: %v", cp.ID, err)
+			db.Exec(`UPDATE prop_plots SET status='available' WHERE id=?`, cp.ID) // release the claim
 			failedPlots = append(failedPlots, cp.Number)
-			continue // no booking row exists for this plot — never mark it booked
+			continue
 		}
 		if bid, err2 := res.LastInsertId(); err2 == nil {
 			newBookingIDs = append(newBookingIDs, int(bid))
 		}
-		db.Exec(`UPDATE prop_plots SET status='booked' WHERE id=?`, cp.ID)
 		logPlotStatus(cp.ID, cp.Number, cp.EstateName, cp.EstateID, "available", "booked", agentName, "booked")
 
 		if groups[cp.EstateID] == nil {
@@ -4125,7 +4174,11 @@ func cartCheckoutHandler(w http.ResponseWriter, r *http.Request, cartPath, recei
 		log.Printf("cartCheckout: FAILED to create booking record(s) for plot(s) %s — buyer=%s, left available/unchanged, not booked", strings.Join(failedPlots, ", "), buyerName)
 	}
 	if len(newBookingIDs) == 0 {
-		http.Redirect(w, r, cartPath+"?err=booking_failed", http.StatusFound)
+		errCode := "booking_failed"
+		if len(failedPlots) > 0 && strings.Contains(failedPlots[0], "just booked by someone else") {
+			errCode = "plot_taken"
+		}
+		http.Redirect(w, r, cartPath+"?err="+errCode, http.StatusFound)
 		return
 	}
 
