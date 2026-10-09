@@ -3426,6 +3426,12 @@ func adminExportReportsHandler(w http.ResponseWriter, r *http.Request) {
 
 	case "booked":
 		filename = "booked_plots.csv"
+		// Matches adminBookedPlotsHandler's definition of "booked": any plot
+		// with p.status='booked', picking each plot's latest booking row
+		// regardless of that booking's own status — not just b.status='active'.
+		// The old active-only filter silently dropped every booking that had
+		// already advanced to Accounts or Legal review, undercounting this
+		// export relative to every other "booked plots" view in the app.
 		baseQuery = `
 			SELECT p.plot_number, e.name, COALESCE(b.buyer_name,''), COALESCE(b.buyer_phone,''),
 			       COALESCE(b.agent_name,''), DATE_FORMAT(b.date_booked,'%d %b %Y'),
@@ -3433,7 +3439,12 @@ func adminExportReportsHandler(w http.ResponseWriter, r *http.Request) {
 			FROM prop_bookings b
 			JOIN prop_plots   p ON p.id = b.plot_id
 			JOIN prop_estates e ON e.id = b.estate_id
-			WHERE b.status = 'active' AND p.status = 'booked'`
+			JOIN (
+				SELECT plot_id, MAX(id) AS latest_id
+				FROM prop_bookings
+				GROUP BY plot_id
+			) latest ON b.id = latest.latest_id
+			WHERE p.status = 'booked'`
 		if agent != "" {
 			baseQuery += ` AND b.agent_name = ?`
 			args = append(args, agent)
