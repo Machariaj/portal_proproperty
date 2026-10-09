@@ -38,6 +38,7 @@
             <input type="date" name="date_to" value="{{ .FTo }}" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
         </div>
         <button type="submit" class="btn-primary">Filter</button>
+        <button type="submit" name="export" value="1" class="btn-ghost">⬇ Export CSV</button>
         {{ if or .FEstate .FLawyer .FFrom .FTo }}
         <a href="/legal/queue" class="btn-ghost">Clear</a>
         {{ end }}

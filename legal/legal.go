@@ -5,6 +5,7 @@
 package legal
 
 import (
+	"bytes"
 	"database/sql"
 	"fmt"
 	"log"
@@ -319,6 +320,33 @@ type queueRow struct {
 	LawyerName string
 }
 
+// csvEscape mirrors main.go's helper of the same name — duplicated rather
+// than imported since this package never reaches into package main's
+// internals.
+func csvEscape(s string) string {
+	if strings.ContainsAny(s, ",\"\n\r") {
+		return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
+	}
+	return s
+}
+
+// writeQueueCSV exports a queueRow list (shared by queueHandler and
+// awaitingSignatureHandler) as a CSV download. stageColumnHeader names the
+// stage-date column, since the two callers use that column for a different
+// moment ("Moved to Legal" vs "Sent for Signature").
+func writeQueueCSV(w http.ResponseWriter, filename, stageColumnHeader string, queue []queueRow) {
+	var buf bytes.Buffer
+	buf.WriteString("Buyer,Estate,Plot,Agent,Lawyer," + stageColumnHeader + "\n")
+	for _, q := range queue {
+		fmt.Fprintf(&buf, "%s,%s,%s,%s,%s,%s\n",
+			csvEscape(q.BuyerName), csvEscape(q.EstateName), csvEscape(q.PlotNumber),
+			csvEscape(q.AgentName), csvEscape(q.LawyerName), csvEscape(q.StageDate))
+	}
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	w.Write(buf.Bytes())
+}
+
 // queueHandler lists stage 1: bookings Legal has just received from
 // Accounts and has not yet drafted a sale agreement for. StageDate here is
 // accounts_reviewed_at — when the booking actually moved into Legal's
@@ -351,6 +379,11 @@ func queueHandler(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&q.BookingID, &q.BuyerName, &q.AgentName, &q.EstateName, &q.PlotNumber, &q.StageDate, &q.LawyerName); err == nil {
 			queue = append(queue, q)
 		}
+	}
+
+	if r.URL.Query().Get("export") == "1" {
+		writeQueueCSV(w, "legal_pending_drafting.csv", "Moved to Legal", queue)
+		return
 	}
 
 	data := map[string]any{
@@ -394,6 +427,11 @@ func awaitingSignatureHandler(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&q.BookingID, &q.BuyerName, &q.AgentName, &q.EstateName, &q.PlotNumber, &q.StageDate, &q.LawyerName); err == nil {
 			queue = append(queue, q)
 		}
+	}
+
+	if r.URL.Query().Get("export") == "1" {
+		writeQueueCSV(w, "legal_pending_signature.csv", "Sent for Signature", queue)
+		return
 	}
 
 	data := map[string]any{
@@ -455,6 +493,20 @@ func completedHandler(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&c.BookingID, &c.BuyerName, &c.AgentName, &c.EstateName, &c.PlotNumber, &c.DateSigned, &c.PlotStatus, &c.LawyerName); err == nil {
 			list = append(list, c)
 		}
+	}
+
+	if r.URL.Query().Get("export") == "1" {
+		var buf bytes.Buffer
+		buf.WriteString("Buyer,Estate,Plot,Agent,Lawyer,Date Signed,Plot Status\n")
+		for _, c := range list {
+			fmt.Fprintf(&buf, "%s,%s,%s,%s,%s,%s,%s\n",
+				csvEscape(c.BuyerName), csvEscape(c.EstateName), csvEscape(c.PlotNumber),
+				csvEscape(c.AgentName), csvEscape(c.LawyerName), csvEscape(c.DateSigned), csvEscape(c.PlotStatus))
+		}
+		w.Header().Set("Content-Type", "text/csv")
+		w.Header().Set("Content-Disposition", `attachment; filename="legal_completed.csv"`)
+		w.Write(buf.Bytes())
+		return
 	}
 
 	data := map[string]any{
