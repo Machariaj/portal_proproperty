@@ -1580,10 +1580,15 @@ func adminUpdatePlotStatusHandler(w http.ResponseWriter, r *http.Request) {
 		db.Exec(`INSERT IGNORE INTO prop_sales (plot_id, estate_id, buyer_name, buyer_phone, buyer_email, agent_name, amount, payment_plan, deposit_doc, id_doc, kra_doc, passport_photo) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
 			plotID, id, buyerName, buyerPhone, buyerEmail, agentName, deposit, paymentPlan, depositRef, idPhoto, kra, passportPhoto)
 	} else if newStatus == "available" {
-		// Fetch zoho_books_id before cancelling so we can void the estimate in Zoho Books
+		// NOT IN ('cancelled','expired') — not just ('active','sa_signed',
+		// 'completed') — so reverting a plot that's currently sitting in
+		// Accounts or Legal review (status pending_accounts_review /
+		// pending_wakili_review) also cancels that booking, instead of
+		// leaving it live in those queues for a plot that's now available
+		// for anyone else to book.
 		var zohoBookID string
-		db.QueryRow(`SELECT COALESCE(zoho_books_id,'') FROM prop_bookings WHERE plot_id=? AND status IN ('active','sa_signed','completed') ORDER BY id DESC LIMIT 1`, plotID).Scan(&zohoBookID)
-		db.Exec(`UPDATE prop_bookings SET status='cancelled' WHERE plot_id=? AND status IN ('active','sa_signed','completed')`, plotID)
+		db.QueryRow(`SELECT COALESCE(zoho_books_id,'') FROM prop_bookings WHERE plot_id=? AND status NOT IN ('cancelled','expired') ORDER BY id DESC LIMIT 1`, plotID).Scan(&zohoBookID)
+		db.Exec(`UPDATE prop_bookings SET status='cancelled' WHERE plot_id=? AND status NOT IN ('cancelled','expired')`, plotID)
 		db.Exec(`DELETE FROM prop_sales WHERE plot_id=?`, plotID)
 		if zohoBookID != "" {
 			go cancelBooksEstimate(zohoBookID)
