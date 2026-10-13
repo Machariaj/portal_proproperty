@@ -173,6 +173,7 @@ func main() {
 		saveUploadedFiles, processSignedIntegrations, cancelBooksEstimate, sendReviewOutcomeEmail,
 		sendSentForSignatureSMS, sendAgreementSignedSMS)
 	legal.SetLogStatusFn(logPlotStatus)
+	legal.SetLogBookingFn(logBooking)
 	initPermissionTables()
 	init2FATables()
 	initSchedulerTables()

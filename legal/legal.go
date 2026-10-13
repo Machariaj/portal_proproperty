@@ -30,6 +30,7 @@ var (
 	sendSentForSigSMS func(bookingID string)
 	sendSignedSMS     func(bookingID string)
 	logStatusFn       func(plotID int, plotNumber, estateName string, estateID int, oldStatus, newStatus, changedBy, reason string)
+	logBookingFn      func(event, agentName, clientName, plotInfo, detail string)
 )
 
 // Init wires this package to the host app's shared dependencies. Two roles
@@ -77,6 +78,14 @@ func Init(
 // package can record SA-signed transitions to prop_plot_status_log.
 func SetLogStatusFn(fn func(plotID int, plotNumber, estateName string, estateID int, oldStatus, newStatus, changedBy, reason string)) {
 	logStatusFn = fn
+}
+
+// SetLogBookingFn wires in the host's logBooking function so the legal
+// package can record its own lifecycle events (sent for signature, etc.) to
+// logs/bookings.log, the same file every other booking event already goes
+// to (PLOT_BOOKED, DOCS_UPLOADED, SYSADMIN_SKIP_ACCOUNTS...).
+func SetLogBookingFn(fn func(event, agentName, clientName, plotInfo, detail string)) {
+	logBookingFn = fn
 }
 
 // scopeQuery narrows a queue query to what the current viewer is allowed to
@@ -667,6 +676,13 @@ func sendForSignatureHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("legal send-for-signature: %v", err)
 		http.Redirect(w, r, fmt.Sprintf("/legal/review/%s?err=Database+error", bookingID), http.StatusFound)
 		return
+	}
+	reviewer := getAgentFn(r)
+	if logBookingFn != nil {
+		if detail, derr := loadReviewDetail(bookingID); derr == nil {
+			logBookingFn("SENT_FOR_SIGNATURE", reviewer, detail.BuyerName,
+				detail.PlotNumber+" — "+detail.EstateName, "sale agreement sent to client for signature")
+		}
 	}
 	if sendSentForSigSMS != nil {
 		sendSentForSigSMS(bookingID)
