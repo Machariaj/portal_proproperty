@@ -73,7 +73,7 @@
                 <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">Deposit — Total Paid (KES) <span style="font-weight:400;color:#6b7280;">(correct if needed)</span></label>
                 <input type="number" name="deposit" min="0" step="0.01" value="{{ .Info.Deposit }}"
                        style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;box-sizing:border-box;">
-                <p style="font-size:11px;color:#94a3b8;margin:4px 0 0;">The single source of truth for this booking's deposit — set it to the actual amount paid. "Generate Booking Confirmation Receipt" below only prints a receipt; it does not change this total.</p>
+                <p style="font-size:11px;color:#94a3b8;margin:4px 0 0;">Sets the running total directly. To log an itemized payment with a receipt/reference file instead, use "Generate Booking Confirmation Receipt" below.</p>
             </div>
             <div>
                 <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px;">Care Of <span style="font-weight:400;color:#6b7280;">(optional — sent only to Zoho CRM, not visible to Accounts or Legal)</span></label>
@@ -151,7 +151,7 @@
     <!-- Generate Booking Receipt -->
     <div style="border-top:1px solid #e5e7eb;margin-top:28px;padding-top:24px;">
         <h3 style="font-size:15px;font-weight:700;color:#1e3a5f;margin:0 0 14px;">Generate Booking Confirmation Receipt</h3>
-        <p style="font-size:12px;color:#6b7280;margin:0 0 12px;">Prints a receipt for this payment only — it does not change the deposit total above. If this payment should count toward the threshold, update "Deposit — Total Paid" separately.</p>
+        <p style="font-size:12px;color:#6b7280;margin:0 0 12px;">This also adds the amount to the buyer's running deposit total — once it reaches the estate's threshold and all KYC docs are uploaded, the booking moves to Accounts for review.</p>
         <form method="POST" action="/admin/booking-receipt" enctype="multipart/form-data" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
             <input type="hidden" name="booking_id" value="{{ .Info.BookingID }}">
             <div>

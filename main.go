@@ -4870,11 +4870,16 @@ func agentBookingAttachmentsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // bookingReceiptGenerateHandler creates a new booking confirmation receipt
-// record — a printable record of one payment. It does not change
-// prop_bookings.deposit (that has exactly one source of truth: the
-// "Deposit — Total Paid" field on the attachments page, which logs its own
-// changes as DEPOSIT_UPDATED). An optional payment-reference file gets
-// appended to deposit_ref alongside the initial deposit proof.
+// record AND tops up the booking's running deposit total by the same
+// amount — a receipt generated here is the "add a payment reference + add
+// the deposit amount" action, since the two are the same real-world event
+// (a payment came in). An optional payment-reference file gets appended to
+// deposit_ref alongside the initial deposit proof, and the accounts-review
+// trigger is re-checked afterward in case this top-up pushes the deposit
+// to/above the estate's threshold. RECEIPT_GENERATED logs the resulting
+// old->new deposit total alongside the receipt itself, so — unlike before —
+// this change is traceable from bookings.log without also having to query
+// prop_booking_receipts by hand.
 func bookingReceiptGenerateHandler(w http.ResponseWriter, r *http.Request, isAdmin bool) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -4890,14 +4895,15 @@ func bookingReceiptGenerateHandler(w http.ResponseWriter, r *http.Request, isAdm
 
 	// Verify booking exists
 	var bookingID int
-	var existingDepositRef, buyerName, agentName, plotNumber, estateName string
+	var existingDepositRef, buyerName, agentName, plotNumber, estateName, oldDepositStr string
 	if err := db.QueryRow(`
-		SELECT b.id, COALESCE(b.deposit_ref,''), b.buyer_name, COALESCE(b.agent_name,''), p.plot_number, e.name
+		SELECT b.id, COALESCE(b.deposit_ref,''), b.buyer_name, COALESCE(b.agent_name,''), p.plot_number, e.name,
+		       COALESCE(CAST(b.deposit AS CHAR),'0')
 		FROM prop_bookings b
 		JOIN prop_plots p ON p.id = b.plot_id
 		JOIN prop_estates e ON e.id = b.estate_id
 		WHERE b.id = ?`, bookingIDStr).
-		Scan(&bookingID, &existingDepositRef, &buyerName, &agentName, &plotNumber, &estateName); err != nil {
+		Scan(&bookingID, &existingDepositRef, &buyerName, &agentName, &plotNumber, &estateName, &oldDepositStr); err != nil {
 		http.NotFound(w, r)
 		return
 	}
@@ -4917,12 +4923,6 @@ func bookingReceiptGenerateHandler(w http.ResponseWriter, r *http.Request, isAdm
 	}
 	newID, _ = res.LastInsertId()
 
-	// Receipt generation is a record/print action only — it no longer adds
-	// to prop_bookings.deposit. That column has exactly one source of truth
-	// now: the "Deposit — Total Paid" field on this same page, which logs
-	// every change to bookings.log (DEPOSIT_UPDATED). The silent add-on-top
-	// behavior this used to have made the running total impossible to
-	// reconstruct from the log alone — every receipt was an untracked write.
 	refAttached := "no payment reference file attached"
 	if newRef := saveUploadedFiles(r, "payment_reference"); newRef != "" {
 		depositRef := newRef
@@ -4932,8 +4932,17 @@ func bookingReceiptGenerateHandler(w http.ResponseWriter, r *http.Request, isAdm
 		db.Exec(`UPDATE prop_bookings SET deposit_ref=? WHERE id=?`, depositRef, bookingID)
 		refAttached = "payment reference file attached"
 	}
+
+	oldDeposit, _ := strconv.ParseFloat(oldDepositStr, 64)
+	amountVal, _ := strconv.ParseFloat(amountStr, 64)
+	newDeposit := oldDeposit + amountVal
+	db.Exec(`UPDATE prop_bookings SET deposit = COALESCE(deposit,0) + ? WHERE id=?`, amountStr, bookingID)
+
 	logBooking("RECEIPT_GENERATED", agentName, buyerName, plotNumber+" — "+estateName,
-		fmt.Sprintf("receipt %s for KES %s by %s (%s)", receiptNumber, amountStr, getAgentName(r), refAttached))
+		fmt.Sprintf("receipt %s for KES %s by %s — deposit updated from KES %.2f to KES %.2f (%s)",
+			receiptNumber, amountStr, getAgentName(r), oldDeposit, newDeposit, refAttached))
+
+	go maybeAdvanceToAccountsReview(bookingID)
 
 	prefix := "/agent"
 	if isAdmin {
