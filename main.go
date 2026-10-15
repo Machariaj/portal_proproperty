@@ -4662,11 +4662,20 @@ func bookingAttachmentsHandler(w http.ResponseWriter, r *http.Request, tmplName,
 		// blank here (unlike name/phone/email above) so it can be cleared.
 		info.CareOf = strings.TrimSpace(r.FormValue("care_of"))
 
+		// Capture each field's newly-uploaded file(s) separately (not just
+		// the appended result) so the DOCS_UPLOADED log line below can name
+		// exactly which document(s) this specific save added, instead of
+		// only the overall completeness state.
+		newDepositRefFiles := saveUploadedFiles(r, "deposit_ref")
+		newIDPhotoFiles := saveUploadedFiles(r, "id_photo")
+		newKRAFiles := saveUploadedFiles(r, "kra")
+		newPassportPhotoFiles := saveUploadedFiles(r, "passport_photo")
+
 		// Append new files to existing ones for each field
-		depositRef := appendFiles(saveUploadedFiles(r, "deposit_ref"), info.DepositRef)
-		idPhoto := appendFiles(saveUploadedFiles(r, "id_photo"), info.IDPhoto)
-		kra := appendFiles(saveUploadedFiles(r, "kra"), info.KRA)
-		passportPhoto := appendFiles(saveUploadedFiles(r, "passport_photo"), info.PassportPhoto)
+		depositRef := appendFiles(newDepositRefFiles, info.DepositRef)
+		idPhoto := appendFiles(newIDPhotoFiles, info.IDPhoto)
+		kra := appendFiles(newKRAFiles, info.KRA)
+		passportPhoto := appendFiles(newPassportPhotoFiles, info.PassportPhoto)
 
 		notes := strings.TrimSpace(r.FormValue("notes"))
 		if pp := r.FormValue("payment_plan"); pp != "" {
@@ -4704,12 +4713,32 @@ func bookingAttachmentsHandler(w http.ResponseWriter, r *http.Request, tmplName,
 		}
 
 		allDocs := hasAllAttachments(bookingInfo{DepositRef: depositRef, IDPhoto: idPhoto, KRA: kra, PassportPhoto: passportPhoto})
-		docStatus := "incomplete"
-		if allDocs {
-			docStatus = "all 4 docs present — integrations triggered"
+
+		// Only log when this save actually added a file — a save that just
+		// corrected the buyer name or deposit, with no new document, used to
+		// log a misleading DOCS_UPLOADED line anyway.
+		var uploadedNames []string
+		if newDepositRefFiles != "" {
+			uploadedNames = append(uploadedNames, "Deposit Reference")
 		}
-		logBooking("DOCS_UPLOADED", info.AgentName, info.BuyerName,
-			info.PlotNumber+" — "+info.EstateName, docStatus)
+		if newIDPhotoFiles != "" {
+			uploadedNames = append(uploadedNames, "ID Photo")
+		}
+		if newKRAFiles != "" {
+			uploadedNames = append(uploadedNames, "KRA PIN")
+		}
+		if newPassportPhotoFiles != "" {
+			uploadedNames = append(uploadedNames, "Passport Photo")
+		}
+		if len(uploadedNames) > 0 {
+			status := "still incomplete"
+			if allDocs {
+				status = "all 4 docs now present — integrations triggered"
+			}
+			logBooking("DOCS_UPLOADED", info.AgentName, info.BuyerName,
+				info.PlotNumber+" — "+info.EstateName,
+				fmt.Sprintf("uploaded: %s (%s)", strings.Join(uploadedNames, ", "), status))
+		}
 
 		// When all docs are now present, check whether the deposit already meets
 		// the estate's threshold too — if so, this booking moves straight to
