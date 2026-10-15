@@ -4869,15 +4869,12 @@ func agentBookingAttachmentsHandler(w http.ResponseWriter, r *http.Request) {
 	bookingAttachmentsHandler(w, r, "agent_booking_attachments.html", "/agent/bookings", false)
 }
 
-// bookingReceiptGenerateHandler creates a new booking confirmation receipt record.
-// bookingReceiptGenerateHandler both records a printable payment receipt AND
-// tops up the booking's running deposit total by the same amount — a receipt
-// generated here is the "add a payment reference + add the deposit amount"
-// action, since the two are the same real-world event (a payment came in).
-// An optional payment-reference file gets appended to deposit_ref alongside
-// the initial deposit proof, and the accounts-review trigger is re-checked
-// afterward in case this top-up pushes the deposit to/above the estate's
-// threshold.
+// bookingReceiptGenerateHandler creates a new booking confirmation receipt
+// record — a printable record of one payment. It does not change
+// prop_bookings.deposit (that has exactly one source of truth: the
+// "Deposit — Total Paid" field on the attachments page, which logs its own
+// changes as DEPOSIT_UPDATED). An optional payment-reference file gets
+// appended to deposit_ref alongside the initial deposit proof.
 func bookingReceiptGenerateHandler(w http.ResponseWriter, r *http.Request, isAdmin bool) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -4893,8 +4890,14 @@ func bookingReceiptGenerateHandler(w http.ResponseWriter, r *http.Request, isAdm
 
 	// Verify booking exists
 	var bookingID int
-	var existingDepositRef string
-	if err := db.QueryRow(`SELECT id, COALESCE(deposit_ref,'') FROM prop_bookings WHERE id=?`, bookingIDStr).Scan(&bookingID, &existingDepositRef); err != nil {
+	var existingDepositRef, buyerName, agentName, plotNumber, estateName string
+	if err := db.QueryRow(`
+		SELECT b.id, COALESCE(b.deposit_ref,''), b.buyer_name, COALESCE(b.agent_name,''), p.plot_number, e.name
+		FROM prop_bookings b
+		JOIN prop_plots p ON p.id = b.plot_id
+		JOIN prop_estates e ON e.id = b.estate_id
+		WHERE b.id = ?`, bookingIDStr).
+		Scan(&bookingID, &existingDepositRef, &buyerName, &agentName, &plotNumber, &estateName); err != nil {
 		http.NotFound(w, r)
 		return
 	}
@@ -4920,13 +4923,17 @@ func bookingReceiptGenerateHandler(w http.ResponseWriter, r *http.Request, isAdm
 	// every change to bookings.log (DEPOSIT_UPDATED). The silent add-on-top
 	// behavior this used to have made the running total impossible to
 	// reconstruct from the log alone — every receipt was an untracked write.
+	refAttached := "no payment reference file attached"
 	if newRef := saveUploadedFiles(r, "payment_reference"); newRef != "" {
 		depositRef := newRef
 		if existingDepositRef != "" {
 			depositRef = existingDepositRef + "," + newRef
 		}
 		db.Exec(`UPDATE prop_bookings SET deposit_ref=? WHERE id=?`, depositRef, bookingID)
+		refAttached = "payment reference file attached"
 	}
+	logBooking("RECEIPT_GENERATED", agentName, buyerName, plotNumber+" — "+estateName,
+		fmt.Sprintf("receipt %s for KES %s by %s (%s)", receiptNumber, amountStr, getAgentName(r), refAttached))
 
 	prefix := "/agent"
 	if isAdmin {
