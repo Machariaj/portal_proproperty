@@ -144,6 +144,10 @@ func main() {
 		runFixInstallmentLinkage(os.Args[2:])
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "sync-crm-attachments" {
+		runSyncCRMAttachments(os.Args[2:])
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "sync-payment-plans" {
 		runSyncPaymentPlans(os.Args[2:])
 		return
@@ -2552,6 +2556,71 @@ func adminSyncCRMAttachmentsHandler(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	http.Redirect(w, r, "/admin/signed-plots?sync_ok=1#booking-"+bookingID, http.StatusFound)
+}
+
+// runSyncCRMAttachments is a CLI command that re-uploads all documents for a
+// single booking to its existing Zoho CRM deal.
+// Usage: ./portal sync-crm-attachments <booking-id> [--dry-run]
+func runSyncCRMAttachments(args []string) {
+	if len(args) == 0 {
+		fmt.Println("usage: sync-crm-attachments <booking-id> [--dry-run]")
+		os.Exit(1)
+	}
+	bookingIDVal, err := strconv.Atoi(args[0])
+	if err != nil || bookingIDVal <= 0 {
+		fmt.Printf("invalid booking-id %q\n", args[0])
+		os.Exit(1)
+	}
+	bookingID := &bookingIDVal
+	isDryRun := len(args) > 1 && args[1] == "--dry-run"
+	dryRun := &isDryRun
+
+	initDB()
+
+	var crmID, depositRef, idPhoto, kra, passportPhoto, saleAgreement, buyerName, plotNumber string
+	dbErr := db.QueryRow(`
+		SELECT COALESCE(b.zoho_crm_id,''),
+		       COALESCE(b.deposit_ref,''), COALESCE(b.id_photo,''),
+		       COALESCE(b.kra,''), COALESCE(b.passport_photo,''),
+		       COALESCE(b.sale_agreement,''),
+		       b.buyer_name, p.plot_number
+		FROM prop_bookings b
+		JOIN prop_plots p ON p.id = b.plot_id
+		WHERE b.id = ? AND b.status IN ('sa_signed','completed')`, *bookingID).
+		Scan(&crmID, &depositRef, &idPhoto, &kra, &passportPhoto, &saleAgreement, &buyerName, &plotNumber)
+	if dbErr != nil {
+		log.Fatalf("[sync-crm-attachments] booking %d not found or not sa_signed/completed: %v", *bookingID, dbErr)
+	}
+	if crmID == "" {
+		log.Fatalf("[sync-crm-attachments] booking %d (%s plot %s) has no Zoho CRM deal ID", *bookingID, buyerName, plotNumber)
+	}
+
+	files := splitFiles(depositRef, idPhoto, kra, passportPhoto, saleAgreement)
+	fmt.Printf("booking %d  buyer: %s  plot: %s  CRM deal: %s\n%d file(s) to upload:\n",
+		*bookingID, buyerName, plotNumber, crmID, len(files))
+	for _, f := range files {
+		fmt.Printf("  %s\n", f)
+	}
+
+	if *dryRun {
+		fmt.Println("dry-run — no files uploaded")
+		os.Exit(0)
+	}
+
+	ok, fail := 0, 0
+	for _, f := range files {
+		if err := uploadCRMAttachment(crmID, f); err != nil {
+			fmt.Printf("  FAIL  %s: %v\n", f, err)
+			fail++
+		} else {
+			fmt.Printf("  OK    %s\n", f)
+			ok++
+		}
+	}
+	fmt.Printf("done: %d uploaded, %d failed\n", ok, fail)
+	if fail > 0 {
+		os.Exit(1)
+	}
 }
 
 // extendBookingHandler handles POST /admin/booking-extend/{id}
