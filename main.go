@@ -4885,7 +4885,12 @@ func bookingReceiptGenerateHandler(w http.ResponseWriter, r *http.Request, isAdm
 	}
 	newID, _ = res.LastInsertId()
 
-	// Payment reference file is optional — the amount alone still tops up the deposit.
+	// Receipt generation is a record/print action only — it no longer adds
+	// to prop_bookings.deposit. That column has exactly one source of truth
+	// now: the "Deposit — Total Paid" field on this same page, which logs
+	// every change to bookings.log (DEPOSIT_UPDATED). The silent add-on-top
+	// behavior this used to have made the running total impossible to
+	// reconstruct from the log alone — every receipt was an untracked write.
 	if newRef := saveUploadedFiles(r, "payment_reference"); newRef != "" {
 		depositRef := newRef
 		if existingDepositRef != "" {
@@ -4893,9 +4898,6 @@ func bookingReceiptGenerateHandler(w http.ResponseWriter, r *http.Request, isAdm
 		}
 		db.Exec(`UPDATE prop_bookings SET deposit_ref=? WHERE id=?`, depositRef, bookingID)
 	}
-	db.Exec(`UPDATE prop_bookings SET deposit = COALESCE(deposit,0) + ? WHERE id=?`, amountStr, bookingID)
-
-	go maybeAdvanceToAccountsReview(bookingID)
 
 	prefix := "/agent"
 	if isAdmin {
